@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><title>Comprobante Rechazado</title></head>
+<body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:0 auto">
+  <img src="{{logoUrl}}" alt="Viatika" style="height:40px;margin:20px 0">
+  <h2 style="color:#e53e3e">Comprobante de Devolución Rechazado</h2>
+  <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
+  <p>El comprobante de devolución del anticipo N° <strong>{{advanceId}}</strong> ha sido <strong>rechazado</strong>.</p>
+  {{#if rejectionReason}}
+  <div style="background:#fff5f5;border-left:4px solid #e53e3e;padding:12px;margin:16px 0">
+    <strong>Motivo:</strong> {{rejectionReason}}
+  </div>
+  {{/if}}
+  <p>Por favor cargue un nuevo comprobante en la plataforma lo antes posible.</p>
+</body>
+</html>

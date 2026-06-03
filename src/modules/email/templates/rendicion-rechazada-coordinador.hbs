@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Rendición rechazada por Contabilidad</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; line-height: 1.6; background-color: #f4f7f6; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .header { background-color: #f8fafc; padding: 20px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+    .logo { max-width: 150px; height: auto; }
+    .content { padding: 30px; }
+    .heading { color: #b91c1c; font-size: 22px; margin-bottom: 16px; }
+    .details { background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0; border-radius: 6px; }
+    .detail-item { margin-bottom: 10px; }
+    .detail-label { font-weight: bold; color: #475569; }
+    .btn-container { text-align: center; margin-top: 24px; }
+    .btn { display: inline-block; background-color: #0ea5e9; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="{{logoUrl}}" alt="Viatika" class="logo">
+    </div>
+    <div class="content">
+      <h1 class="heading">Rendición rechazada por Contabilidad</h1>
+      <p>Estimado/a <strong>{{coordinatorName}}</strong>,</p>
+      <p>La rendición de <strong>{{collaboratorName}}</strong> que usted aprobó fue <strong>rechazada por Contabilidad</strong> en la aprobación final.</p>
+
+      <div class="details">
+        <div class="detail-item"><span class="detail-label">Rendición:</span> {{reportTitle}}</div>
+        <div class="detail-item"><span class="detail-label">Motivo:</span> {{rejectionReason}}</div>
+      </div>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

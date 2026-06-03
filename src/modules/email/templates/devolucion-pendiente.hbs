@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><title>Devolución Pendiente</title></head>
+<body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:0 auto">
+  <img src="{{logoUrl}}" alt="Viatika" style="height:40px;margin:20px 0">
+  <h2 style="color:#e53e3e">Devolución de Saldo Pendiente</h2>
+  <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
+  <p>Al liquidar su anticipo, se determinó que existe un <strong>saldo a favor de la empresa</strong> que debe ser devuelto.</p>
+  <table style="width:100%;border-collapse:collapse;margin:16px 0">
+    <tr><td style="padding:8px;background:#f7f7f7;font-weight:bold">Monto a devolver</td><td style="padding:8px">S/ {{amountDue}}</td></tr>
+    <tr><td style="padding:8px;background:#f7f7f7;font-weight:bold">Fecha límite</td><td style="padding:8px">{{dueDate}}</td></tr>
+    <tr><td style="padding:8px;background:#f7f7f7;font-weight:bold">N° Anticipo</td><td style="padding:8px">{{advanceId}}</td></tr>
+  </table>
+  <p>Por favor realice la transferencia a la cuenta de la empresa y cargue el comprobante en la plataforma antes de la fecha límite.</p>
+</body>
+</html>

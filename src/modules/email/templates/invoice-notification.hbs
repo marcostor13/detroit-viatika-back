@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang='es'>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Nueva Factura Subida</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap');
+      
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #F4F7FE;
+        font-family: 'DM Sans', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        color: #1B2559;
+        line-height: 1.6;
+      }
+      .email-wrapper {
+        background-color: #F4F7FE;
+        padding: 40px 20px;
+      }
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #FFFFFF;
+        border-radius: 20px;
+        box-shadow: 0 20px 25px -5px rgba(112, 144, 176, 0.12);
+        overflow: hidden;
+      }
+      .header {
+        background-color: #FFFFFF;
+        text-align: center;
+        padding: 40px 30px 30px;
+      }
+      .header img {
+        max-width: 180px;
+        height: auto;
+        margin-bottom: 20px;
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 700;
+        color: #1B2559;
+      }
+      .content {
+        padding: 30px 40px;
+        color: #1B2559;
+      }
+      .content p {
+        font-size: 16px;
+        line-height: 1.6;
+        margin-bottom: 20px;
+        color: #1B2559;
+      }
+      .content strong {
+        color: #4318FF;
+        font-weight: 700;
+      }
+      .details-card {
+        background-color: #F4F7FE;
+        padding: 24px;
+        border-radius: 16px;
+        margin: 30px 0;
+      }
+      .details-card p {
+        margin: 12px 0;
+        font-size: 14px;
+        color: #1B2559;
+      }
+      .details-card strong {
+        color: #4318FF;
+        font-weight: 700;
+      }
+      .footer {
+        text-align: center;
+        font-size: 12px;
+        color: #A3AED0;
+        padding: 30px 40px;
+        background-color: #F4F7FE;
+        border-top: 1px solid rgba(163, 174, 208, 0.2);
+      }
+      .footer p {
+        margin: 5px 0;
+        color: #A3AED0;
+      }
+      @media (max-width: 600px) {
+        .email-wrapper {
+          padding: 20px 10px;
+        }
+        .container {
+          border-radius: 16px;
+        }
+        .content {
+          padding: 24px 20px;
+        }
+        .header {
+          padding: 30px 20px 20px;
+        }
+        .header img {
+          max-width: 140px;
+        }
+        .header h1 {
+          font-size: 20px;
+        }
+        .content p {
+          font-size: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class='email-wrapper'>
+      <div class='container'>
+        <div class='header'>
+          {{#if logoUrl}}
+            <img src='{{logoUrl}}' alt='Viatika Logo' />
+          {{/if}}
+          <h1>Nueva Factura Subida</h1>
+        </div>
+        <div class='content'>
+          <p>Hola,</p>
+          <p>Se ha subido una nueva factura al sistema por <strong>{{createdBy}}</strong>:</p>
+          <div class='details-card'>
+            <p><strong>Proveedor:</strong> {{providerName}}</p>
+            <p><strong>Número de Factura:</strong> {{invoiceNumber}}</p>
+            <p><strong>Fecha:</strong> {{date}}</p>
+            <p><strong>Tipo:</strong> {{type}}</p>
+            {{#if showAdditionalInfo}}
+            <p><strong>Monto Total:</strong> {{montoTotalFormatted}}</p>
+            <p><strong>Categoría:</strong> {{category}}</p>
+            <p><strong>Proyecto:</strong> {{projectName}}</p>
+            <p><strong>Razón Social del Emisor:</strong> {{razonSocial}}</p>
+            {{#if direccionEmisor}}
+            <p><strong>Dirección del Emisor:</strong> {{direccionEmisor}}</p>
+            {{/if}}
+            <p><strong>Estado:</strong> {{status}}</p>
+            {{/if}}
+          </div>
+          <p>Puedes acceder a la factura a través del sistema.</p>
+          <p>Si tienes alguna pregunta, no dudes en contactarnos.</p>
+        </div></div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Gastos de viáticos pendientes de revisión</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; line-height: 1.6; background-color: #f4f7f6; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .header { background-color: #f8fafc; padding: 20px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+    .logo { max-width: 150px; height: auto; }
+    .content { padding: 30px; }
+    .heading { color: #1e293b; font-size: 22px; margin-bottom: 16px; }
+    .info-box { background-color: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; padding: 16px 20px; margin: 20px 0; }
+    .label { font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+    .quick-list { margin: 0; padding-left: 18px; }
+    .quick-list li { margin: 6px 0; }
+    .btn-container { text-align: center; margin-top: 24px; }
+    .btn { display: inline-block; background-color: #0ea5e9; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; }
+    .footer { text-align: center; font-size: 12px; color: #94a3b8; padding: 20px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="{{logoUrl}}" alt="Viatika" class="logo">
+    </div>
+    <div class="content">
+      <h1 class="heading">Gastos pendientes de revisión</h1>
+      <p>Estimado/a <strong>{{coordinatorName}}</strong>,</p>
+      <div class="info-box">
+        <p style="margin: 0;">El colaborador <strong>{{collaboratorName}}</strong> tiene <strong>{{pendingCount}} comprobante(s) pendiente(s)</strong> de aprobación en sus viáticos activos.</p>
+      </div>
+      <p class="label">Datos del viaje:</p>
+      <ul class="quick-list">
+        <li>Lugar: {{place}}</li>
+        <li>Periodo: {{startDate}} al {{endDate}}</li>
+        <li>Comprobantes pendientes: {{pendingCount}}</li>
+      </ul>
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Revisar comprobantes</a>
+      </div>
+    </div></div>
+</body>
+</html>

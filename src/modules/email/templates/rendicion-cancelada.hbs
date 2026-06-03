@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rendición cancelada</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="background:#e74c3c;padding:24px 32px;text-align:center;">
+              <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">Rendición Cancelada</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;">
+              <p style="margin:0 0 16px;color:#374151;font-size:15px;">Hola <strong>{{adminName}}</strong>,</p>
+              <p style="margin:0 0 16px;color:#374151;font-size:15px;">
+                El colaborador <strong>{{collaboratorName}}</strong> ha <strong>cancelado</strong> su solicitud de rendición.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;margin:0 0 24px;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <p style="margin:0 0 6px;color:#991b1b;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Detalle de la rendición cancelada</p>
+                    <p style="margin:0 0 4px;color:#374151;font-size:14px;"><strong>Título:</strong> {{reportTitle}}</p>
+                    {{#if cancelReason}}
+                    <p style="margin:8px 0 0;color:#374151;font-size:14px;"><strong>Motivo:</strong> {{cancelReason}}</p>
+                    {{/if}}
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0;color:#6b7280;font-size:13px;">No se requiere ninguna acción de tu parte.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -1,0 +1,57 @@
+# Dependencies (se reinstalan en el contenedor)
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist
+build
+coverage
+.nyc_output
+
+# Git
+.git
+.gitignore
+
+# IDE y editores
+.idea
+.vscode
+*.swp
+*.sublime-*
+
+# Variables de entorno (NUNCA incluir en la imagen)
+.env
+.env.*
+!.env.example
+
+# Scripts de despliegue (no necesarios en el contenedor)
+deploy.ps1
+deploy.sh
+Dockerfile
+.dockerignore
+
+# Tests
+test
+*.spec.ts
+*.test.ts
+jest.config.js
+.eslintrc*
+
+# Documentación y misc
+README.md
+*.md
+.prettierignore
+.prettierrc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporales
+tmp
+temp
+.temp
+.tmp
+*.log

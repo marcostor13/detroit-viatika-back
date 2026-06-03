@@ -1,0 +1,160 @@
+<html lang='es'>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Factura Aprobada</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap');
+
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f4f7fe;
+        font-family:
+          'DM Sans',
+          'Plus Jakarta Sans',
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        color: #1b2559;
+        line-height: 1.6;
+      }
+      .email-wrapper {
+        background-color: #f4f7fe;
+        padding: 40px 20px;
+      }
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        border-radius: 20px;
+        box-shadow: 0 20px 25px -5px rgba(112, 144, 176, 0.12);
+        overflow: hidden;
+      }
+      .header {
+        background-color: #ffffff;
+        text-align: center;
+        padding: 40px 30px 30px;
+      }
+      .header img {
+        max-width: 180px;
+        height: auto;
+        margin-bottom: 20px;
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 700;
+        color: #1b2559;
+      }
+      .content {
+        padding: 30px 40px;
+        color: #1b2559;
+      }
+      .content p {
+        font-size: 16px;
+        line-height: 1.6;
+        margin-bottom: 20px;
+        color: #1b2559;
+      }
+      .details-card {
+        background-color: #f4f7fe;
+        padding: 24px;
+        border-radius: 16px;
+        margin: 30px 0;
+      }
+      .details-card ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .details-card li {
+        margin: 12px 0;
+        font-size: 14px;
+        color: #1b2559;
+      }
+      .details-card strong {
+        color: #4318ff;
+        font-weight: 700;
+      }
+      .approval-badge {
+        background-color: #05cd99;
+        color: #ffffff;
+        padding: 16px 24px;
+        border-radius: 16px;
+        margin: 30px 0;
+        text-align: center;
+      }
+      .approval-badge p {
+        margin: 8px 0;
+        font-weight: 700;
+        font-size: 16px;
+      }
+      .footer {
+        text-align: center;
+        font-size: 12px;
+        color: #a3aed0;
+        padding: 30px 40px;
+        background-color: #f4f7fe;
+        border-top: 1px solid rgba(163, 174, 208, 0.2);
+      }
+      .footer p {
+        margin: 5px 0;
+        color: #a3aed0;
+      }
+      @media (max-width: 600px) {
+        .email-wrapper {
+          padding: 20px 10px;
+        }
+        .container {
+          border-radius: 16px;
+        }
+        .content {
+          padding: 24px 20px;
+        }
+        .header {
+          padding: 30px 20px 20px;
+        }
+        .header img {
+          max-width: 140px;
+        }
+        .header h1 {
+          font-size: 20px;
+        }
+        .content p {
+          font-size: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class='email-wrapper'>
+      <div class='container'>
+        <div class='header'>
+          {{#if logoUrl}}
+            <img src='{{logoUrl}}' alt='Viatika Logo' />
+          {{/if}}
+          <h1>Factura Aprobada</h1>
+        </div>
+        <div class='content'>
+          <p>Estimado/a,</p>
+          <p>Le informamos que la siguiente factura ha sido aprobada:</p>
+          <div class='details-card'>
+            <ul>
+              <li><strong>Proveedor:</strong> {{providerName}}</li>
+              <li><strong>Número de Factura:</strong> {{invoiceNumber}}</li>
+              <li><strong>Fecha:</strong> {{date}}</li>
+              <li><strong>Tipo:</strong> {{type}}</li>
+            </ul>
+          </div>
+          <div class='approval-badge'>
+            <p><strong>Aprobada por:</strong> {{approvedBy}}</p>
+            <p>La factura ha sido procesada correctamente.</p>
+          </div>
+          <p>Esta factura continuará su proceso según los flujos establecidos.</p>
+        </div></div>
+    </div>
+  </body>
+</html>
