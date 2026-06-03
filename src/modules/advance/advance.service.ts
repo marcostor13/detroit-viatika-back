@@ -1166,6 +1166,12 @@ export class AdvanceService {
     dateFrom?: string
     dateTo?: string
   }) {
+    if (!Types.ObjectId.isValid(opts.clientId)) {
+      throw new BadRequestException(
+        'Selecciona una empresa para ver los viáticos.'
+      )
+    }
+
     const isAdminRole = [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(
       opts.requesterRole as ROLES
     )
@@ -1430,7 +1436,9 @@ export class AdvanceService {
     }
 
     const canPay =
-      [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(userRole as ROLES) ||
+      [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.ADMIN].includes(
+        userRole as ROLES
+      ) ||
       userPermissions?.canApproveL2 === true
     if (!canPay)
       throw new ForbiddenException('No tienes permiso para registrar pagos')

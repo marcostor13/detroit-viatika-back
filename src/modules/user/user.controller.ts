@@ -80,7 +80,11 @@ export class UserController {
       }
     }
 
-    if (role !== ROLES.SUPER_ADMIN && role !== ROLES.CONTABILIDAD) {
+    if (
+      role !== ROLES.SUPER_ADMIN &&
+      role !== ROLES.CONTABILIDAD &&
+      role !== ROLES.ADMIN
+    ) {
       const tokenClientId = req?.user?.clientId?.toString()
       if (!tokenClientId || tokenClientId !== clientId.toString()) {
         throw new ForbiddenException('No tienes permiso para ver usuarios de esta empresa')

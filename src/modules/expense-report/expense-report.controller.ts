@@ -133,7 +133,7 @@ export class ExpenseReportController {
   ) {
     const role = req.user?.roles?.[0] || req.user?.role
     const canPay =
-      [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(role) ||
+      [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.ADMIN].includes(role) ||
       req.user?.permissions?.canApproveL2 === true
     if (!canPay) {
       throw new ForbiddenException(
