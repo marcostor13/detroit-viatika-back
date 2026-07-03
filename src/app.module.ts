@@ -25,6 +25,7 @@ import { ScheduleModule } from '@nestjs/schedule'
 import { SchedulerModule } from './modules/scheduler/scheduler.module'
 import { DashboardModule } from './modules/dashboard/dashboard.module'
 import { LineaNegocioModule } from './modules/linea-negocio/linea-negocio.module'
+import { OrdenTrabajoModule } from './modules/orden-trabajo/orden-trabajo.module'
 import { CajaChicaReportModule } from './modules/caja-chica-report/caja-chica-report.module'
 import { AccountingConfigModule } from './modules/accounting-config/accounting-config.module'
 import { AccountingEntriesModule } from './modules/accounting-entries/accounting-entries.module'
@@ -62,6 +63,7 @@ import { SaldoModule } from './modules/saldo/saldo.module'
     SchedulerModule,
     DashboardModule,
     LineaNegocioModule,
+    OrdenTrabajoModule,
     CajaChicaReportModule,
     AccountingConfigModule,
     AccountingEntriesModule,

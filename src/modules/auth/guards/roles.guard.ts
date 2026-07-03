@@ -23,6 +23,11 @@ export class RolesGuard implements CanActivate {
 
     const rawRole: string = user.roles[0]
     const effectiveRole = ROLE_ALIASES[rawRole] ?? rawRole
-    return requiredRoles.some(role => effectiveRole === role)
+    // Se comprueban ambos: el alias preserva compatibilidad con endpoints que
+    // solo listan el rol antiguo (Administrador), pero sin descartar el rol
+    // real (Coordinador) para los endpoints que lo exigen específicamente
+    // (p.ej. aprobación de viáticos) — de lo contrario un Coordinador nunca
+    // podría pasar un @Roles(ROLES.COORDINADOR).
+    return requiredRoles.some(role => role === rawRole || role === effectiveRole)
   }
 }

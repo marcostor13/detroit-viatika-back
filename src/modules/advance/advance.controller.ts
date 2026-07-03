@@ -122,26 +122,25 @@ export class AdvanceController {
     return this.advanceService.findOne(id)
   }
 
-  /** Aprobación nivel 1 (Admin/SuperAdmin o usuario con permiso canApproveL1) */
-  @Patch(':id/approve-l1')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
-  async approveL1(
+  /**
+   * Aprueba el nivel actual de la cadena de aprobadores. Solo puede actuar el
+   * aprobador (Coordinador) al que le toca el turno, o Superadmin (llave maestra).
+   */
+  @Patch(':id/approve')
+  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
+  async approve(
     @Param('id') id: string,
     @Body() dto: ApproveAdvanceDto,
     @Request() req
   ) {
-    dto.approvedBy = req.user?.sub || req.user?._id
-    const userRole = req.user?.roles?.[0] || req.user?.role
-    const result = await this.advanceService.approveL1(
-      id,
-      dto,
-      userRole,
-      req.user?.permissions
-    )
+    const actorId = req.user?.sub || req.user?._id
+    dto.approvedBy = actorId
+    const actorRole = req.user?.roles?.[0] || req.user?.role
+    const result = await this.advanceService.approve(id, dto, actorId, actorRole)
     this.auditLogService.log({
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email,
-      action: 'approve_advance_l1',
+      action: 'approve_advance',
       module: 'tesoreria',
       entityId: id,
       clientId: req.user.clientId,
@@ -149,49 +148,18 @@ export class AdvanceController {
     return result
   }
 
-  /** Aprobación nivel 2 (SuperAdmin o usuario con permiso canApproveL2) */
-  @Patch(':id/approve-l2')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
-  async approveL2(
-    @Param('id') id: string,
-    @Body() dto: ApproveAdvanceDto,
-    @Request() req
-  ) {
-    dto.approvedBy = req.user?.sub || req.user?._id
-    const userRole = req.user?.roles?.[0] || req.user?.role
-    const result = await this.advanceService.approveL2(
-      id,
-      dto,
-      userRole,
-      req.user?.permissions
-    )
-    this.auditLogService.log({
-      userId: req.user._id || req.user.sub,
-      userName: req.user.name || req.user.email,
-      action: 'approve_advance_l2',
-      module: 'tesoreria',
-      entityId: id,
-      clientId: req.user.clientId,
-    })
-    return result
-  }
-
-  /** Rechazo (Admin/SuperAdmin o usuario con permiso de aprobación) */
+  /** Rechazo (aprobador al que le toca el turno, o Superadmin) */
   @Patch(':id/reject')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
   async reject(
     @Param('id') id: string,
     @Body() dto: RejectAdvanceDto,
     @Request() req
   ) {
-    dto.rejectedBy = req.user?.sub || req.user?._id
-    const userRole = req.user?.roles?.[0] || req.user?.role
-    const result = await this.advanceService.reject(
-      id,
-      dto,
-      userRole,
-      req.user?.permissions
-    )
+    const actorId = req.user?.sub || req.user?._id
+    dto.rejectedBy = actorId
+    const actorRole = req.user?.roles?.[0] || req.user?.role
+    const result = await this.advanceService.reject(id, dto, actorId, actorRole)
     this.auditLogService.log({
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email,

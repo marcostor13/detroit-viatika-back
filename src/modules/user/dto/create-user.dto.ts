@@ -92,9 +92,16 @@ export class CreateUserDto {
   @IsOptional()
   phone?: string
 
+  /** @deprecated usar approverIds. Se conserva para migración. */
   @IsMongoId()
   @IsOptional()
   coordinatorId?: string
+
+  /** Cadena ordenada de aprobadores (rol Coordinador) para anticipos/viáticos. */
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  approverIds?: string[]
 
   @IsOptional()
   @ValidateNested()

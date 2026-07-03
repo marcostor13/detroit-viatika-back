@@ -16,6 +16,10 @@ export class UpdateExpenseDto {
 
   @IsString()
   @IsOptional()
+  ordenTrabajoId?: string
+
+  @IsString()
+  @IsOptional()
   categoryId?: string
 
   @IsString()

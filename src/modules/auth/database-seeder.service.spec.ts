@@ -13,6 +13,11 @@ const mockUserModel = {
   },
   create: jest.fn().mockResolvedValue({}),
   updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
+  find: jest.fn().mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue([]),
+  }),
+  updateOne: jest.fn().mockResolvedValue({ acknowledged: true }),
 }
 
 const mockRoleService = {
@@ -144,6 +149,34 @@ describe('DatabaseSeederService', () => {
       ])
       await service.onApplicationBootstrap()
       expect(mockUserModel.collection.dropIndex).toHaveBeenCalledWith('email_1')
+    })
+  })
+
+  describe('migrateCoordinatorIdToApproverIds', () => {
+    it('sets approverIds=[coordinatorId] for users with a legacy coordinator and no approverIds', async () => {
+      mockRoleService.getByName.mockResolvedValue({ _id: 'r', name: 'Role' })
+      mockUserService.findAllWithClient.mockResolvedValue([
+        { role: { name: ROLES.SUPER_ADMIN } },
+      ])
+      const candidate = { _id: 'u1', coordinatorId: 'coord-1' }
+      mockUserModel.find.mockReturnValueOnce({
+        select: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([candidate]),
+      })
+      await service.onApplicationBootstrap()
+      expect(mockUserModel.updateOne).toHaveBeenCalledWith(
+        { _id: 'u1' },
+        { $set: { approverIds: ['coord-1'] } }
+      )
+    })
+
+    it('does nothing when no legacy candidates are found', async () => {
+      mockRoleService.getByName.mockResolvedValue({ _id: 'r', name: 'Role' })
+      mockUserService.findAllWithClient.mockResolvedValue([
+        { role: { name: ROLES.SUPER_ADMIN } },
+      ])
+      await service.onApplicationBootstrap()
+      expect(mockUserModel.updateOne).not.toHaveBeenCalled()
     })
   })
 })

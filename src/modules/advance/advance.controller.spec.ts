@@ -32,10 +32,7 @@ const mockAdvanceService = {
   findPending: jest.fn().mockResolvedValue([]),
   getStats: jest.fn().mockResolvedValue({}),
   findOne: jest.fn().mockResolvedValue({ _id: advanceId }),
-  approveL1: jest
-    .fn()
-    .mockResolvedValue({ _id: advanceId, status: 'pending_l2' }),
-  approveL2: jest
+  approve: jest
     .fn()
     .mockResolvedValue({ _id: advanceId, status: 'approved' }),
   reject: jest.fn().mockResolvedValue({ _id: advanceId, status: 'rejected' }),
@@ -164,21 +161,21 @@ describe('AdvanceController', () => {
     })
   })
 
-  describe('approveL1', () => {
+  describe('approve', () => {
     it('asigna approvedBy del JWT y registra auditoria', async () => {
-      const req = makeReq()
+      const req = makeReq({ roles: [ROLES.COORDINADOR], role: ROLES.COORDINADOR })
       const dto: any = {}
-      const result = await controller.approveL1(advanceId, dto, req as never)
+      const result = await controller.approve(advanceId, dto, req as never)
       expect(dto.approvedBy).toBe(userId)
-      expect(mockAdvanceService.approveL1).toHaveBeenCalledWith(
+      expect(mockAdvanceService.approve).toHaveBeenCalledWith(
         advanceId,
         dto,
-        ROLES.ADMIN,
-        expect.any(Object)
+        userId,
+        ROLES.COORDINADOR
       )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: 'approve_advance_l1',
+          action: 'approve_advance',
           entityId: advanceId,
         })
       )
@@ -186,23 +183,18 @@ describe('AdvanceController', () => {
     })
   })
 
-  describe('approveL2', () => {
-    it('asigna approvedBy del JWT y registra auditoria', async () => {
-      const req = makeReq()
-      const dto: any = {}
-      await controller.approveL2(advanceId, dto, req as never)
-      expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'approve_advance_l2' })
-      )
-    })
-  })
-
   describe('reject', () => {
     it('asigna rejectedBy del JWT y registra auditoria', async () => {
-      const req = makeReq()
+      const req = makeReq({ roles: [ROLES.COORDINADOR], role: ROLES.COORDINADOR })
       const dto: any = { rejectionReason: 'No corresponde' }
       await controller.reject(advanceId, dto, req as never)
       expect(dto.rejectedBy).toBe(userId)
+      expect(mockAdvanceService.reject).toHaveBeenCalledWith(
+        advanceId,
+        dto,
+        userId,
+        ROLES.COORDINADOR
+      )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'reject_advance' })
       )

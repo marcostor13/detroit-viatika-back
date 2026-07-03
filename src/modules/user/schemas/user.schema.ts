@@ -41,7 +41,10 @@ export interface UserDocument extends Document {
   bankAccount?: BankAccount
   permissions?: UserPermissions
   signature?: string
+  /** @deprecated usar approverIds. Se conserva para migración. */
   coordinatorId?: Types.ObjectId
+  /** Cadena ordenada de aprobadores (rol Coordinador) para anticipos/viáticos. */
+  approverIds?: Types.ObjectId[]
   mustChangePassword?: boolean
   profilePic?: string
   isCompanyAdmin?: boolean
@@ -122,9 +125,13 @@ export class User {
   @Prop()
   signature?: string
 
-  /** Coordinador / aprobador asignado (Fase 2 — solicitud de viáticos) */
+  /** @deprecated Coordinador único legacy. Usar approverIds. Se conserva para migración. */
   @Prop({ type: Types.ObjectId, ref: 'User', required: false })
   coordinatorId?: Types.ObjectId
+
+  /** Cadena ordenada de aprobadores (rol Coordinador) para anticipos/viáticos. */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: undefined })
+  approverIds?: Types.ObjectId[]
 
   @Prop({ type: Boolean, default: false })
   mustChangePassword?: boolean

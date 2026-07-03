@@ -1164,6 +1164,13 @@ export class ExpenseService {
         HttpStatus.BAD_REQUEST
       )
     }
+    // El formato oficial (ADF-FOR-005) exige la Orden de Trabajo junto al Centro de Costo.
+    if (!body.ordenTrabajoId) {
+      throw new HttpException(
+        'Se requiere seleccionar la Orden de Trabajo (OT)',
+        HttpStatus.BAD_REQUEST
+      )
+    }
 
     const client = await this.clientModel.findById(body.clientId).lean().exec()
     const dailyLimit = client?.limits?.movilidadDiario ?? null
@@ -1203,6 +1210,7 @@ export class ExpenseService {
     const expense = await this.expenseRepository.create({
       categoryId: new Types.ObjectId(body.categoryId),
       proyectId: new Types.ObjectId(body.proyectId),
+      ordenTrabajoId: new Types.ObjectId(body.ordenTrabajoId),
       clientId: body.clientId,
       expenseReportId: body.expenseReportId
         ? new Types.ObjectId(body.expenseReportId)
@@ -1564,6 +1572,9 @@ export class ExpenseService {
       // (a diferencia de los create tipados), y guardarlos como string rompe los
       // $lookup/match estrictos del backend.
       proyectId: this.toObjectIdOrRaw(dto.proyectId),
+      ordenTrabajoId: dto.ordenTrabajoId
+        ? this.toObjectIdOrRaw(dto.ordenTrabajoId)
+        : undefined,
       categoryId: this.toObjectIdOrRaw(dto.categoryId),
       clientId: new Types.ObjectId(createExpenseDto.clientId),
       createdBy: createExpenseDto.userId,
@@ -1843,6 +1854,7 @@ export class ExpenseService {
       this.expenseRepository
         .find(query)
         .populate('proyectId')
+        .populate('ordenTrabajoId')
         .populate('categoryId')
         .sort(sortOptions)
         .skip(skip)
@@ -1903,6 +1915,7 @@ export class ExpenseService {
     const expense = await this.expenseRepository
       .findOne({ _id: expenseIdObject })
       .populate('proyectId')
+      .populate('ordenTrabajoId')
       .populate('categoryId')
       .exec()
 
@@ -2025,6 +2038,8 @@ export class ExpenseService {
     const updateDoc: any = { ...dto }
     if (updateDoc.proyectId !== undefined)
       updateDoc.proyectId = this.toObjectIdOrRaw(updateDoc.proyectId)
+    if (updateDoc.ordenTrabajoId !== undefined)
+      updateDoc.ordenTrabajoId = this.toObjectIdOrRaw(updateDoc.ordenTrabajoId)
     if (updateDoc.categoryId !== undefined)
       updateDoc.categoryId = this.toObjectIdOrRaw(updateDoc.categoryId)
 

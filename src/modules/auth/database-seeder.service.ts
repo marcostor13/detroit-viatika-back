@@ -21,6 +21,37 @@ export class DatabaseSeederService implements OnApplicationBootstrap {
     await this.migrateEmailIndex()
     await this.seedRoles()
     await this.seedSuperAdmin()
+    await this.migrateCoordinatorIdToApproverIds()
+  }
+
+  /**
+   * Migra el campo legacy User.coordinatorId (aprobador único) al nuevo
+   * User.approverIds (cadena ordenada). Solo toca usuarios que tienen
+   * coordinatorId pero aún no tienen approverIds — idempotente.
+   */
+  private async migrateCoordinatorIdToApproverIds() {
+    const candidates = await this.userModel
+      .find({
+        coordinatorId: { $exists: true, $ne: null },
+        $or: [
+          { approverIds: { $exists: false } },
+          { approverIds: { $size: 0 } },
+        ],
+      })
+      .select('_id coordinatorId')
+      .exec()
+
+    if (candidates.length === 0) return
+
+    for (const u of candidates) {
+      await this.userModel.updateOne(
+        { _id: u._id },
+        { $set: { approverIds: [u.coordinatorId] } }
+      )
+    }
+    this.logger.log(
+      `Migrados ${candidates.length} usuario(s) de coordinatorId a approverIds`
+    )
   }
 
   /** Drop the old global email_1 unique index if it still exists, so the new compound index takes over. */

@@ -36,7 +36,11 @@ import { applyFechaEmisionDisplayToExpenses } from '../expense/utils/fecha-emisi
 import { UploadService } from '../upload/upload.service'
 import { ProjectService } from '../project/project.service'
 import { CategoryService } from '../category/category.service'
-import { ADVANCE_THRESHOLDS } from '../advance/entities/advance.entity'
+import {
+  buildApproverChain,
+  canActOnChain,
+  advanceChain,
+} from '../advance/approval-chain.util'
 import { CreateViaticoExpenseReportDto } from './dto/create-viatico-expense-report.dto'
 import { PayViaticoDto } from './dto/pay-viatico.dto'
 import { ResubmitViaticoDto } from './dto/resubmit-viatico.dto'
@@ -90,6 +94,75 @@ export class ExpenseReportService implements OnModuleInit {
       this.logger.log('Created partialFilterExpression index for clientId+codigo')
     } catch (e) {
       this.logger.warn(`Index create skipped: ${(e as Error).message}`)
+    }
+    await this.migrateViaticoApprovalChains()
+  }
+
+  /**
+   * Migración única e idempotente de solicitudes de viático en vuelo al nuevo
+   * modelo de cadena de aprobadores (ver AdvanceService.migrateApprovalChains,
+   * misma lógica aplicada a ExpenseReport type='viatico').
+   */
+  private async migrateViaticoApprovalChains() {
+    const pendingL2 = await this.expenseReportModel
+      .find({ type: 'viatico', status: 'pending_l2' })
+      .select('_id userId')
+      .exec()
+    for (const r of pendingL2) {
+      const profile = await this.userService.findTransactionalProfile(
+        r.userId.toString()
+      )
+      const legacyCoordId = profile?.coordinatorId
+      if (!legacyCoordId) continue
+      await this.expenseReportModel.updateOne(
+        { _id: (r as any)._id },
+        {
+          $set: {
+            status: 'pending_l1',
+            viaticoApproverChain: [legacyCoordId],
+            viaticoRequiredLevels: 1,
+            viaticoApprovalLevel: 0,
+          },
+        }
+      )
+    }
+    if (pendingL2.length > 0) {
+      this.logger.log(
+        `Migrados ${pendingL2.length} viático(s) de pending_l2 a la nueva cadena de aprobadores`
+      )
+    }
+
+    const orphanedPendingL1 = await this.expenseReportModel
+      .find({
+        type: 'viatico',
+        status: 'pending_l1',
+        $or: [
+          { viaticoApproverChain: { $exists: false } },
+          { viaticoApproverChain: { $size: 0 } },
+        ],
+      })
+      .select('_id userId')
+      .exec()
+    for (const r of orphanedPendingL1) {
+      const profile = await this.userService.findTransactionalProfile(
+        r.userId.toString()
+      )
+      const legacyCoordId = profile?.coordinatorId
+      if (!legacyCoordId) continue
+      await this.expenseReportModel.updateOne(
+        { _id: (r as any)._id },
+        {
+          $set: {
+            viaticoApproverChain: [legacyCoordId],
+            viaticoRequiredLevels: 1,
+          },
+        }
+      )
+    }
+    if (orphanedPendingL1.length > 0) {
+      this.logger.log(
+        `Backfill de viaticoApproverChain en ${orphanedPendingL1.length} viático(s) pending_l1`
+      )
     }
   }
 
@@ -550,6 +623,7 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('createdBy', 'name email')
       .populate('viaticoLines.categoryId', 'name')
       .populate('projectId', 'code name')
+      .populate('viaticoOrdenTrabajoId', 'codigo departamento')
       .sort({ createdAt: -1 })
       .lean()
       .exec()
@@ -829,6 +903,8 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('createdBy', 'name email')
       .populate('approvedBy', 'name email')
       .populate('projectId', 'name')
+      .populate('viaticoOrdenTrabajoId', 'codigo departamento descripcion')
+      .populate('viaticoApproverChain', 'name email')
       .populate({
         path: 'saldoIds',
         select: 'type amount concepto deposit sourceReportId createdAt',
@@ -2793,6 +2869,7 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('createdBy', 'name email')
       .populate('approvedBy', 'name email')
       .populate('projectId', 'name')
+      .populate('viaticoOrdenTrabajoId', 'codigo departamento descripcion')
       .exec()
     if (!report)
       throw new NotFoundException(`Expense report with ID ${id} not found`)
@@ -3565,7 +3642,7 @@ export class ExpenseReportService implements OnModuleInit {
       ? `Viático: ${dto.place.trim()} (${startFmt} → ${endFmt}) | ${dto.observations.trim()}`
       : `Viático: ${dto.place.trim()} (${startFmt} → ${endFmt})`
 
-    return { lineDocs, roundedSum, description, requiredLevels: roundedSum > ADVANCE_THRESHOLDS.L1_MAX ? 2 : 1 }
+    return { lineDocs, roundedSum, description }
   }
 
   async createViatico(dto: CreateViaticoExpenseReportDto, userId: string, clientId: string): Promise<ExpenseReportDocument> {
@@ -3575,10 +3652,11 @@ export class ExpenseReportService implements OnModuleInit {
     }
 
     const pendingAmt = Number(dto.pendingBalanceAmount ?? 0)
+    const chain = buildApproverChain(profile.approverIds)
 
     // `dto.amount` es el costo del viático (suma de líneas). El saldo heredado NO se
     // suma al anticipo: prefinancia ese costo igual que un saldo de la bolsa.
-    const { lineDocs, roundedSum, description, requiredLevels } = await this.validateViaticoLines(
+    const { lineDocs, roundedSum, description } = await this.validateViaticoLines(
       { place: dto.place, startDate: dto.startDate, endDate: dto.endDate, projectId: dto.projectId, lines: dto.lines, observations: dto.observations, amount: dto.amount },
       clientId
     )
@@ -3594,7 +3672,8 @@ export class ExpenseReportService implements OnModuleInit {
       expenseIds: [],
       budget: roundedSum,
       viaticoAmount: roundedSum,
-      viaticoRequiredLevels: requiredLevels,
+      viaticoApproverChain: chain,
+      viaticoRequiredLevels: chain.length,
       viaticoApprovalLevel: 0,
       viaticoApprovalHistory: [],
       viaticoSolicitudVersion: 1,
@@ -3609,7 +3688,7 @@ export class ExpenseReportService implements OnModuleInit {
       ...(dto.bankName?.trim() && { viaticoBankName: dto.bankName.trim() }),
       ...(dto.accountNumber?.trim() && { viaticoAccountNumber: dto.accountNumber.trim() }),
       ...(dto.cci?.trim() && { viaticoCci: dto.cci.trim() }),
-      coordinatorId: profile.coordinatorId ?? undefined,
+      ...(dto.ordenTrabajoId && { viaticoOrdenTrabajoId: new Types.ObjectId(dto.ordenTrabajoId) }),
       ...(pendingAmt > 0 && dto.pendingBalanceFromReportId && {
         pendingBalanceFromReportId: new Types.ObjectId(dto.pendingBalanceFromReportId),
         pendingBalanceAmount: pendingAmt,
@@ -3739,11 +3818,15 @@ export class ExpenseReportService implements OnModuleInit {
     }
   }
 
+  /**
+   * Notifica al aprobador que le corresponde actuar ahora
+   * (viaticoApproverChain[viaticoApprovalLevel]). Se llama tanto al crear la
+   * solicitud (nivel 0) como al avanzar de nivel tras cada aprobación intermedia.
+   */
   private async notifyViaticoCoordinator(report: ExpenseReportDocument, collaboratorUserId: string, clientId: string): Promise<void> {
     const reportId = String((report as any)._id)
     const collaborator = await this.userService.findEmailNameClient(collaboratorUserId)
-    const profile = await this.userService.findTransactionalProfile(collaboratorUserId)
-    const coordId = profile?.coordinatorId
+    const coordId = report.viaticoApproverChain?.[report.viaticoApprovalLevel ?? 0]
     if (!coordId) {
       await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { status: 'skipped', sentAt: new Date(), errorMessage: 'Sin coordinador asignado' } } })
       return
@@ -3787,60 +3870,43 @@ export class ExpenseReportService implements OnModuleInit {
     }
   }
 
-  async approveViaticoL1(id: string, opts: { approvedBy: string; notes?: string }, userRole: string, userPermissions?: any): Promise<ExpenseReportDocument> {
-    console.log(`[APROBACIÓN VIÁTICO L1] id=${id}, userRole=${userRole}`)
+  /**
+   * Aprueba el nivel actual de la cadena de aprobadores del viático. Solo puede
+   * actuar el aprobador correspondiente al turno (viaticoApproverChain[viaticoApprovalLevel])
+   * o Superadministrador (llave maestra). Cuando el aprobador es el último de la
+   * cadena, la solicitud queda `viatico_approved`; si no, avanza al siguiente aprobador.
+   */
+  async approveViatico(id: string, opts: { approvedBy: string; notes?: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
     const report = await this.expenseReportModel.findById(id)
     if (!report) throw new NotFoundException(`Viático ${id} no encontrado`)
     if (report.type !== 'viatico') throw new BadRequestException('Esta rendición no es de tipo viático')
-    if (report.status !== 'pending_l1') throw new BadRequestException(`El viático no está en pending_l1 (estado actual: ${report.status})`)
+    if (report.status !== 'pending_l1') throw new BadRequestException(`El viático no está pendiente de aprobación (estado actual: ${report.status})`)
 
-    const canApprove = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(userRole as ROLES) || userPermissions?.canApproveL1 === true
-    if (!canApprove) throw new ForbiddenException('No tienes permiso para aprobar en nivel 1')
+    const chain = report.viaticoApproverChain ?? []
+    const approvalLevel = report.viaticoApprovalLevel ?? 0
+    if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
+      throw new ForbiddenException('No te corresponde aprobar esta solicitud en este momento')
+    }
 
-    ;(report.viaticoApprovalHistory ?? []).push({ level: 1, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
-    report.viaticoApprovalLevel = 1
+    ;(report.viaticoApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
 
-    const isSingleLevel = (report.viaticoRequiredLevels ?? 1) === 1
-    console.log(`[APROBACIÓN VIÁTICO L1] isSingleLevel=${isSingleLevel}, viaticoAmount=${report.viaticoAmount}`)
+    const { approvalLevel: nextLevel, isComplete } = advanceChain({ approvalLevel, requiredLevels: report.viaticoRequiredLevels ?? chain.length })
+    report.viaticoApprovalLevel = nextLevel
+
     let autoOpenedBySaldo = false
-    if (isSingleLevel) {
+    if (isComplete) {
       report.status = 'viatico_approved'
       await report.save()
       autoOpenedBySaldo = await this.onViaticoFullyApproved(report as ExpenseReportDocument)
     } else {
-      report.status = 'pending_l2'
       await report.save()
-      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en revisión', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada en nivel 1 y está pendiente de aprobación final.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en revisión', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada en el nivel ${nextLevel} de ${report.viaticoRequiredLevels ?? chain.length} y está pendiente del siguiente aprobador.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
+      this.notifyViaticoCoordinator(report as ExpenseReportDocument, report.userId.toString(), report.clientId.toString()).catch(() => {})
     }
 
     // Si quedó cubierto 100% con saldo (status 'open'), onViaticoFullyApproved ya
     // notificó al colaborador; evitamos el mensaje genérico de "pago en proceso".
-    if (!autoOpenedBySaldo) {
-      this.notificationsService.create({ userId: report.userId.toString(), title: isSingleLevel ? 'Solicitud de viáticos aprobada' : 'Solicitud en revisión', message: isSingleLevel ? `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada. El pago está siendo procesado.` : `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada en nivel 1.`, type: 'success', actionUrl: '/mis-rendiciones' }).catch(() => {})
-    }
-
-    return this.findOne(id) as Promise<ExpenseReportDocument>
-  }
-
-  async approveViaticoL2(id: string, opts: { approvedBy: string; notes?: string }, userRole: string, userPermissions?: any): Promise<ExpenseReportDocument> {
-    console.log(`[APROBACIÓN VIÁTICO L2] id=${id}, userRole=${userRole}`)
-    const report = await this.expenseReportModel.findById(id)
-    if (!report) throw new NotFoundException(`Viático ${id} no encontrado`)
-    if (report.type !== 'viatico') throw new BadRequestException('Esta rendición no es de tipo viático')
-    if (report.status !== 'pending_l2') throw new BadRequestException(`El viático no está en pending_l2 (estado actual: ${report.status})`)
-
-    const canApprove = userRole === ROLES.SUPER_ADMIN || userPermissions?.canApproveL2 === true
-    if (!canApprove) throw new ForbiddenException('No tienes permiso para aprobar en nivel 2')
-
-    ;(report.viaticoApprovalHistory ?? []).push({ level: 2, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
-    report.viaticoApprovalLevel = 2
-    report.status = 'viatico_approved'
-    await report.save()
-
-    const autoOpenedBySaldo = await this.onViaticoFullyApproved(report as ExpenseReportDocument)
-    // Si quedó cubierto 100% con saldo (status 'open'), onViaticoFullyApproved ya
-    // notificó al colaborador; evitamos el mensaje genérico de "pago en proceso".
-    if (!autoOpenedBySaldo) {
+    if (isComplete && !autoOpenedBySaldo) {
       this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos aprobada', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada. El pago está siendo procesado.`, type: 'success', actionUrl: '/mis-rendiciones' }).catch(() => {})
     }
 
@@ -3943,18 +4009,21 @@ export class ExpenseReportService implements OnModuleInit {
     return false
   }
 
-  async rejectViatico(id: string, opts: { rejectedBy: string; rejectionReason: string }, userRole: string, userPermissions?: any): Promise<ExpenseReportDocument> {
+  async rejectViatico(id: string, opts: { rejectedBy: string; rejectionReason: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
     const report = await this.expenseReportModel.findById(id)
     if (!report) throw new NotFoundException(`Viático ${id} no encontrado`)
     if (report.type !== 'viatico') throw new BadRequestException('Esta rendición no es de tipo viático')
-    if (!['pending_l1', 'pending_l2'].includes(report.status)) throw new BadRequestException(`No se puede rechazar en estado "${report.status}"`)
+    if (report.status !== 'pending_l1') throw new BadRequestException(`No se puede rechazar en estado "${report.status}"`)
 
-    const canReject = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(userRole as ROLES) || userPermissions?.canApproveL1 === true || userPermissions?.canApproveL2 === true
-    if (!canReject) throw new ForbiddenException('No tienes permiso para rechazar viáticos')
+    const chain = report.viaticoApproverChain ?? []
+    const approvalLevel = report.viaticoApprovalLevel ?? 0
+    if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
+      throw new ForbiddenException('No tienes permiso para rechazar esta solicitud')
+    }
 
     if ((opts.rejectionReason?.trim() ?? '').length < 10) throw new BadRequestException('El motivo de rechazo debe tener al menos 10 caracteres.')
 
-    ;(report.viaticoApprovalHistory ?? []).push({ level: report.status === 'pending_l2' ? 2 : 1, approvedBy: opts.rejectedBy, action: 'rejected', notes: opts.rejectionReason, date: new Date() })
+    ;(report.viaticoApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.rejectedBy, action: 'rejected', notes: opts.rejectionReason, date: new Date() })
     report.status = 'rejected'
     report.viaticoRejectedBy = opts.rejectedBy
     report.viaticoRejectionReason = opts.rejectionReason
@@ -3987,10 +4056,14 @@ export class ExpenseReportService implements OnModuleInit {
     const profile = await this.userService.findTransactionalProfile(actingUserId)
     if (!profile?.signature?.trim()) throw new ForbiddenException('Debe registrar su firma digital en el perfil antes de reenviar viáticos.')
 
-    const { lineDocs, roundedSum, description, requiredLevels } = await this.validateViaticoLines(
+    const { lineDocs, roundedSum, description } = await this.validateViaticoLines(
       { place: dto.place, startDate: dto.startDate, endDate: dto.endDate, projectId: dto.projectId, lines: dto.lines, observations: dto.observations, amount: dto.amount },
       clientId
     )
+
+    // La cadena de aprobadores se recalcula desde el perfil actual del colaborador
+    // (puede haber cambiado desde la solicitud original).
+    const chain = buildApproverChain(profile.approverIds)
 
     const wasEditing = report.status === 'pending_l1'
     report.viaticoPlace = dto.place.trim()
@@ -4004,6 +4077,9 @@ export class ExpenseReportService implements OnModuleInit {
     report.viaticoBankName = dto.bankName?.trim() || undefined
     report.viaticoAccountNumber = dto.accountNumber?.trim() || undefined
     report.viaticoCci = dto.cci?.trim() || undefined
+    report.viaticoOrdenTrabajoId = dto.ordenTrabajoId
+      ? new Types.ObjectId(dto.ordenTrabajoId)
+      : undefined
     report.viaticoAmount = roundedSum
     report.budget = roundedSum
     // Re-aplicar saldo de la bolsa si la corrección lo selecciona y el viático no
@@ -4041,7 +4117,8 @@ export class ExpenseReportService implements OnModuleInit {
     report.description = description
     report.status = 'pending_l1'
     report.viaticoApprovalLevel = 0
-    report.viaticoRequiredLevels = requiredLevels
+    report.viaticoApproverChain = chain
+    report.viaticoRequiredLevels = chain.length
     report.viaticoRejectedBy = undefined
     report.viaticoRejectionReason = undefined
     report.viaticoBudgetCommitmentRecorded = false
@@ -4238,10 +4315,10 @@ export class ExpenseReportService implements OnModuleInit {
 
   async findViaticos(opts: { requesterId: string; requesterRole: string; requesterPermissions?: any; clientId: string; status?: string; dateFrom?: string; dateTo?: string }) {
     const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(opts.requesterRole as ROLES)
-    const isApprover = !isAdmin && opts.requesterPermissions?.canApproveL1 === true
+    const isApprover = !isAdmin && opts.requesterRole === ROLES.COORDINADOR
     const filter: Record<string, unknown> = { type: 'viatico', clientId: new Types.ObjectId(opts.clientId) }
 
-    if (isApprover) filter['coordinatorId'] = new Types.ObjectId(opts.requesterId)
+    if (isApprover) filter['viaticoApproverChain'] = new Types.ObjectId(opts.requesterId)
     else if (!isAdmin) filter['userId'] = new Types.ObjectId(opts.requesterId)
 
     if (opts.status && opts.status !== 'all') filter['status'] = opts.status
@@ -4255,6 +4332,8 @@ export class ExpenseReportService implements OnModuleInit {
     return this.expenseReportModel.find(filter)
       .populate('userId', 'name email bankAccount dni')
       .populate('projectId', 'code name')
+      .populate('viaticoOrdenTrabajoId', 'codigo departamento')
+      .populate('viaticoApproverChain', 'name email')
       .sort({ viaticoStartDate: -1, createdAt: -1 })
       .exec()
   }
@@ -4267,6 +4346,7 @@ export class ExpenseReportService implements OnModuleInit {
     })
       .populate('userId', 'name email')
       .populate('projectId', 'code name')
+      .populate('viaticoOrdenTrabajoId', 'codigo departamento')
       .sort({ createdAt: -1 })
       .exec()
   }

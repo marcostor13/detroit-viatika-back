@@ -3,7 +3,9 @@ import { Document, Types } from 'mongoose'
 
 export type AdvanceStatus =
   | 'draft'
+  /** Pendiente de aprobación: puede ir por varios aprobadores (ver approverChain/approvalLevel). */
   | 'pending_l1'
+  /** @deprecated ya no se usa para nuevas solicitudes; se conserva por compatibilidad con documentos históricos. */
   | 'pending_l2'
   | 'approved'
   | 'partially_paid'
@@ -54,6 +56,7 @@ export interface ReturnRecord {
 }
 
 export interface ApprovalEntry {
+  /** Posición en la cadena (1-based) en la que se registró esta acción. */
   level: number
   approvedBy: string
   action: 'approved' | 'rejected' | 'resubmitted'
@@ -123,7 +126,10 @@ export interface CoordinatorNotificationLog {
 export interface AdvanceDocument extends Document {
   userId: Types.ObjectId
   clientId: Types.ObjectId
+  /** @deprecated snapshot legacy de un solo aprobador. Usar approverChain. */
   coordinatorId?: Types.ObjectId
+  /** Cadena ordenada de aprobadores (snapshot de User.approverIds al crear la solicitud). */
+  approverChain?: Types.ObjectId[]
   expenseReportId?: Types.ObjectId
   projectId?: Types.ObjectId
   place?: string
@@ -172,10 +178,13 @@ export interface AdvanceDocument extends Document {
   requestCci?: string
 }
 
-// Umbrales de aprobación multinivel
+/**
+ * @deprecated El número de niveles de aprobación ya no depende del monto:
+ * depende de la cantidad de aprobadores asignados al colaborador
+ * (User.approverIds). Ver approval-chain.util.ts.
+ */
 export const ADVANCE_THRESHOLDS = {
-  L1_MAX: 500, // Hasta S/. 500: solo nivel 1 (Admin)
-  // Más de S/. 500: nivel 1 + nivel 2 (Tesorero/SuperAdmin)
+  L1_MAX: 500,
 }
 
 @Schema({ timestamps: true })
@@ -186,8 +195,13 @@ export class Advance {
   @Prop({ required: true, type: Types.ObjectId, ref: 'Client' })
   clientId: Types.ObjectId
 
+  /** @deprecated snapshot legacy de un solo aprobador. Usar approverChain. */
   @Prop({ type: Types.ObjectId, ref: 'User', required: false })
   coordinatorId?: Types.ObjectId
+
+  /** Cadena ordenada de aprobadores (snapshot de User.approverIds al crear la solicitud). */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: undefined })
+  approverChain?: Types.ObjectId[]
 
   @Prop({ type: Types.ObjectId, ref: 'ExpenseReport', required: false })
   expenseReportId?: Types.ObjectId
@@ -270,9 +284,11 @@ export class Advance {
   })
   status: AdvanceStatus
 
-  @Prop({ default: 1 })
+  /** Nº de aprobaciones registradas hasta ahora (0 = falta el primer aprobador). */
+  @Prop({ default: 0 })
   approvalLevel: number
 
+  /** Longitud de approverChain al momento de crear la solicitud. */
   @Prop({ default: 1 })
   requiredLevels: number
 

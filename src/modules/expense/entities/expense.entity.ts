@@ -96,6 +96,8 @@ export interface ExpenseCargosClasificacion {
 
 export interface ExpenseDocument extends Document {
   proyectId: Types.ObjectId
+  /** Orden de Trabajo (LIM-XXX-NNNNNN), obligatoria en el formato oficial de planilla de movilidad (ADF-FOR-005). */
+  ordenTrabajoId?: Types.ObjectId
   total: number
   description: string
   categoryId: Types.ObjectId
@@ -158,6 +160,9 @@ export interface GetExpenseDocument extends Omit<ExpenseDocument, '_id'> {
 export class Expense {
   @Prop({ required: true, type: Types.ObjectId, ref: 'Project' })
   proyectId: Types.ObjectId
+
+  @Prop({ required: false, type: Types.ObjectId, ref: 'OrdenTrabajo' })
+  ordenTrabajoId?: Types.ObjectId
 
   @Prop()
   total: number

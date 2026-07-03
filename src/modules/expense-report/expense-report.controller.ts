@@ -676,61 +676,46 @@ export class ExpenseReportController {
     return result
   }
 
-  /** Aprobar viático nivel 1. */
+  /**
+   * Aprueba el nivel actual de la cadena de aprobadores del viático. Solo el
+   * aprobador (Coordinador) al que le toca el turno, o Superadmin.
+   */
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
-  @Patch(':id/viatico/approve-l1')
-  async approveViaticoL1(
+  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
+  @Patch(':id/viatico/approve')
+  async approveViatico(
     @Param('id') id: string,
     @Body() body: { notes?: string },
     @Request() req: any
   ) {
-    const userRole = req.user?.roles?.[0] ?? ''
-    const result = await this.expenseReportService.approveViaticoL1(
+    const actorId = String(req.user._id || req.user.sub)
+    const actorRole = req.user?.roles?.[0] ?? ''
+    const result = await this.expenseReportService.approveViatico(
       id,
-      { approvedBy: String(req.user._id || req.user.sub), notes: body.notes },
-      userRole,
-      req.user?.permissions
+      { approvedBy: actorId, notes: body.notes },
+      actorId,
+      actorRole
     )
-    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'approve_viatico_l1', module: 'viaticos', entityId: id, clientId: req.user.clientId })
+    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'approve_viatico', module: 'viaticos', entityId: id, clientId: req.user.clientId })
     return result
   }
 
-  /** Aprobar viático nivel 2. */
+  /** Rechazar viático (aprobador al que le toca el turno, o Superadmin). */
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
-  @Patch(':id/viatico/approve-l2')
-  async approveViaticoL2(
-    @Param('id') id: string,
-    @Body() body: { notes?: string },
-    @Request() req: any
-  ) {
-    const userRole = req.user?.roles?.[0] ?? ''
-    const result = await this.expenseReportService.approveViaticoL2(
-      id,
-      { approvedBy: String(req.user._id || req.user.sub), notes: body.notes },
-      userRole,
-      req.user?.permissions
-    )
-    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'approve_viatico_l2', module: 'viaticos', entityId: id, clientId: req.user.clientId })
-    return result
-  }
-
-  /** Rechazar viático. */
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
   @Patch(':id/viatico/reject')
   async rejectViatico(
     @Param('id') id: string,
     @Body() body: { rejectionReason: string },
     @Request() req: any
   ) {
-    const userRole = req.user?.roles?.[0] ?? ''
+    const actorId = String(req.user._id || req.user.sub)
+    const actorRole = req.user?.roles?.[0] ?? ''
     const result = await this.expenseReportService.rejectViatico(
       id,
-      { rejectedBy: String(req.user._id || req.user.sub), rejectionReason: body.rejectionReason },
-      userRole,
-      req.user?.permissions
+      { rejectedBy: actorId, rejectionReason: body.rejectionReason },
+      actorId,
+      actorRole
     )
     await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'reject_viatico', module: 'viaticos', entityId: id, details: body.rejectionReason, clientId: req.user.clientId })
     return result

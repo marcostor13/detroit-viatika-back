@@ -171,6 +171,8 @@ export interface ExpenseReportDocument extends Document {
   viaticoAmount?: number
   viaticoRequiredLevels?: number
   viaticoApprovalLevel?: number
+  /** Cadena ordenada de aprobadores (snapshot de User.approverIds al crear la solicitud). */
+  viaticoApproverChain?: Types.ObjectId[]
   viaticoApprovalHistory?: ApprovalEntry[]
   viaticoPaidAmount?: number
   viaticoPayments?: AdvancePayment[]
@@ -191,6 +193,8 @@ export interface ExpenseReportDocument extends Document {
   viaticoBankName?: string
   viaticoAccountNumber?: string
   viaticoCci?: string
+  /** Orden de Trabajo (LIM-XXX-NNNNNN) a la que se imputa el gasto del viático. */
+  viaticoOrdenTrabajoId?: Types.ObjectId
 }
 
 @Schema({ timestamps: true })
@@ -465,6 +469,10 @@ export class ExpenseReport {
   @Prop({ type: Number, default: 0 })
   viaticoApprovalLevel?: number
 
+  /** Cadena ordenada de aprobadores (snapshot de User.approverIds al crear la solicitud). */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: undefined })
+  viaticoApproverChain?: Types.ObjectId[]
+
   @Prop({
     type: [
       {
@@ -576,6 +584,9 @@ export class ExpenseReport {
 
   @Prop({ type: String, required: false })
   viaticoCci?: string
+
+  @Prop({ type: Types.ObjectId, ref: 'OrdenTrabajo', required: false })
+  viaticoOrdenTrabajoId?: Types.ObjectId
 }
 
 export const ExpenseReportSchema = SchemaFactory.createForClass(ExpenseReport)

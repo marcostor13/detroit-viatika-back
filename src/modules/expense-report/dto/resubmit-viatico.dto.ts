@@ -44,6 +44,11 @@ export class ResubmitViaticoDto {
   @IsMongoId()
   projectId: string
 
+  /** Orden de Trabajo (opcional) a la que se imputa el gasto del viático. */
+  @IsMongoId()
+  @IsOptional()
+  ordenTrabajoId?: string
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateAdvanceLineDto)

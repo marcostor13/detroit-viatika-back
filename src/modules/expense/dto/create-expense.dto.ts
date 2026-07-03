@@ -19,6 +19,11 @@ export class CreateExpenseDto {
   @IsNotEmpty()
   proyectId: string
 
+  /** Orden de Trabajo (opcional salvo en planilla_movilidad, ver ADF-FOR-005). */
+  @IsString()
+  @IsOptional()
+  ordenTrabajoId?: string
+
   @IsString()
   @IsNotEmpty()
   categoryId: string

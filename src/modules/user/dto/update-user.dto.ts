@@ -116,9 +116,16 @@ export class UpdateUserDto {
   @IsOptional()
   signature?: string
 
+  /** @deprecated usar approverIds. Se conserva para migración. */
   @IsMongoId()
   @IsOptional()
   coordinatorId?: string | null
+
+  /** Cadena ordenada de aprobadores (rol Coordinador) para anticipos/viáticos. */
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  approverIds?: string[]
 
   @IsBoolean()
   @IsOptional()

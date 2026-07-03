@@ -6,14 +6,16 @@ import {
   BadRequestException,
   ForbiddenException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model, Types } from 'mongoose'
+import { Advance, AdvanceDocument } from './entities/advance.entity'
 import {
-  Advance,
-  AdvanceDocument,
-  ADVANCE_THRESHOLDS,
-} from './entities/advance.entity'
+  buildApproverChain,
+  canActOnChain,
+  advanceChain,
+} from './approval-chain.util'
 import {
   CreateAdvanceDto,
   CreateAdvanceLineDto,
@@ -35,7 +37,7 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { SaldoService } from '../saldo/saldo.service'
 
 @Injectable()
-export class AdvanceService {
+export class AdvanceService implements OnModuleInit {
   private readonly logger = new Logger(AdvanceService.name)
 
   constructor(
@@ -50,6 +52,73 @@ export class AdvanceService {
     private readonly notificationsService: NotificationsService,
     private readonly saldoService: SaldoService
   ) {}
+
+  async onModuleInit() {
+    await this.migrateApprovalChains()
+  }
+
+  /**
+   * Migración única e idempotente de solicitudes en vuelo al nuevo modelo de
+   * cadena de aprobadores:
+   *  - `pending_l2` (esperaban una 2da aprobación por monto/contabilidad, ya
+   *    eliminada): se convierten a `pending_l1` con una cadena de un solo
+   *    aprobador (su coordinador legacy), para que quede pendiente de una
+   *    última aprobación humana en vez de auto-aprobarse.
+   *  - `pending_l1` sin `approverChain` (creadas antes de esta migración):
+   *    se les asigna la cadena de un solo aprobador (coordinador legacy).
+   * Las solicitudes sin coordinador legacy asignado quedan sin cambios; se
+   * bloquearán al reenviarse hasta que un admin les asigne aprobadores.
+   */
+  private async migrateApprovalChains() {
+    const pendingL2 = await this.advanceModel
+      .find({ status: 'pending_l2' })
+      .select('_id coordinatorId')
+      .exec()
+    for (const a of pendingL2) {
+      if (!a.coordinatorId) continue
+      await this.advanceModel.updateOne(
+        { _id: a._id },
+        {
+          $set: {
+            status: 'pending_l1',
+            approverChain: [a.coordinatorId],
+            requiredLevels: 1,
+            approvalLevel: 0,
+          },
+        }
+      )
+    }
+    if (pendingL2.length > 0) {
+      this.logger.log(
+        `Migrados ${pendingL2.length} anticipo(s) de pending_l2 a la nueva cadena de aprobadores`
+      )
+    }
+
+    const orphanedPendingL1 = await this.advanceModel
+      .find({
+        status: 'pending_l1',
+        $or: [
+          { approverChain: { $exists: false } },
+          { approverChain: { $size: 0 } },
+        ],
+        coordinatorId: { $exists: true, $ne: null },
+      })
+      .select('_id coordinatorId')
+      .exec()
+    for (const a of orphanedPendingL1) {
+      await this.advanceModel.updateOne(
+        { _id: a._id },
+        {
+          $set: { approverChain: [a.coordinatorId], requiredLevels: 1 },
+        }
+      )
+    }
+    if (orphanedPendingL1.length > 0) {
+      this.logger.log(
+        `Backfill de approverChain en ${orphanedPendingL1.length} anticipo(s) pending_l1`
+      )
+    }
+  }
 
   async create(dto: CreateAdvanceDto): Promise<Advance> {
     if (!dto.clientId) throw new BadRequestException('clientId es requerido')
@@ -219,11 +288,15 @@ export class AdvanceService {
       ? Number(dto.pendingBalanceAmount) + Number(dto.additionalAmount)
       : dto.amount
 
-    const requiredLevels = amount > ADVANCE_THRESHOLDS.L1_MAX ? 2 : 1
+    const profile = await this.userService.findTransactionalProfile(
+      dto.userId!
+    )
+    const chain = buildApproverChain(profile?.approverIds)
 
     const advance = await this.advanceModel.create({
       userId: new Types.ObjectId(dto.userId),
       clientId: new Types.ObjectId(dto.clientId),
+      approverChain: chain,
       expenseReportId: dto.expenseReportId
         ? new Types.ObjectId(dto.expenseReportId)
         : undefined,
@@ -231,7 +304,7 @@ export class AdvanceService {
       description: dto.description,
       status: 'pending_l1',
       approvalLevel: 0,
-      requiredLevels,
+      requiredLevels: chain.length,
       approvalHistory: [],
       ...(hasPendingBalance && {
         pendingBalanceFromReportId: dto.pendingBalanceFromReportId
@@ -283,7 +356,6 @@ export class AdvanceService {
     }[]
     roundedSum: number
     description: string
-    requiredLevels: number
   }> {
     const start = this.startOfDay(new Date(dto.startDate))
     const end = this.startOfDay(new Date(dto.endDate))
@@ -352,9 +424,7 @@ export class AdvanceService {
       ? `${metaDesc} | ${dto.observations.trim()}`
       : metaDesc
 
-    const requiredLevels = roundedSum > ADVANCE_THRESHOLDS.L1_MAX ? 2 : 1
-
-    return { lineDocs, roundedSum, description, requiredLevels }
+    return { lineDocs, roundedSum, description }
   }
 
   private async createViaticoSolicitud(
@@ -370,7 +440,7 @@ export class AdvanceService {
     const pendingAmt = Number(dto.pendingBalanceAmount ?? 0)
     const linesOnlyAmount = Math.round((dto.amount - pendingAmt) * 100) / 100
 
-    const { lineDocs, roundedSum, description, requiredLevels } =
+    const { lineDocs, roundedSum, description } =
       await this.validateViaticoBusinessRulesAndLines(
         {
           place: dto.place!,
@@ -385,12 +455,12 @@ export class AdvanceService {
       )
 
     const totalAmount = Math.round((roundedSum + pendingAmt) * 100) / 100
-    const totalRequiredLevels = totalAmount > ADVANCE_THRESHOLDS.L1_MAX ? 2 : 1
+    const chain = buildApproverChain(profile.approverIds)
 
     const advance = await this.advanceModel.create({
       userId: new Types.ObjectId(dto.userId),
       clientId: new Types.ObjectId(dto.clientId),
-      coordinatorId: profile.coordinatorId ?? undefined,
+      approverChain: chain,
       expenseReportId: dto.expenseReportId
         ? new Types.ObjectId(dto.expenseReportId)
         : undefined,
@@ -406,7 +476,7 @@ export class AdvanceService {
       description,
       status: 'pending_l1',
       approvalLevel: 0,
-      requiredLevels: totalRequiredLevels,
+      requiredLevels: chain.length,
       approvalHistory: [],
       solicitudVersion: 1,
       budgetCommitmentRecorded: false,
@@ -455,6 +525,11 @@ export class AdvanceService {
     return refreshed as Advance
   }
 
+  /**
+   * Notifica al aprobador que le corresponde actuar ahora (approverChain[approvalLevel]).
+   * Se llama tanto al crear la solicitud (nivel 0) como al avanzar de nivel tras
+   * cada aprobación intermedia.
+   */
   private async notifyCoordinatorViatico(
     advance: AdvanceDocument,
     collaboratorUserId: string,
@@ -465,9 +540,7 @@ export class AdvanceService {
     const collaborator =
       await this.userService.findEmailNameClient(collaboratorUserId)
 
-    const profile =
-      await this.userService.findTransactionalProfile(collaboratorUserId)
-    const coordId = profile?.coordinatorId
+    const coordId = advance.approverChain?.[advance.approvalLevel]
 
     const project = await this.projectService.findOne(
       advance.projectId!.toString(),
@@ -821,9 +894,11 @@ export class AdvanceService {
   }
 
   /**
-   * Notifica a Contabilidad/Tesorería cuando una solicitud queda en pending_l2,
-   * para que procedan con la segunda aprobación.
+   * @deprecated La aprobación de Contabilidad (nivel 2 por monto) fue eliminada.
+   * El siguiente aprobador de la cadena se notifica ahora vía notifyCoordinatorViatico.
+   * Se conserva sin uso por si se requiere referencia histórica.
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async notifyL2ApproversViaticoAprobadoL1(
     advance: AdvanceDocument
   ): Promise<void> {
@@ -1296,7 +1371,7 @@ export class AdvanceService {
     // que tiene asignados — mismo criterio que las rendiciones
     // (findAllByCoordinator). Sin esto, veía los de todo el cliente.
     if (actor?.role === ROLES.COORDINADOR) {
-      const userIds = await this.userService.findUserIdsByCoordinator(
+      const userIds = await this.userService.findUserIdsByApprover(
         actor.userId,
         clientId
       )
@@ -1324,17 +1399,16 @@ export class AdvanceService {
       ROLES.SUPER_ADMIN,
       ROLES.CONTABILIDAD,
     ].includes(opts.requesterRole as ROLES)
-    // Aprobador/coordinador real: solo quien puede aprobar nivel 1.
-    const isApprover =
-      !isAdminRole && opts.requesterPermissions?.canApproveL1 === true
+    // Aprobador real: rol Coordinador (único rol elegible como aprobador de cadena).
+    const isApprover = !isAdminRole && opts.requesterRole === ROLES.COORDINADOR
 
     const filter: Record<string, unknown> = {
       clientId: new Types.ObjectId(opts.clientId),
     }
 
     if (isApprover) {
-      // Coordinador: ve las solicitudes que le toca aprobar.
-      filter['coordinatorId'] = new Types.ObjectId(opts.requesterId)
+      // Coordinador: ve las solicitudes donde forma parte de la cadena de aprobadores.
+      filter['approverChain'] = new Types.ObjectId(opts.requesterId)
     } else if (!isAdminRole) {
       // Colaborador (con módulo «viaticos» pero sin permiso de aprobar):
       // solo ve sus propios viáticos, a modo informativo.
@@ -1360,6 +1434,7 @@ export class AdvanceService {
       .find(filter)
       .populate('userId', 'name email bankAccount dni')
       .populate('projectId', 'code name')
+      .populate('approverChain', 'name email')
       .sort({ startDate: -1, createdAt: -1 })
       .exec()
   }
@@ -1419,6 +1494,7 @@ export class AdvanceService {
       .populate('userId', 'name email bankAccount dni')
       .populate('expenseReportId', 'title status budget')
       .populate('projectId')
+      .populate('approverChain', 'name email')
       .populate({
         path: 'lines.categoryId',
         select: 'name key limit isActive',
@@ -1429,41 +1505,56 @@ export class AdvanceService {
     return advance
   }
 
-  async approveL1(
+  /**
+   * Aprueba el nivel actual de la cadena de aprobadores del anticipo. Solo puede
+   * actuar el aprobador correspondiente al turno (approverChain[approvalLevel])
+   * o Superadministrador (llave maestra). Cuando el aprobador que actúa es el
+   * último de la cadena, la solicitud queda `approved`; si no, avanza al
+   * siguiente aprobador.
+   */
+  async approve(
     id: string,
     dto: ApproveAdvanceDto,
-    userRole: string,
-    userPermissions?: any
+    actorId: string,
+    actorRole: string
   ): Promise<Advance> {
     const advance = await this.advanceModel.findById(id)
     if (!advance) throw new NotFoundException(`Viático ${id} no encontrado`)
 
     if (advance.status !== 'pending_l1') {
       throw new BadRequestException(
-        `El viático no está en estado de aprobación nivel 1 (estado actual: ${advance.status})`
+        `El viático no está pendiente de aprobación (estado actual: ${advance.status})`
       )
     }
 
-    const canApproveL1 =
-      [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(userRole as ROLES) ||
-      userPermissions?.canApproveL1 === true
-    if (!canApproveL1)
-      throw new ForbiddenException('No tienes permiso para aprobar en nivel 1')
+    const chain = advance.approverChain ?? []
+    if (
+      !canActOnChain({
+        chain,
+        approvalLevel: advance.approvalLevel,
+        actorId,
+        actorRole,
+      })
+    ) {
+      throw new ForbiddenException(
+        'No te corresponde aprobar esta solicitud en este momento'
+      )
+    }
 
     advance.approvalHistory.push({
-      level: 1,
-      approvedBy: dto.approvedBy || 'sistema',
+      level: advance.approvalLevel + 1,
+      approvedBy: dto.approvedBy || actorId,
       action: 'approved',
       notes: dto.notes,
       date: new Date(),
     })
-    advance.approvalLevel = 1
 
-    if (advance.requiredLevels === 1) {
-      advance.status = 'approved'
-    } else {
-      advance.status = 'pending_l2'
-    }
+    const { approvalLevel, isComplete } = advanceChain({
+      approvalLevel: advance.approvalLevel,
+      requiredLevels: advance.requiredLevels,
+    })
+    advance.approvalLevel = approvalLevel
+    if (isComplete) advance.status = 'approved'
 
     const saved = await advance.save()
     if (saved.status === 'approved') {
@@ -1482,88 +1573,50 @@ export class AdvanceService {
         .create({
           userId: saved.userId.toString(),
           title: 'Solicitud de viáticos en revisión',
-          message: `Tu solicitud de viáticos por S/ ${this.formatViaticoMoney(saved.amount)} fue aprobada en el primer nivel y está pendiente de aprobación final.`,
+          message: `Tu solicitud de viáticos por S/ ${this.formatViaticoMoney(saved.amount)} fue aprobada en el nivel ${saved.approvalLevel} de ${saved.requiredLevels} y está pendiente del siguiente aprobador.`,
           type: 'info',
           actionUrl: '/mis-rendiciones',
         })
         .catch(() => {})
-      this.notifyL2ApproversViaticoAprobadoL1(saved as AdvanceDocument).catch(
-        () => {}
-      )
+      this.notifyCoordinatorViatico(
+        saved as AdvanceDocument,
+        saved.userId.toString(),
+        saved.clientId.toString()
+      ).catch(() => {})
     }
-    return this.findOne(id)
-  }
-
-  async approveL2(
-    id: string,
-    dto: ApproveAdvanceDto,
-    userRole: string,
-    userPermissions?: any
-  ): Promise<Advance> {
-    const advance = await this.advanceModel.findById(id)
-    if (!advance) throw new NotFoundException(`Viático ${id} no encontrado`)
-
-    if (advance.status !== 'pending_l2') {
-      throw new BadRequestException(
-        `El viático no está en estado de aprobación nivel 2 (estado actual: ${advance.status})`
-      )
-    }
-
-    const canApproveL2 =
-      userRole === ROLES.SUPER_ADMIN || userPermissions?.canApproveL2 === true
-    if (!canApproveL2)
-      throw new ForbiddenException('No tienes permiso para aprobar en nivel 2')
-
-    advance.approvalHistory.push({
-      level: 2,
-      approvedBy: dto.approvedBy || 'sistema',
-      action: 'approved',
-      notes: dto.notes,
-      date: new Date(),
-    })
-    advance.approvalLevel = 2
-    advance.status = 'approved'
-
-    const saved = await advance.save()
-    await this.onViaticoAdvanceFullyApproved(saved as AdvanceDocument)
-    this.notificationsService
-      .create({
-        userId: saved.userId.toString(),
-        title: 'Solicitud de viáticos aprobada',
-        message: `Tu solicitud de viáticos por S/ ${this.formatViaticoMoney(saved.amount)} fue aprobada completamente. El pago está siendo procesado.`,
-        type: 'success',
-        actionUrl: '/mis-rendiciones',
-      })
-      .catch(() => {})
     return this.findOne(id)
   }
 
   async reject(
     id: string,
     dto: RejectAdvanceDto,
-    userRole: string,
-    userPermissions?: any
+    actorId: string,
+    actorRole: string
   ): Promise<Advance> {
     const advance = await this.advanceModel.findById(id)
     if (!advance) throw new NotFoundException(`Viático ${id} no encontrado`)
 
-    const rejectableStatuses = ['pending_l1', 'pending_l2']
-    if (!rejectableStatuses.includes(advance.status)) {
+    if (advance.status !== 'pending_l1') {
       throw new BadRequestException(
         `No se puede rechazar un viático en estado "${advance.status}"`
       )
     }
 
-    const canReject =
-      [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(userRole as ROLES) ||
-      userPermissions?.canApproveL1 === true ||
-      userPermissions?.canApproveL2 === true
-    if (!canReject)
-      throw new ForbiddenException('No tienes permiso para rechazar viáticos')
+    const chain = advance.approverChain ?? []
+    if (
+      !canActOnChain({
+        chain,
+        approvalLevel: advance.approvalLevel,
+        actorId,
+        actorRole,
+      })
+    ) {
+      throw new ForbiddenException('No tienes permiso para rechazar esta solicitud')
+    }
 
     advance.approvalHistory.push({
-      level: advance.status === 'pending_l2' ? 2 : 1,
-      approvedBy: dto.rejectedBy || 'sistema',
+      level: advance.approvalLevel + 1,
+      approvedBy: dto.rejectedBy || actorId,
       action: 'rejected',
       notes: dto.rejectionReason,
       date: new Date(),
@@ -2269,7 +2322,7 @@ export class AdvanceService {
       )
     }
 
-    const { lineDocs, roundedSum, description, requiredLevels } =
+    const { lineDocs, roundedSum, description } =
       await this.validateViaticoBusinessRulesAndLines(
         {
           place: dto.place,
@@ -2282,6 +2335,10 @@ export class AdvanceService {
         },
         clientId
       )
+
+    // La cadena de aprobadores se recalcula desde el perfil actual del colaborador
+    // (puede haber cambiado desde la solicitud original).
+    const chain = buildApproverChain(profile.approverIds)
 
     const wasEditing = advance.status === 'pending_l1'
     advance.place = dto.place.trim()
@@ -2296,7 +2353,8 @@ export class AdvanceService {
     advance.description = description
     advance.status = 'pending_l1'
     advance.approvalLevel = 0
-    advance.requiredLevels = requiredLevels
+    advance.approverChain = chain
+    advance.requiredLevels = chain.length
     advance.rejectedBy = undefined
     advance.rejectionReason = undefined
     advance.budgetCommitmentRecorded = false

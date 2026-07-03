@@ -43,9 +43,14 @@ export interface IUserResponse {
   cargo?: string
   address?: string
   phone?: string
+  /** @deprecated usar approverIds. */
   coordinatorId?:
     | Types.ObjectId
     | { _id: Types.ObjectId; name?: string; email?: string }
+  approverIds?: (
+    | Types.ObjectId
+    | { _id: Types.ObjectId; name?: string; email?: string }
+  )[]
   mustChangePassword?: boolean
   signature?: string
   bankAccount?: {
@@ -64,6 +69,39 @@ export class UserService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private readonly roleService: RoleService
   ) {}
+
+  /**
+   * Valida que cada id de la cadena de aprobadores corresponda a un usuario
+   * activo con rol Coordinador del mismo cliente. Devuelve la cadena ordenada
+   * como ObjectId[] (o `[]` si se envía una lista vacía, lo que limpia la cadena).
+   */
+  private async validateApproverChain(
+    approverIds: string[],
+    clientId: string | null
+  ): Promise<Types.ObjectId[]> {
+    if (approverIds.length === 0) return []
+    const coordinadorRole = await this.roleService.getByName('Coordinador')
+    if (!coordinadorRole) {
+      throw new BadRequestException('No existe el rol Coordinador en el sistema')
+    }
+    const found = await this.userModel
+      .find({
+        _id: { $in: approverIds.map(id => new Types.ObjectId(id)) },
+        roleId: (coordinadorRole as any)._id,
+        clientId: clientId ? new Types.ObjectId(clientId) : null,
+        isActive: { $ne: false },
+      })
+      .select('_id')
+      .exec()
+    const foundIds = new Set(found.map(u => u._id.toString()))
+    const missing = approverIds.filter(id => !foundIds.has(id))
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        'Todos los aprobadores deben ser usuarios activos con rol Coordinador de la misma empresa'
+      )
+    }
+    return approverIds.map(id => new Types.ObjectId(id))
+  }
 
   async findAllWithClient(): Promise<IUserResponse[]> {
     const users = await this.userModel
@@ -161,6 +199,7 @@ export class UserService {
       .populate('roleId')
       .populate('clientId')
       .populate('coordinatorId', 'name email')
+      .populate('approverIds', 'name email')
       .exec()
     if (!user) {
       return {} as IUserResponse
@@ -184,6 +223,7 @@ export class UserService {
       address: (user as any).address,
       phone: (user as any).phone,
       coordinatorId: (user as any).coordinatorId,
+      approverIds: (user as any).approverIds,
       bankAccount: (user as any).bankAccount,
       signature: (user as any).signature,
       mustChangePassword: !!(user as any).mustChangePassword,
@@ -215,19 +255,26 @@ export class UserService {
     const hashedPassword = await bcrypt.hash(temporaryPassword, 10)
     const {
       coordinatorId: coordRaw,
+      approverIds: approverIdsRaw,
       permissions,
       ...rest
     } = userData as CreateUserDto & {
       coordinatorId?: string
+      approverIds?: string[]
       permissions?: IUserPermissions
     }
+    const chain = approverIdsRaw
+      ? await this.validateApproverChain(approverIdsRaw, userData.clientId)
+      : undefined
     const savedUser = await this.userModel.create({
       ...rest,
       roleId,
       clientId,
       password: hashedPassword,
       mustChangePassword: true,
-      coordinatorId: coordRaw ? new Types.ObjectId(coordRaw) : undefined,
+      ...(chain
+        ? { approverIds: chain, coordinatorId: chain[0] }
+        : { coordinatorId: coordRaw ? new Types.ObjectId(coordRaw) : undefined }),
       ...(permissions ? { permissions } : {}),
     })
     const populatedUser = await this.userModel
@@ -267,6 +314,21 @@ export class UserService {
     const users = await this.userModel
       .find({
         coordinatorId: new Types.ObjectId(coordinatorId),
+        clientId: new Types.ObjectId(clientId),
+      })
+      .select('_id')
+      .exec()
+    return users.map(u => u._id)
+  }
+
+  /** Colaboradores que tienen a `approverId` en cualquier posición de su cadena de aprobadores. */
+  async findUserIdsByApprover(
+    approverId: string,
+    clientId: string
+  ): Promise<Types.ObjectId[]> {
+    const users = await this.userModel
+      .find({
+        approverIds: new Types.ObjectId(approverId),
         clientId: new Types.ObjectId(clientId),
       })
       .select('_id')
@@ -367,7 +429,7 @@ export class UserService {
     return { data, total, page, pages, limit }
   }
 
-  update(id: string, updateUserDto: UpdateUserDto) {
+  async update(id: string, updateUserDto: UpdateUserDto) {
     const updateData: any = { ...updateUserDto }
 
     if (updateData.roleId) {
@@ -387,6 +449,23 @@ export class UserService {
         : null
     }
 
+    if ('approverIds' in updateUserDto && updateUserDto.approverIds !== undefined) {
+      let clientIdForValidation = updateUserDto.clientId ?? null
+      if (!clientIdForValidation) {
+        const existing = await this.userModel
+          .findById(id)
+          .select('clientId')
+          .exec()
+        clientIdForValidation = existing?.clientId?.toString() ?? null
+      }
+      const chain = await this.validateApproverChain(
+        updateUserDto.approverIds,
+        clientIdForValidation
+      )
+      updateData.approverIds = chain
+      updateData.coordinatorId = chain[0] ?? null
+    }
+
     return this.userModel
       .findByIdAndUpdate(id, updateData, { new: true })
       .populate('roleId')
@@ -398,18 +477,21 @@ export class UserService {
     return this.userModel.findByIdAndDelete(id).exec()
   }
 
-  /** Firma y coordinador para validar solicitudes transaccionales (viáticos). */
-  async findTransactionalProfile(
-    userId: string
-  ): Promise<{ signature?: string; coordinatorId?: Types.ObjectId } | null> {
+  /** Firma y cadena de aprobadores para validar solicitudes transaccionales (viáticos). */
+  async findTransactionalProfile(userId: string): Promise<{
+    signature?: string
+    coordinatorId?: Types.ObjectId
+    approverIds?: Types.ObjectId[]
+  } | null> {
     const u = await this.userModel
       .findById(userId)
-      .select('signature coordinatorId')
+      .select('signature coordinatorId approverIds')
       .exec()
     if (!u) return null
     return {
       signature: u.signature,
       coordinatorId: u.coordinatorId,
+      approverIds: u.approverIds,
     }
   }
 
@@ -971,7 +1053,9 @@ export class UserService {
           clientId: clientObjectId,
           mustChangePassword: true,
           permissions: this.defaultPermissionsForRole(roleName),
-          ...(coordinatorId ? { coordinatorId } : {}),
+          ...(coordinatorId
+            ? { coordinatorId, approverIds: [coordinatorId] }
+            : {}),
           ...(row.dni ? { dni: row.dni } : {}),
           ...(row.employeeCode ? { employeeCode: row.employeeCode } : {}),
           ...(row.area ? { area: row.area } : {}),

@@ -70,6 +70,13 @@ describe('RolesGuard', () => {
     expect(guard.canActivate(makeContext(['Coordinador']))).toBe(true)
   })
 
+  it('still allows Coordinador through endpoints gated specifically to Coordinador (regression: approve viatico 403)', () => {
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['Coordinador', 'Superadministrador'])
+    expect(guard.canActivate(makeContext(['Coordinador']))).toBe(true)
+  })
+
   it('allows access when one of multiple required roles matches', () => {
     jest
       .spyOn(reflector, 'getAllAndOverride')

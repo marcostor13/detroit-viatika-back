@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common'
 import { Types } from 'mongoose'
 import { AdvanceService } from './advance.service'
-import { Advance, ADVANCE_THRESHOLDS } from './entities/advance.entity'
+import { Advance } from './entities/advance.entity'
 import { ExpenseReportService } from '../expense-report/expense-report.service'
 import { ProjectService } from '../project/project.service'
 import { CategoryService } from '../category/category.service'
@@ -137,31 +137,66 @@ describe('AdvanceService', () => {
 
   // ── create ────────────────────────────────────────────────────────────
   describe('create', () => {
-    it('creates an advance and sets requiredLevels=1 for amount <= threshold', async () => {
-      const advance = makeMockAdvance({ amount: ADVANCE_THRESHOLDS.L1_MAX })
+    it('creates an advance with approverChain and requiredLevels from a single-approver collaborator', async () => {
+      const approverA = new Types.ObjectId()
+      mockUserService.findTransactionalProfile.mockResolvedValue({
+        approverIds: [approverA],
+      })
+      const advance = makeMockAdvance({ amount: 100, requiredLevels: 1 })
       mockAdvanceModel.create.mockResolvedValue(advance)
       const result = await service.create({
         userId,
         clientId,
-        amount: ADVANCE_THRESHOLDS.L1_MAX,
+        amount: 100,
         description: 'Test',
       })
       expect(result.requiredLevels).toBe(1)
+      expect(mockAdvanceModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({ approverChain: [approverA], requiredLevels: 1 })
+      )
     })
 
-    it('sets requiredLevels=2 for amount > threshold', async () => {
-      const advance = makeMockAdvance({ amount: 501, requiredLevels: 2 })
+    it('sets requiredLevels to the length of a multi-approver chain, regardless of amount', async () => {
+      const approverA = new Types.ObjectId()
+      const approverB = new Types.ObjectId()
+      mockUserService.findTransactionalProfile.mockResolvedValue({
+        approverIds: [approverA, approverB],
+      })
+      const advance = makeMockAdvance({ amount: 5000, requiredLevels: 2 })
       mockAdvanceModel.create.mockResolvedValue(advance)
       const result = await service.create({
         userId,
         clientId,
-        amount: 501,
+        amount: 5000,
         description: 'Test',
       })
       expect(result.requiredLevels).toBe(2)
+      expect(mockAdvanceModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          approverChain: [approverA, approverB],
+          requiredLevels: 2,
+        })
+      )
+    })
+
+    it('throws BadRequestException when the collaborator has no approvers assigned', async () => {
+      mockUserService.findTransactionalProfile.mockResolvedValue({
+        approverIds: [],
+      })
+      await expect(
+        service.create({
+          userId,
+          clientId,
+          amount: 100,
+          description: 'Test',
+        })
+      ).rejects.toThrow(BadRequestException)
     })
 
     it('links to expense report when expenseReportId is provided', async () => {
+      mockUserService.findTransactionalProfile.mockResolvedValue({
+        approverIds: [new Types.ObjectId()],
+      })
       const advance = makeMockAdvance()
       mockAdvanceModel.create.mockResolvedValue(advance)
       await service.create({
@@ -217,139 +252,187 @@ describe('AdvanceService', () => {
     })
   })
 
-  // ── approveL1 ─────────────────────────────────────────────────────────
-  describe('approveL1', () => {
-    const dto = { approvedBy: 'admin@test.com', notes: 'OK' }
+  // ── approve ───────────────────────────────────────────────────────────
+  describe('approve', () => {
+    const approverA = new Types.ObjectId()
+    const approverB = new Types.ObjectId()
+    const dto = { approvedBy: approverA.toString(), notes: 'OK' }
 
-    it('approves at L1 and sets status=approved when requiredLevels=1', async () => {
-      const advance = makeMockAdvance({ requiredLevels: 1 })
-      advance.save.mockResolvedValue(advance)
+    it('approves and completes a single-approver chain', async () => {
+      const advance = makeMockAdvance({
+        approverChain: [approverA],
+        requiredLevels: 1,
+        approvalLevel: 0,
+      })
       mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      const result = await service.approveL1(advanceId, dto, ROLES.ADMIN)
+      await service.approve(
+        advanceId,
+        dto,
+        approverA.toString(),
+        ROLES.COORDINADOR
+      )
       expect(advance.status).toBe('approved')
+      expect(advance.approvalLevel).toBe(1)
       expect(advance.approvalHistory).toHaveLength(1)
-      expect(advance.approvalHistory[0].action).toBe('approved')
+      expect(advance.approvalHistory[0].level).toBe(1)
       expect(advance.save).toHaveBeenCalled()
     })
 
-    it('sets status=pending_l2 when requiredLevels=2', async () => {
-      const advance = makeMockAdvance({ requiredLevels: 2 })
+    it('advances without completing when more approvers remain in the chain', async () => {
+      const advance = makeMockAdvance({
+        approverChain: [approverA, approverB],
+        requiredLevels: 2,
+        approvalLevel: 0,
+      })
       mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await service.approveL1(advanceId, dto, ROLES.ADMIN)
-      expect(advance.status).toBe('pending_l2')
+      await service.approve(
+        advanceId,
+        dto,
+        approverA.toString(),
+        ROLES.COORDINADOR
+      )
+      expect(advance.status).toBe('pending_l1')
+      expect(advance.approvalLevel).toBe(1)
     })
 
-    it('throws ForbiddenException for Colaborador without canApproveL1', async () => {
-      const advance = makeMockAdvance()
+    it('completes when the last approver of a multi-level chain approves', async () => {
+      const advance = makeMockAdvance({
+        approverChain: [approverA, approverB],
+        requiredLevels: 2,
+        approvalLevel: 1,
+      })
+      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
+      await service.approve(
+        advanceId,
+        { approvedBy: approverB.toString() },
+        approverB.toString(),
+        ROLES.COORDINADOR
+      )
+      expect(advance.status).toBe('approved')
+      expect(advance.approvalLevel).toBe(2)
+    })
+
+    it('throws ForbiddenException when the actor is not the approver whose turn it is', async () => {
+      const advance = makeMockAdvance({
+        approverChain: [approverA, approverB],
+        requiredLevels: 2,
+        approvalLevel: 0,
+      })
       mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
       await expect(
-        service.approveL1(advanceId, dto, ROLES.COLABORADOR)
+        service.approve(
+          advanceId,
+          dto,
+          approverB.toString(),
+          ROLES.COORDINADOR
+        )
       ).rejects.toThrow(ForbiddenException)
     })
 
-    it('allows approval via canApproveL1 permission', async () => {
-      const advance = makeMockAdvance({ requiredLevels: 1 })
-      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await service.approveL1(advanceId, dto, ROLES.COLABORADOR, {
-        canApproveL1: true,
+    it('allows Superadministrador as break-glass regardless of chain position', async () => {
+      const superAdminId = new Types.ObjectId().toString()
+      const advance = makeMockAdvance({
+        approverChain: [approverA],
+        requiredLevels: 1,
+        approvalLevel: 0,
       })
+      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
+      await service.approve(advanceId, dto, superAdminId, ROLES.SUPER_ADMIN)
       expect(advance.status).toBe('approved')
     })
 
-    it('throws BadRequestException when status is not pending_l1', async () => {
-      const advance = makeMockAdvance({ status: 'approved' })
+    it('throws ForbiddenException for Administrador who is not in the chain', async () => {
+      const adminId = new Types.ObjectId().toString()
+      const advance = makeMockAdvance({
+        approverChain: [approverA],
+        requiredLevels: 1,
+        approvalLevel: 0,
+      })
       mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
       await expect(
-        service.approveL1(advanceId, dto, ROLES.ADMIN)
+        service.approve(advanceId, dto, adminId, ROLES.ADMIN)
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('throws BadRequestException when status is not pending_l1', async () => {
+      const advance = makeMockAdvance({
+        status: 'approved',
+        approverChain: [approverA],
+      })
+      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
+      await expect(
+        service.approve(advanceId, dto, approverA.toString(), ROLES.COORDINADOR)
       ).rejects.toThrow(BadRequestException)
     })
 
     it('throws NotFoundException when advance not found', async () => {
       mockAdvanceModel.findById.mockReturnValue(makeQuery(null))
       await expect(
-        service.approveL1(advanceId, dto, ROLES.ADMIN)
+        service.approve(advanceId, dto, approverA.toString(), ROLES.COORDINADOR)
       ).rejects.toThrow(NotFoundException)
-    })
-  })
-
-  // ── approveL2 ─────────────────────────────────────────────────────────
-  describe('approveL2', () => {
-    const dto = { approvedBy: 'super@test.com', notes: 'Approved L2' }
-
-    it('approves at L2 and sets status=approved', async () => {
-      const advance = makeMockAdvance({
-        status: 'pending_l2',
-        requiredLevels: 2,
-      })
-      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await service.approveL2(advanceId, dto, ROLES.SUPER_ADMIN)
-      expect(advance.status).toBe('approved')
-      expect(advance.approvalLevel).toBe(2)
-    })
-
-    it('throws ForbiddenException for Admin without canApproveL2', async () => {
-      const advance = makeMockAdvance({ status: 'pending_l2' })
-      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await expect(
-        service.approveL2(advanceId, dto, ROLES.ADMIN)
-      ).rejects.toThrow(ForbiddenException)
-    })
-
-    it('allows approval via canApproveL2 permission', async () => {
-      const advance = makeMockAdvance({ status: 'pending_l2' })
-      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await service.approveL2(advanceId, dto, ROLES.COLABORADOR, {
-        canApproveL2: true,
-      })
-      expect(advance.status).toBe('approved')
-    })
-
-    it('throws BadRequestException when status is not pending_l2', async () => {
-      const advance = makeMockAdvance({ status: 'pending_l1' })
-      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await expect(
-        service.approveL2(advanceId, dto, ROLES.SUPER_ADMIN)
-      ).rejects.toThrow(BadRequestException)
     })
   })
 
   // ── reject ────────────────────────────────────────────────────────────
   describe('reject', () => {
+    const approverA = new Types.ObjectId()
+    const approverB = new Types.ObjectId()
     const dto = {
-      rejectedBy: 'admin@test.com',
+      rejectedBy: approverA.toString(),
       rejectionReason:
         'El monto solicitado no está justificado según la política interna.',
     }
 
-    it('rejects a pending_l1 advance', async () => {
-      const advance = makeMockAdvance({ status: 'pending_l1' })
+    it('rejects a pending_l1 advance when acted by the expected approver', async () => {
+      const advance = makeMockAdvance({
+        status: 'pending_l1',
+        approverChain: [approverA],
+        approvalLevel: 0,
+      })
       mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await service.reject(advanceId, dto, ROLES.ADMIN)
+      await service.reject(
+        advanceId,
+        dto,
+        approverA.toString(),
+        ROLES.COORDINADOR
+      )
       expect(advance.status).toBe('rejected')
       expect(advance.rejectionReason).toBe(dto.rejectionReason)
     })
 
-    it('rejects a pending_l2 advance', async () => {
-      const advance = makeMockAdvance({ status: 'pending_l2' })
-      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await service.reject(advanceId, dto, ROLES.ADMIN)
-      expect(advance.status).toBe('rejected')
-    })
-
     it('throws BadRequestException for non-rejectable status', async () => {
-      const advance = makeMockAdvance({ status: 'approved' })
-      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await expect(service.reject(advanceId, dto, ROLES.ADMIN)).rejects.toThrow(
-        BadRequestException
-      )
-    })
-
-    it('throws ForbiddenException for Colaborador without reject permissions', async () => {
-      const advance = makeMockAdvance({ status: 'pending_l1' })
+      const advance = makeMockAdvance({
+        status: 'approved',
+        approverChain: [approverA],
+      })
       mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
       await expect(
-        service.reject(advanceId, dto, ROLES.COLABORADOR)
+        service.reject(advanceId, dto, approverA.toString(), ROLES.COORDINADOR)
+      ).rejects.toThrow(BadRequestException)
+    })
+
+    it('throws ForbiddenException when the actor is not the approver whose turn it is', async () => {
+      const advance = makeMockAdvance({
+        status: 'pending_l1',
+        approverChain: [approverA, approverB],
+        approvalLevel: 0,
+      })
+      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
+      await expect(
+        service.reject(advanceId, dto, approverB.toString(), ROLES.COORDINADOR)
       ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('allows Superadministrador to reject as break-glass', async () => {
+      const superAdminId = new Types.ObjectId().toString()
+      const advance = makeMockAdvance({
+        status: 'pending_l1',
+        approverChain: [approverA],
+        approvalLevel: 0,
+      })
+      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
+      await service.reject(advanceId, dto, superAdminId, ROLES.SUPER_ADMIN)
+      expect(advance.status).toBe('rejected')
     })
   })
 
@@ -808,33 +891,32 @@ describe('AdvanceService', () => {
         clientId,
       })
       const findCall = mockAdvanceModel.find.mock.calls[0][0]
-      expect(findCall.coordinatorId).toBeUndefined()
+      expect(findCall.approverChain).toBeUndefined()
     })
 
-    it('filters by coordinatorId for non-admin with canApproveL1', async () => {
+    it('filters by approverChain membership for Coordinador role', async () => {
+      const advances = [makeMockAdvance()]
+      mockAdvanceModel.find.mockReturnValue(makeQuery(advances))
+      await service.findForViaticosPage({
+        requesterId: userId,
+        requesterRole: 'Coordinador',
+        clientId,
+      })
+      const findCall = mockAdvanceModel.find.mock.calls[0][0]
+      expect(findCall.approverChain).toBeDefined()
+    })
+
+    it('filters by own userId for collaborator with viaticos module', async () => {
       const advances = [makeMockAdvance()]
       mockAdvanceModel.find.mockReturnValue(makeQuery(advances))
       await service.findForViaticosPage({
         requesterId: userId,
         requesterRole: 'Colaborador',
-        requesterPermissions: { canApproveL1: true },
+        requesterPermissions: { modules: ['viaticos'] },
         clientId,
       })
       const findCall = mockAdvanceModel.find.mock.calls[0][0]
-      expect(findCall.coordinatorId).toBeDefined()
-    })
-
-    it('filters by own userId for collaborator with viaticos module but no canApproveL1', async () => {
-      const advances = [makeMockAdvance()]
-      mockAdvanceModel.find.mockReturnValue(makeQuery(advances))
-      await service.findForViaticosPage({
-        requesterId: userId,
-        requesterRole: 'Colaborador',
-        requesterPermissions: { canApproveL1: false, modules: ['viaticos'] },
-        clientId,
-      })
-      const findCall = mockAdvanceModel.find.mock.calls[0][0]
-      expect(findCall.coordinatorId).toBeUndefined()
+      expect(findCall.approverChain).toBeUndefined()
       expect(findCall.userId).toBeDefined()
     })
 
