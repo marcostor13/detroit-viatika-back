@@ -56,7 +56,10 @@ describe('AiController', () => {
 
       await controller.chat(dto, req as never, res as never)
 
-      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream')
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Content-Type',
+        'text/event-stream'
+      )
       expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache')
       expect(res.setHeader).toHaveBeenCalledWith('Connection', 'keep-alive')
       expect(res.write).toHaveBeenCalledTimes(2)

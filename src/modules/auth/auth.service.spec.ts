@@ -118,17 +118,17 @@ describe('AuthService', () => {
 
     it('throws BadRequestException when user not found', async () => {
       mockUserService.findAllByEmail.mockResolvedValue([])
-      await expect(
-        service.login('wrong@example.com', 'bad')
-      ).rejects.toThrow(BadRequestException)
+      await expect(service.login('wrong@example.com', 'bad')).rejects.toThrow(
+        BadRequestException
+      )
     })
 
     it('throws BadRequestException when password is wrong', async () => {
       mockUserService.findAllByEmail.mockResolvedValue([mockUser])
       ;(bcrypt.compare as jest.Mock).mockResolvedValue(false)
-      await expect(
-        service.login('test@example.com', 'wrong')
-      ).rejects.toThrow(BadRequestException)
+      await expect(service.login('test@example.com', 'wrong')).rejects.toThrow(
+        BadRequestException
+      )
     })
 
     it('includes clientId and permissions in JWT payload', async () => {
@@ -146,23 +146,29 @@ describe('AuthService', () => {
 
   describe('selectClient', () => {
     it('throws BadRequestException when hubToken is invalid', async () => {
-      mockJwtService.verify.mockImplementation(() => { throw new Error('invalid') })
+      mockJwtService.verify.mockImplementation(() => {
+        throw new Error('invalid')
+      })
       await expect(
         service.selectClient({ hubToken: 'bad.token', clientId: 'c1' })
       ).rejects.toThrow(BadRequestException)
     })
 
     it('throws BadRequestException when email/password not provided without hubToken', async () => {
-      await expect(
-        service.selectClient({ clientId: 'c1' })
-      ).rejects.toThrow(BadRequestException)
+      await expect(service.selectClient({ clientId: 'c1' })).rejects.toThrow(
+        BadRequestException
+      )
     })
 
     it('issues token for email+password+clientId flow', async () => {
       const user = { ...mockUser, client: { _id: { toString: () => 'c1' } } }
       mockUserService.findAllByEmail.mockResolvedValue([user])
       ;(bcrypt.compare as jest.Mock).mockResolvedValue(true)
-      const result = await service.selectClient({ email: 'test@example.com', password: 'pass', clientId: 'c1' })
+      const result = await service.selectClient({
+        email: 'test@example.com',
+        password: 'pass',
+        clientId: 'c1',
+      })
       expect(result).toHaveProperty('access_token')
     })
   })
@@ -170,10 +176,16 @@ describe('AuthService', () => {
   describe('getHubCompanies', () => {
     it('returns mapped list of companies', async () => {
       mockClientService.findAll.mockResolvedValue([
-        { _id: { toString: () => 'c1' }, comercialName: 'Empresa A', logo: null },
+        {
+          _id: { toString: () => 'c1' },
+          comercialName: 'Empresa A',
+          logo: null,
+        },
       ])
       const result = await service.getHubCompanies()
-      expect(result).toEqual([{ clientId: 'c1', name: 'Empresa A', logo: null }])
+      expect(result).toEqual([
+        { clientId: 'c1', name: 'Empresa A', logo: null },
+      ])
     })
   })
 })

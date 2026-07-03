@@ -1,0 +1,9 @@
+services:
+  api:
+    build: .
+    container_name: nestjs_api
+    restart: always
+    ports:
+      - '3016:3016'
+    env_file:
+      - .env

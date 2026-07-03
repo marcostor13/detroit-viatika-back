@@ -32,18 +32,30 @@ const mockAdvanceService = {
   findPending: jest.fn().mockResolvedValue([]),
   getStats: jest.fn().mockResolvedValue({}),
   findOne: jest.fn().mockResolvedValue({ _id: advanceId }),
-  approveL1: jest.fn().mockResolvedValue({ _id: advanceId, status: 'pending_l2' }),
-  approveL2: jest.fn().mockResolvedValue({ _id: advanceId, status: 'approved' }),
+  approveL1: jest
+    .fn()
+    .mockResolvedValue({ _id: advanceId, status: 'pending_l2' }),
+  approveL2: jest
+    .fn()
+    .mockResolvedValue({ _id: advanceId, status: 'approved' }),
   reject: jest.fn().mockResolvedValue({ _id: advanceId, status: 'rejected' }),
-  resubmitRejected: jest.fn().mockResolvedValue({ _id: advanceId, status: 'pending_l1' }),
+  resubmitRejected: jest
+    .fn()
+    .mockResolvedValue({ _id: advanceId, status: 'pending_l1' }),
   resendCoordinatorNotification: jest.fn().mockResolvedValue({ sent: true }),
-  registerPayment: jest.fn().mockResolvedValue({ _id: advanceId, status: 'paid' }),
-  registerReturn: jest.fn().mockResolvedValue({ _id: advanceId, status: 'returned' }),
+  registerPayment: jest
+    .fn()
+    .mockResolvedValue({ _id: advanceId, status: 'paid' }),
+  registerReturn: jest
+    .fn()
+    .mockResolvedValue({ _id: advanceId, status: 'returned' }),
   initiateReturnTracking: jest.fn().mockResolvedValue({ _id: advanceId }),
   uploadReturnProof: jest.fn().mockResolvedValue({ _id: advanceId }),
   validateReturn: jest.fn().mockResolvedValue({ _id: advanceId }),
   findPendingReturns: jest.fn().mockResolvedValue([]),
-  cancelByCollaborator: jest.fn().mockResolvedValue({ _id: advanceId, status: 'cancelled' }),
+  cancelByCollaborator: jest
+    .fn()
+    .mockResolvedValue({ _id: advanceId, status: 'cancelled' }),
 }
 
 const mockAuditLogService = { log: jest.fn().mockResolvedValue(undefined) }
@@ -78,7 +90,10 @@ describe('AdvanceController', () => {
   describe('findMy', () => {
     it('delega al servicio con userId y clientId de la ruta', async () => {
       await controller.findMy(userId, clientId)
-      expect(mockAdvanceService.findMyAdvances).toHaveBeenCalledWith(userId, clientId)
+      expect(mockAdvanceService.findMyAdvances).toHaveBeenCalledWith(
+        userId,
+        clientId
+      )
     })
   })
 
@@ -96,7 +111,9 @@ describe('AdvanceController', () => {
         role: ROLES.COLABORADOR,
         permissions: {},
       })
-      expect(() => controller.findForViaticosPage(req as never)).toThrow(ForbiddenException)
+      expect(() => controller.findForViaticosPage(req as never)).toThrow(
+        ForbiddenException
+      )
     })
 
     it('permite acceso a ADMIN', async () => {
@@ -154,10 +171,16 @@ describe('AdvanceController', () => {
       const result = await controller.approveL1(advanceId, dto, req as never)
       expect(dto.approvedBy).toBe(userId)
       expect(mockAdvanceService.approveL1).toHaveBeenCalledWith(
-        advanceId, dto, ROLES.ADMIN, expect.any(Object)
+        advanceId,
+        dto,
+        ROLES.ADMIN,
+        expect.any(Object)
       )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'approve_advance_l1', entityId: advanceId })
+        expect.objectContaining({
+          action: 'approve_advance_l1',
+          entityId: advanceId,
+        })
       )
       expect(result).toBeDefined()
     })
@@ -192,7 +215,10 @@ describe('AdvanceController', () => {
       const dto: any = {}
       await controller.resubmit(advanceId, dto, req as never)
       expect(mockAdvanceService.resubmitRejected).toHaveBeenCalledWith(
-        advanceId, dto, userId, clientId
+        advanceId,
+        dto,
+        userId,
+        clientId
       )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'resubmit_advance' })
@@ -204,9 +230,9 @@ describe('AdvanceController', () => {
     it('llama al servicio y registra auditoria', async () => {
       const req = makeReq()
       await controller.resendCoordinatorEmail(advanceId, req as never)
-      expect(mockAdvanceService.resendCoordinatorNotification).toHaveBeenCalledWith(
-        advanceId, clientId
-      )
+      expect(
+        mockAdvanceService.resendCoordinatorNotification
+      ).toHaveBeenCalledWith(advanceId, clientId)
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'resend_coordinator_notification' })
       )
@@ -217,9 +243,16 @@ describe('AdvanceController', () => {
     it('delega al servicio con rol y permisos del JWT', async () => {
       const req = makeReq()
       const dto: any = { method: 'transfer', amount: 500 }
-      const result = await controller.registerPayment(advanceId, dto, req as never)
+      const result = await controller.registerPayment(
+        advanceId,
+        dto,
+        req as never
+      )
       expect(mockAdvanceService.registerPayment).toHaveBeenCalledWith(
-        advanceId, dto, ROLES.ADMIN, expect.any(Object)
+        advanceId,
+        dto,
+        ROLES.ADMIN,
+        expect.any(Object)
       )
       expect(result).toBeDefined()
     })
@@ -228,14 +261,19 @@ describe('AdvanceController', () => {
   describe('registerReturn', () => {
     it('delega al servicio con id y monto', async () => {
       await controller.registerReturn(advanceId, { returnedAmount: 200 })
-      expect(mockAdvanceService.registerReturn).toHaveBeenCalledWith(advanceId, 200)
+      expect(mockAdvanceService.registerReturn).toHaveBeenCalledWith(
+        advanceId,
+        200
+      )
     })
   })
 
   describe('initiateReturn', () => {
     it('delega al servicio', async () => {
       await controller.initiateReturn(advanceId)
-      expect(mockAdvanceService.initiateReturnTracking).toHaveBeenCalledWith(advanceId)
+      expect(mockAdvanceService.initiateReturnTracking).toHaveBeenCalledWith(
+        advanceId
+      )
     })
   })
 
@@ -259,9 +297,16 @@ describe('AdvanceController', () => {
   describe('validateReturn', () => {
     it('delega aprobacion al servicio', async () => {
       const req = makeReq()
-      await controller.validateReturn(advanceId, { approved: true }, req as never)
+      await controller.validateReturn(
+        advanceId,
+        { approved: true },
+        req as never
+      )
       expect(mockAdvanceService.validateReturn).toHaveBeenCalledWith(
-        advanceId, true, userId, undefined
+        advanceId,
+        true,
+        userId,
+        undefined
       )
     })
   })
@@ -269,15 +314,23 @@ describe('AdvanceController', () => {
   describe('findPendingReturns', () => {
     it('delega al servicio con clientId', async () => {
       await controller.findPendingReturns(clientId)
-      expect(mockAdvanceService.findPendingReturns).toHaveBeenCalledWith(clientId)
+      expect(mockAdvanceService.findPendingReturns).toHaveBeenCalledWith(
+        clientId
+      )
     })
   })
 
   describe('cancelByCollaborator', () => {
     it('cancela el anticipo y registra auditoria', async () => {
       const req = makeReq()
-      const result = await controller.cancelByCollaborator(advanceId, req as never)
-      expect(mockAdvanceService.cancelByCollaborator).toHaveBeenCalledWith(advanceId, userId)
+      const result = await controller.cancelByCollaborator(
+        advanceId,
+        req as never
+      )
+      expect(mockAdvanceService.cancelByCollaborator).toHaveBeenCalledWith(
+        advanceId,
+        userId
+      )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'cancel_advance' })
       )

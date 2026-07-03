@@ -46,7 +46,10 @@ describe('CategoryController', () => {
       const result = await controller.create(dto, req as never)
       expect(mockCategoryService.create).toHaveBeenCalledWith(dto)
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'create_category', module: 'categorias' })
+        expect.objectContaining({
+          action: 'create_category',
+          module: 'categorias',
+        })
       )
       expect(result).toBeDefined()
     })
@@ -56,7 +59,10 @@ describe('CategoryController', () => {
     it('delega al servicio con clientId', async () => {
       const req = makeReq()
       await controller.findAllFlat(clientId, req as never)
-      expect(mockCategoryService.findAllFlat).toHaveBeenCalledWith(clientId, undefined)
+      expect(mockCategoryService.findAllFlat).toHaveBeenCalledWith(
+        clientId,
+        undefined
+      )
     })
   })
 
@@ -64,7 +70,10 @@ describe('CategoryController', () => {
     it('usa la misma logica que findAllFlat', async () => {
       const req = makeReq()
       await controller.findAllFlatLegacy(clientId, req as never)
-      expect(mockCategoryService.findAllFlat).toHaveBeenCalledWith(clientId, undefined)
+      expect(mockCategoryService.findAllFlat).toHaveBeenCalledWith(
+        clientId,
+        undefined
+      )
     })
   })
 
@@ -98,7 +107,10 @@ describe('CategoryController', () => {
   describe('findByKey', () => {
     it('delega al servicio con key y clientId', async () => {
       await controller.findByKey('alimentacion', clientId)
-      expect(mockCategoryService.findByKey).toHaveBeenCalledWith('alimentacion', clientId)
+      expect(mockCategoryService.findByKey).toHaveBeenCalledWith(
+        'alimentacion',
+        clientId
+      )
     })
   })
 
@@ -108,7 +120,11 @@ describe('CategoryController', () => {
       const req = makeReq()
       const result = await controller.update(catId, clientId, dto, req as never)
       expect(mockCategoryService.findOne).toHaveBeenCalledWith(catId, clientId)
-      expect(mockCategoryService.update).toHaveBeenCalledWith(catId, dto, clientId)
+      expect(mockCategoryService.update).toHaveBeenCalledWith(
+        catId,
+        dto,
+        clientId
+      )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'update_category' })
       )

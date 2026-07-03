@@ -20,7 +20,7 @@ const mockCategory = {
   createdAt: new Date(),
   updatedAt: new Date(),
   toObject: function () {
-    const { toObject: _, ...rest } = this as any
+    const { toObject: _, ...rest } = this
     return rest
   },
 }
@@ -36,7 +36,7 @@ const mockParent = {
   createdAt: new Date(),
   updatedAt: new Date(),
   toObject: function () {
-    const { toObject: _, ...rest } = this as any
+    const { toObject: _, ...rest } = this
     return rest
   },
 }
@@ -97,12 +97,15 @@ describe('CategoryService', () => {
 
     it('preserves an explicit key when provided', async () => {
       mockSave.mockResolvedValue({ ...mockCategory, key: 'custom-key' })
-      await service.create({ name: 'Alimentación', key: 'custom-key', clientId })
+      await service.create({
+        name: 'Alimentación',
+        key: 'custom-key',
+        clientId,
+      })
       expect(MockModel).toHaveBeenCalledWith(
         expect.objectContaining({ key: 'custom-key' })
       )
     })
-
   })
 
   describe('create', () => {
@@ -162,7 +165,9 @@ describe('CategoryService', () => {
 
     it('throws NotFoundException when not found', async () => {
       MockModel.findOne.mockReturnValue(makeExec(null))
-      await expect(service.findOne(categoryId, clientId)).rejects.toThrow(NotFoundException)
+      await expect(service.findOne(categoryId, clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -179,7 +184,9 @@ describe('CategoryService', () => {
 
     it('throws NotFoundException when key not found', async () => {
       MockModel.findOne.mockReturnValue(makeExec(null))
-      await expect(service.findByKey('nonexistent', clientId)).rejects.toThrow(NotFoundException)
+      await expect(service.findByKey('nonexistent', clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -188,21 +195,29 @@ describe('CategoryService', () => {
       const updated = { ...mockCategory, name: 'Transporte' }
       MockModel.findOne.mockReturnValue(makeExec(mockCategory))
       MockModel.findOneAndUpdate.mockReturnValue(makeExec(updated))
-      const result = await service.update(categoryId, { name: 'Transporte' }, clientId)
+      const result = await service.update(
+        categoryId,
+        { name: 'Transporte' },
+        clientId
+      )
       expect(result).toEqual(updated)
     })
 
     it('throws NotFoundException when category not found for update', async () => {
       MockModel.findOne.mockReturnValue(makeExec(mockCategory))
       MockModel.findOneAndUpdate.mockReturnValue(makeExec(null))
-      await expect(service.update(categoryId, { name: 'X' }, clientId)).rejects.toThrow(NotFoundException)
+      await expect(
+        service.update(categoryId, { name: 'X' }, clientId)
+      ).rejects.toThrow(NotFoundException)
     })
   })
 
   describe('remove', () => {
     it('deletes the category successfully', async () => {
       MockModel.findOneAndDelete.mockReturnValue(makeExec(mockCategory))
-      await expect(service.remove(categoryId, clientId)).resolves.toBeUndefined()
+      await expect(
+        service.remove(categoryId, clientId)
+      ).resolves.toBeUndefined()
       expect(MockModel.findOneAndDelete).toHaveBeenCalledWith({
         _id: categoryId,
         clientId: expect.any(Types.ObjectId),
@@ -211,7 +226,9 @@ describe('CategoryService', () => {
 
     it('throws NotFoundException when category not found for delete', async () => {
       MockModel.findOneAndDelete.mockReturnValue(makeExec(null))
-      await expect(service.remove(categoryId, clientId)).rejects.toThrow(NotFoundException)
+      await expect(service.remove(categoryId, clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 })

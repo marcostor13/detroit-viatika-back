@@ -4,10 +4,12 @@ import {
   IsOptional,
   IsNumber,
   Min,
+  Max,
   IsMongoId,
   IsArray,
   ValidateNested,
   IsDateString,
+  MaxLength,
 } from 'class-validator'
 import { Type } from 'class-transformer'
 
@@ -58,6 +60,18 @@ export class CreateAdvanceDto {
   @IsOptional()
   place?: string
 
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  @IsOptional()
+  lat?: number
+
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  @IsOptional()
+  lng?: number
+
   @IsDateString()
   @IsOptional()
   startDate?: string
@@ -94,6 +108,28 @@ export class CreateAdvanceDto {
   @Min(0)
   @IsOptional()
   additionalAmount?: number
+
+  /** Saldos de la bolsa seleccionados para financiar esta solicitud (consumo completo, mismo centro de costo). */
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  saldoIds?: string[]
+
+  /** Cuenta bancaria alternativa para el depósito (opcional). */
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  bankName?: string
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  accountNumber?: string
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  cci?: string
 
   /** Seteados desde el JWT en el controlador */
   userId?: string

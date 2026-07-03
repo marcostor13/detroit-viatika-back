@@ -30,9 +30,12 @@ describe('CategoryGroupController', () => {
         { provide: AuditLogService, useValue: mockAuditLogService },
       ],
     })
-      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(require('../auth/guards/roles.guard').RolesGuard).useValue({ canActivate: () => true })
-      .overrideGuard(require('@nestjs/passport').AuthGuard('jwt')).useValue({ canActivate: () => true })
+      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(require('../auth/guards/roles.guard').RolesGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(require('@nestjs/passport').AuthGuard('jwt'))
+      .useValue({ canActivate: () => true })
       .compile()
 
     controller = module.get<CategoryGroupController>(CategoryGroupController)
@@ -56,7 +59,10 @@ describe('CategoryGroupController', () => {
       const result = await controller.create(dto, mockReq as any)
       expect(mockCategoryGroupService.create).toHaveBeenCalledWith(dto)
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'create_category_group', module: 'categorias' })
+        expect.objectContaining({
+          action: 'create_category_group',
+          module: 'categorias',
+        })
       )
       expect(result).toEqual({ _id: 'g1', name: 'Test Group' })
     })
@@ -66,9 +72,16 @@ describe('CategoryGroupController', () => {
     it('delegates to service.update with id and clientId params', async () => {
       const dto = { name: 'Updated Name' } as any
       const result = await controller.update('g1', 'c1', dto, mockReq as any)
-      expect(mockCategoryGroupService.update).toHaveBeenCalledWith('g1', dto, 'c1')
+      expect(mockCategoryGroupService.update).toHaveBeenCalledWith(
+        'g1',
+        dto,
+        'c1'
+      )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'update_category_group', entityId: 'g1' })
+        expect.objectContaining({
+          action: 'update_category_group',
+          entityId: 'g1',
+        })
       )
       expect(result).toEqual({ _id: 'g1', name: 'Updated Group' })
     })
@@ -79,7 +92,10 @@ describe('CategoryGroupController', () => {
       await controller.remove('g1', 'c1', mockReq as any)
       expect(mockCategoryGroupService.remove).toHaveBeenCalledWith('g1', 'c1')
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'delete_category_group', entityId: 'g1' })
+        expect.objectContaining({
+          action: 'delete_category_group',
+          entityId: 'g1',
+        })
       )
     })
   })

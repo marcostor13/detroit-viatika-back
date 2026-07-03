@@ -32,14 +32,22 @@ export function parseFechaEmisionInput(
   const ymdMatch = clean.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/)
   if (ymdMatch) {
     return new Date(
-      Date.UTC(Number(ymdMatch[1]), Number(ymdMatch[2]) - 1, Number(ymdMatch[3]))
+      Date.UTC(
+        Number(ymdMatch[1]),
+        Number(ymdMatch[2]) - 1,
+        Number(ymdMatch[3])
+      )
     )
   }
 
   const dmyMatch = clean.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/)
   if (dmyMatch) {
     return new Date(
-      Date.UTC(Number(dmyMatch[3]), Number(dmyMatch[2]) - 1, Number(dmyMatch[1]))
+      Date.UTC(
+        Number(dmyMatch[3]),
+        Number(dmyMatch[2]) - 1,
+        Number(dmyMatch[1])
+      )
     )
   }
 
@@ -101,9 +109,10 @@ export function applyFechaEmisionDisplayToExpense<
   if (rawData != null) {
     try {
       const isString = typeof rawData === 'string'
-      const obj = (
-        isString ? JSON.parse(rawData as string) : rawData
-      ) as Record<string, unknown>
+      const obj = (isString ? JSON.parse(rawData) : rawData) as Record<
+        string,
+        unknown
+      >
       fromData = formatFechaEmisionDdMmYyyy(
         obj?.fechaEmision as string | Date | undefined
       )

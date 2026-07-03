@@ -37,7 +37,7 @@ const makeService = () =>
     mockClientModel as any,
     mockUserService as any,
     mockEmailService as any,
-    mockNotificationsService as any,
+    mockNotificationsService as any
   )
 
 describe('SchedulerService', () => {
@@ -59,7 +59,9 @@ describe('SchedulerService', () => {
     })
 
     it('swallows errors thrown internally', async () => {
-      mockClientModel.find.mockReturnValue({ exec: jest.fn().mockRejectedValue(new Error('DB down')) })
+      mockClientModel.find.mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('DB down')),
+      })
       await expect(service.handleDailyNotifications()).resolves.toBeUndefined()
     })
   })
@@ -96,7 +98,10 @@ describe('SchedulerService', () => {
 
       mockClientModel.find.mockReturnValue(makeExec([client]))
       mockAdvanceModel.find.mockReturnValue(makeExec([advance]))
-      mockUserService.findEmailNameClient.mockResolvedValue({ email: 'a@b.com', name: 'Test' })
+      mockUserService.findEmailNameClient.mockResolvedValue({
+        email: 'a@b.com',
+        name: 'Test',
+      })
 
       await service.handleDailyNotifications()
       expect(mockNotificationsService.create).toHaveBeenCalled()
@@ -131,7 +136,10 @@ describe('SchedulerService', () => {
       mockClientModel.find.mockReturnValue(makeExec([client]))
       mockAdvanceModel.find.mockReturnValue(makeExec([advance]))
       mockExpenseModel.countDocuments.mockReturnValue(makeExec(0))
-      mockUserService.findEmailNameClient.mockResolvedValue({ email: 'a@b.com', name: 'Test' })
+      mockUserService.findEmailNameClient.mockResolvedValue({
+        email: 'a@b.com',
+        name: 'Test',
+      })
 
       await service.handleDailyNotifications()
       expect(mockNotificationsService.create).toHaveBeenCalled()
@@ -169,7 +177,9 @@ describe('SchedulerService', () => {
       mockAdvanceModel.find.mockReturnValue(makeExec([advance]))
 
       await service.handleDailyNotifications()
-      expect(mockEmailService.sendViaticoRecordatorioColaborador).not.toHaveBeenCalled()
+      expect(
+        mockEmailService.sendViaticoRecordatorioColaborador
+      ).not.toHaveBeenCalled()
 
       jest.useRealTimers()
     })
@@ -202,12 +212,20 @@ describe('SchedulerService', () => {
       mockClientModel.find.mockReturnValue(makeExec([client]))
       mockAdvanceModel.find.mockReturnValue(makeExec([advance]))
       mockExpenseModel.countDocuments
-        .mockReturnValueOnce(makeExec(0))  // recentExpenses = 0 → collab reminder
-        .mockReturnValueOnce(makeExec(3))  // pendingCount = 3 → coordinator summary
+        .mockReturnValueOnce(makeExec(0)) // recentExpenses = 0 → collab reminder
+        .mockReturnValueOnce(makeExec(3)) // pendingCount = 3 → coordinator summary
 
       mockUserService.findEmailNameClient
-        .mockResolvedValueOnce({ email: 'collab@test.com', name: 'Collab', clientId: 'c1' })
-        .mockResolvedValueOnce({ email: 'coord@test.com', name: 'Coord', clientId: 'c1' })
+        .mockResolvedValueOnce({
+          email: 'collab@test.com',
+          name: 'Collab',
+          clientId: 'c1',
+        })
+        .mockResolvedValueOnce({
+          email: 'coord@test.com',
+          name: 'Coord',
+          clientId: 'c1',
+        })
 
       mockUserService.isEmailEnabled.mockResolvedValue(true)
 
@@ -250,12 +268,17 @@ describe('SchedulerService', () => {
       mockClientModel.find.mockReturnValue(makeExec([client]))
       mockAdvanceModel.find.mockReturnValue(makeExec([makeLongAdvance(monday)]))
       mockExpenseModel.countDocuments.mockReturnValue(makeExec(0))
-      mockUserService.findEmailNameClient.mockResolvedValue({ email: 'a@b.com', name: 'Test' })
+      mockUserService.findEmailNameClient.mockResolvedValue({
+        email: 'a@b.com',
+        name: 'Test',
+      })
       mockUserService.isEmailEnabled.mockResolvedValue(false)
 
       await service.handleDailyNotifications()
 
-      expect(mockEmailService.sendViaticoRecordatorioColaborador).not.toHaveBeenCalled()
+      expect(
+        mockEmailService.sendViaticoRecordatorioColaborador
+      ).not.toHaveBeenCalled()
     })
 
     it('sends collaborator email when isEmailEnabled returns true', async () => {
@@ -265,14 +288,19 @@ describe('SchedulerService', () => {
       mockClientModel.find.mockReturnValue(makeExec([client]))
       mockAdvanceModel.find.mockReturnValue(makeExec([makeLongAdvance(monday)]))
       mockExpenseModel.countDocuments.mockReturnValue(makeExec(0))
-      mockUserService.findEmailNameClient.mockResolvedValue({ email: 'a@b.com', name: 'Test' })
+      mockUserService.findEmailNameClient.mockResolvedValue({
+        email: 'a@b.com',
+        name: 'Test',
+      })
       mockUserService.isEmailEnabled.mockResolvedValue(true)
 
       await service.handleDailyNotifications()
 
-      expect(mockEmailService.sendViaticoRecordatorioColaborador).toHaveBeenCalledWith(
+      expect(
+        mockEmailService.sendViaticoRecordatorioColaborador
+      ).toHaveBeenCalledWith(
         'a@b.com',
-        expect.objectContaining({ collaboratorName: 'Test' }),
+        expect.objectContaining({ collaboratorName: 'Test' })
       )
     })
 
@@ -282,11 +310,13 @@ describe('SchedulerService', () => {
 
       const coordinatorId = { toString: () => 'coord1' }
       mockClientModel.find.mockReturnValue(makeExec([client]))
-      mockAdvanceModel.find.mockReturnValue(makeExec([makeLongAdvance(monday, coordinatorId)]))
+      mockAdvanceModel.find.mockReturnValue(
+        makeExec([makeLongAdvance(monday, coordinatorId)])
+      )
       // recentExpenses > 0 so no collab reminder (avoids the collab isEmailEnabled call)
       mockExpenseModel.countDocuments
-        .mockReturnValueOnce(makeExec(5))  // recentExpenses — skip collab reminder
-        .mockReturnValueOnce(makeExec(2))  // pendingCount — trigger coordinator summary
+        .mockReturnValueOnce(makeExec(5)) // recentExpenses — skip collab reminder
+        .mockReturnValueOnce(makeExec(2)) // pendingCount — trigger coordinator summary
       mockUserService.findEmailNameClient
         .mockResolvedValueOnce({ email: 'collab@test.com', name: 'Collab' })
         .mockResolvedValueOnce({ email: 'coord@test.com', name: 'Coord' })
@@ -294,7 +324,9 @@ describe('SchedulerService', () => {
 
       await service.handleDailyNotifications()
 
-      expect(mockEmailService.sendViaticoResumenCoordinador).not.toHaveBeenCalled()
+      expect(
+        mockEmailService.sendViaticoResumenCoordinador
+      ).not.toHaveBeenCalled()
     })
 
     it('sends coordinator email when isEmailEnabled returns true for coordinator', async () => {
@@ -303,7 +335,9 @@ describe('SchedulerService', () => {
 
       const coordinatorId = { toString: () => 'coord1' }
       mockClientModel.find.mockReturnValue(makeExec([client]))
-      mockAdvanceModel.find.mockReturnValue(makeExec([makeLongAdvance(monday, coordinatorId)]))
+      mockAdvanceModel.find.mockReturnValue(
+        makeExec([makeLongAdvance(monday, coordinatorId)])
+      )
       mockExpenseModel.countDocuments
         .mockReturnValueOnce(makeExec(5))
         .mockReturnValueOnce(makeExec(2))
@@ -314,9 +348,11 @@ describe('SchedulerService', () => {
 
       await service.handleDailyNotifications()
 
-      expect(mockEmailService.sendViaticoResumenCoordinador).toHaveBeenCalledWith(
+      expect(
+        mockEmailService.sendViaticoResumenCoordinador
+      ).toHaveBeenCalledWith(
         'coord@test.com',
-        expect.objectContaining({ coordinatorName: 'Coord', pendingCount: 2 }),
+        expect.objectContaining({ coordinatorName: 'Coord', pendingCount: 2 })
       )
     })
 
@@ -336,12 +372,17 @@ describe('SchedulerService', () => {
       }
       mockClientModel.find.mockReturnValue(makeExec([client]))
       mockAdvanceModel.find.mockReturnValue(makeExec([advance]))
-      mockUserService.findEmailNameClient.mockResolvedValue({ email: 'a@b.com', name: 'Test' })
+      mockUserService.findEmailNameClient.mockResolvedValue({
+        email: 'a@b.com',
+        name: 'Test',
+      })
       mockUserService.isEmailEnabled.mockResolvedValue(false)
 
       await service.handleDailyNotifications()
 
-      expect(mockEmailService.sendViaticoRecordatorioUltimoDia).not.toHaveBeenCalled()
+      expect(
+        mockEmailService.sendViaticoRecordatorioUltimoDia
+      ).not.toHaveBeenCalled()
     })
 
     it('sends last-day email when isEmailEnabled returns true', async () => {
@@ -360,14 +401,19 @@ describe('SchedulerService', () => {
       }
       mockClientModel.find.mockReturnValue(makeExec([client]))
       mockAdvanceModel.find.mockReturnValue(makeExec([advance]))
-      mockUserService.findEmailNameClient.mockResolvedValue({ email: 'a@b.com', name: 'Test' })
+      mockUserService.findEmailNameClient.mockResolvedValue({
+        email: 'a@b.com',
+        name: 'Test',
+      })
       mockUserService.isEmailEnabled.mockResolvedValue(true)
 
       await service.handleDailyNotifications()
 
-      expect(mockEmailService.sendViaticoRecordatorioUltimoDia).toHaveBeenCalledWith(
+      expect(
+        mockEmailService.sendViaticoRecordatorioUltimoDia
+      ).toHaveBeenCalledWith(
         'a@b.com',
-        expect.objectContaining({ collaboratorName: 'Test' }),
+        expect.objectContaining({ collaboratorName: 'Test' })
       )
     })
   })

@@ -32,7 +32,12 @@ const mockUserService = {
   update: jest.fn().mockResolvedValue({ _id: userId }),
   delete: jest.fn().mockResolvedValue({ deleted: true }),
   resetPassword: jest.fn().mockResolvedValue({ message: 'ok' }),
-  bulkImportUsers: jest.fn().mockResolvedValue({ created: 2, skipped: [], errors: [] }),
+  bulkImportUsers: jest.fn().mockResolvedValue({
+    created: 2,
+    skipped: [],
+    errors: [],
+    credentials: [],
+  }),
   changeOwnPassword: jest.fn().mockResolvedValue(undefined),
 }
 
@@ -63,7 +68,11 @@ describe('UserController', () => {
 
   describe('create', () => {
     it('crea el usuario y registra auditoria', async () => {
-      const dto: any = { email: 'nuevo@test.com', name: 'Nuevo', password: 'Pass123!' }
+      const dto: any = {
+        email: 'nuevo@test.com',
+        name: 'Nuevo',
+        password: 'Pass123!',
+      }
       const req = makeReq()
       const result = await controller.create(dto, req as never)
       expect(mockUserService.create).toHaveBeenCalledWith(dto)
@@ -76,30 +85,79 @@ describe('UserController', () => {
 
   describe('findAll', () => {
     it('permite a ADMIN consultar su propio clientId', async () => {
-      const req = makeReq({ roles: [ROLES.ADMIN], clientId: clientId.toString() })
-      await controller.findAll(clientId, undefined, undefined, undefined, undefined, undefined, req as never)
+      const req = makeReq({
+        roles: [ROLES.ADMIN],
+        clientId: clientId.toString(),
+      })
+      await controller.findAll(
+        clientId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        req as never
+      )
       expect(mockUserService.findAll).toHaveBeenCalledWith(clientId)
     })
 
     it('lanza ForbiddenException si ADMIN intenta consultar otro clientId', async () => {
-      const req = makeReq({ roles: [ROLES.ADMIN], clientId: clientId.toString() })
+      const req = makeReq({
+        roles: [ROLES.ADMIN],
+        clientId: clientId.toString(),
+      })
       await expect(
-        controller.findAll(otherClientId, undefined, undefined, undefined, undefined, undefined, req as never)
+        controller.findAll(
+          otherClientId,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          req as never
+        )
       ).rejects.toThrow(ForbiddenException)
     })
 
     it('usa findAllPaginated cuando se pasan parametros de busqueda', async () => {
-      const req = makeReq({ roles: [ROLES.ADMIN], clientId: clientId.toString() })
-      await controller.findAll(clientId, '1', '20', 'juan', 'active', undefined, req as never)
+      const req = makeReq({
+        roles: [ROLES.ADMIN],
+        clientId: clientId.toString(),
+      })
+      await controller.findAll(
+        clientId,
+        '1',
+        '20',
+        'juan',
+        'active',
+        undefined,
+        req as never
+      )
       expect(mockUserService.findAllPaginated).toHaveBeenCalledWith(
         clientId,
-        expect.objectContaining({ page: 1, limit: 20, search: 'juan', status: 'active' })
+        expect.objectContaining({
+          page: 1,
+          limit: 20,
+          search: 'juan',
+          status: 'active',
+        })
       )
     })
 
     it('permite a SUPER_ADMIN consultar cualquier clientId', async () => {
-      const req = makeReq({ roles: [ROLES.SUPER_ADMIN], clientId: clientId.toString() })
-      await controller.findAll(otherClientId, undefined, undefined, undefined, undefined, undefined, req as never)
+      const req = makeReq({
+        roles: [ROLES.SUPER_ADMIN],
+        clientId: clientId.toString(),
+      })
+      await controller.findAll(
+        otherClientId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        req as never
+      )
       expect(mockUserService.findAll).toHaveBeenCalledWith(otherClientId)
     })
   })
@@ -114,21 +172,26 @@ describe('UserController', () => {
   describe('updateOwnProfile', () => {
     it('actualiza nombre y foto del propio perfil', async () => {
       const req = makeReq()
-      const body = { name: 'Nuevo Nombre', profilePic: 'https://cdn.example.com/pic.jpg' }
+      const body = {
+        name: 'Nuevo Nombre',
+        profilePic: 'https://cdn.example.com/pic.jpg',
+      }
       await controller.updateOwnProfile(body, req as never)
-      expect(mockUserService.update).toHaveBeenCalledWith(
-        userId.toString(),
-        { name: 'Nuevo Nombre', profilePic: 'https://cdn.example.com/pic.jpg' }
-      )
+      expect(mockUserService.update).toHaveBeenCalledWith(userId.toString(), {
+        name: 'Nuevo Nombre',
+        profilePic: 'https://cdn.example.com/pic.jpg',
+      })
     })
 
     it('omite nombre si esta vacio', async () => {
       const req = makeReq()
-      await controller.updateOwnProfile({ name: '  ', profilePic: 'url' }, req as never)
-      expect(mockUserService.update).toHaveBeenCalledWith(
-        userId.toString(),
-        { profilePic: 'url' }
+      await controller.updateOwnProfile(
+        { name: '  ', profilePic: 'url' },
+        req as never
       )
+      expect(mockUserService.update).toHaveBeenCalledWith(userId.toString(), {
+        profilePic: 'url',
+      })
     })
   })
 
@@ -136,18 +199,25 @@ describe('UserController', () => {
     it('actualiza el usuario por id', async () => {
       const dto: any = { name: 'Actualizado' }
       await controller.update(userId, dto)
-      expect(mockUserService.update).toHaveBeenCalledWith(userId.toString(), dto)
+      expect(mockUserService.update).toHaveBeenCalledWith(
+        userId.toString(),
+        dto
+      )
     })
   })
 
   describe('updatePermissions', () => {
     it('actualiza permisos y registra auditoria', async () => {
       const req = makeReq()
-      const dto: any = { modules: ['tesoreria'], canApproveL1: true, canApproveL2: false }
+      const dto: any = {
+        modules: ['tesoreria'],
+        canApproveL1: true,
+        canApproveL2: false,
+      }
       await controller.updatePermissions(userId, dto, req as never)
-      expect(mockUserService.update).toHaveBeenCalledWith(
-        userId.toString(), { permissions: dto }
-      )
+      expect(mockUserService.update).toHaveBeenCalledWith(userId.toString(), {
+        permissions: dto,
+      })
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'update_permissions' })
       )
@@ -165,7 +235,9 @@ describe('UserController', () => {
     it('resetea la contrasena y registra auditoria', async () => {
       const req = makeReq()
       await controller.resetPassword(userId, req as never)
-      expect(mockUserService.resetPassword).toHaveBeenCalledWith(userId.toString())
+      expect(mockUserService.resetPassword).toHaveBeenCalledWith(
+        userId.toString()
+      )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'reset_password' })
       )
@@ -184,19 +256,30 @@ describe('UserController', () => {
   describe('changeOwnPassword', () => {
     it('cambia la contrasena del usuario autenticado', async () => {
       const req = makeReq()
-      const result = await controller.changeOwnPassword({ password: 'Nueva123!' }, req as never)
-      expect(mockUserService.changeOwnPassword).toHaveBeenCalledWith(userId.toString(), 'Nueva123!')
-      expect(result).toEqual({ message: 'Contraseña actualizada correctamente' })
+      const result = await controller.changeOwnPassword(
+        { password: 'Nueva123!' },
+        req as never
+      )
+      expect(mockUserService.changeOwnPassword).toHaveBeenCalledWith(
+        userId.toString(),
+        'Nueva123!'
+      )
+      expect(result).toEqual({
+        message: 'Contraseña actualizada correctamente',
+      })
     })
   })
 
   describe('updateSignature', () => {
     it('actualiza la firma digital y registra auditoria', async () => {
       const req = makeReq()
-      await controller.updateSignature({ signature: 'base64-sig' }, req as never)
-      expect(mockUserService.update).toHaveBeenCalledWith(
-        userId.toString(), { signature: 'base64-sig' }
+      await controller.updateSignature(
+        { signature: 'base64-sig' },
+        req as never
       )
+      expect(mockUserService.update).toHaveBeenCalledWith(userId.toString(), {
+        signature: 'base64-sig',
+      })
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'update_signature' })
       )

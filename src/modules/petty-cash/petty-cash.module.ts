@@ -9,7 +9,9 @@ import { AuditLogModule } from '../audit-log/audit-log.module'
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: PettyCash.name, schema: PettyCashSchema }]),
+    MongooseModule.forFeature([
+      { name: PettyCash.name, schema: PettyCashSchema },
+    ]),
     EmailModule,
     UserModule,
     AuditLogModule,

@@ -88,7 +88,10 @@ describe('ProjectService', () => {
     })
 
     it('generates code from name when code is not provided', async () => {
-      mockProjectModel.create.mockResolvedValue({ ...mockProject, code: 'MY-PROJECT' })
+      mockProjectModel.create.mockResolvedValue({
+        ...mockProject,
+        code: 'MY-PROJECT',
+      })
       await service.create({ name: 'My Project', clientId })
       expect(mockProjectModel.create).toHaveBeenCalledWith(
         expect.objectContaining({ code: 'MY-PROJECT' })
@@ -96,7 +99,10 @@ describe('ProjectService', () => {
     })
 
     it('uses provided code when given', async () => {
-      mockProjectModel.create.mockResolvedValue({ ...mockProject, code: 'CUSTOM' })
+      mockProjectModel.create.mockResolvedValue({
+        ...mockProject,
+        code: 'CUSTOM',
+      })
       await service.create({ name: 'Any', code: 'CUSTOM', clientId })
       expect(mockProjectModel.create).toHaveBeenCalledWith(
         expect.objectContaining({ code: 'CUSTOM' })
@@ -138,7 +144,10 @@ describe('ProjectService', () => {
     it('returns paginated result when page/limit opts are provided', async () => {
       mockProjectModel.find.mockReturnValue(makeQuery([mockProject]))
       mockProjectModel.countDocuments.mockReturnValue(makeCountQuery(25))
-      const result = await service.findAll(clientId, { page: 2, limit: 10 }) as any
+      const result = (await service.findAll(clientId, {
+        page: 2,
+        limit: 10,
+      })) as any
       expect(result.data).toEqual([expectedResponse])
       expect(result.total).toBe(25)
       expect(result.page).toBe(2)
@@ -174,7 +183,9 @@ describe('ProjectService', () => {
 
     it('throws NotFoundException when project does not exist', async () => {
       mockProjectModel.findOne.mockReturnValue(makeQuery(null))
-      await expect(service.findOne(projectId, clientId)).rejects.toThrow(NotFoundException)
+      await expect(service.findOne(projectId, clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -182,13 +193,19 @@ describe('ProjectService', () => {
     it('returns updated project', async () => {
       const updated = { ...mockProject, name: 'Updated' }
       mockProjectModel.findOneAndUpdate.mockReturnValue(makeQuery(updated))
-      const result = await service.update(projectId, { name: 'Updated' }, clientId)
+      const result = await service.update(
+        projectId,
+        { name: 'Updated' },
+        clientId
+      )
       expect(result).toEqual({ ...expectedResponse, name: 'Updated' })
     })
 
     it('throws NotFoundException when project not found for update', async () => {
       mockProjectModel.findOneAndUpdate.mockReturnValue(makeQuery(null))
-      await expect(service.update(projectId, { name: 'X' }, clientId)).rejects.toThrow(NotFoundException)
+      await expect(
+        service.update(projectId, { name: 'X' }, clientId)
+      ).rejects.toThrow(NotFoundException)
     })
 
     it('checks for active expenses when deactivating', async () => {
@@ -202,7 +219,11 @@ describe('ProjectService', () => {
       mockExpenseModel.countDocuments.mockReturnValue(Promise.resolve(0))
       const updated = { ...mockProject, isActive: false }
       mockProjectModel.findOneAndUpdate.mockReturnValue(makeQuery(updated))
-      const result = await service.update(projectId, { isActive: false }, clientId)
+      const result = await service.update(
+        projectId,
+        { isActive: false },
+        clientId
+      )
       expect(result).toEqual({ ...expectedResponse, isActive: false })
     })
 
@@ -231,7 +252,9 @@ describe('ProjectService', () => {
 
     it('throws NotFoundException when project not found for delete', async () => {
       mockProjectModel.findOneAndDelete.mockReturnValue(makeQuery(null))
-      await expect(service.remove(projectId, clientId)).rejects.toThrow(NotFoundException)
+      await expect(service.remove(projectId, clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -290,7 +313,7 @@ describe('ProjectService', () => {
       mockProjectModel.create.mockResolvedValue(mockProject)
 
       const result = await service.bulkImport(
-        [{ 'Nombre Proyecto': 'Alpha', 'Código': 'ALPHA-01' }],
+        [{ 'Nombre Proyecto': 'Alpha', Código: 'ALPHA-01' }],
         clientId
       )
 
@@ -303,7 +326,7 @@ describe('ProjectService', () => {
       mockProjectModel.findOne.mockReturnValue(makeQuery(mockProject))
 
       const result = await service.bulkImport(
-        [{ 'Nombre Proyecto': 'Alpha', 'Código': 'CC-001' }],
+        [{ 'Nombre Proyecto': 'Alpha', Código: 'CC-001' }],
         clientId
       )
 
@@ -312,7 +335,7 @@ describe('ProjectService', () => {
     })
 
     it('records errors for rows without a name', async () => {
-      const result = await service.bulkImport([{ 'Código': 'X' }], clientId)
+      const result = await service.bulkImport([{ Código: 'X' }], clientId)
       expect(result.errors).toHaveLength(1)
     })
 
@@ -338,7 +361,7 @@ describe('ProjectService', () => {
       const result = await service.bulkImport(
         [
           { 'Nombre Proyecto': 'New' },
-          { 'Nombre Proyecto': 'Existing', 'Código': 'CC-001' },
+          { 'Nombre Proyecto': 'Existing', Código: 'CC-001' },
           {},
         ],
         clientId

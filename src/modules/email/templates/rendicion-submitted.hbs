@@ -15,6 +15,14 @@
     .detail-label { font-weight: bold; color: #475569; }
     .btn-container { text-align: center; margin-top: 30px; }
     .btn { display: inline-block; background-color: #0ea5e9; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; }
+    .comprobantes-title { color: #475569; font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin: 25px 0 10px; }
+    .comprobantes { width: 100%; border-collapse: collapse; }
+    .comprobantes td { padding: 12px 0; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    .comprobantes tr:last-child td { border-bottom: none; }
+    .cat-tag { display: inline-block; background-color: #eef2ff; color: #4338ca; font-size: 12px; font-weight: bold; padding: 2px 8px; border-radius: 4px; }
+    .cat-desc { color: #64748b; font-size: 13px; margin-top: 4px; }
+    .cat-amount { text-align: right; font-weight: bold; color: #dc2626; white-space: nowrap; }
+    .comprobantes-total td { border-top: 2px solid #cbd5e1; border-bottom: none; padding-top: 12px; font-weight: bold; color: #1e293b; }
     .footer { text-align: center; font-size: 12px; color: #94a3b8; padding: 20px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; }
   </style>
 </head>
@@ -32,13 +40,54 @@
         <div class="detail-item">
           <span class="detail-label">Título:</span> {{reportTitle}}
         </div>
+        {{#if isDirecta}}
+        {{#if hasDirectaDeposit}}
+        <div class="detail-item">
+          <span class="detail-label">Total depositado:</span> S/ {{depositFormatted}}
+        </div>
+        {{/if}}
+        <div class="detail-item">
+          <span class="detail-label">Total gastado:</span> S/ {{expenseTotalFormatted}}
+        </div>
+        {{#if hasDirectaDeposit}}
+        <div class="detail-item">
+          <span class="detail-label">Saldo disponible:</span> S/ {{saldoFormatted}}
+        </div>
+        {{/if}}
+        {{else}}
         <div class="detail-item">
           <span class="detail-label">Presupuesto:</span> S/ {{budgetFormatted}}
         </div>
+        {{/if}}
         <div class="detail-item">
           <span class="detail-label">Documentos adjuntos:</span> {{expenseCount}}
         </div>
       </div>
+
+      {{#if isDirecta}}
+      <div class="comprobantes-title">Comprobantes ({{expenseCount}})</div>
+      <table class="comprobantes">
+        {{#each expenseItems}}
+        <tr>
+          <td>
+            <span class="cat-tag">{{this.categoryName}}</span>
+            {{#if this.description}}<div class="cat-desc">{{this.description}}</div>{{/if}}
+          </td>
+          <td class="cat-amount">S/ {{this.totalFormatted}}</td>
+        </tr>
+        {{/each}}
+        <tr class="comprobantes-total">
+          <td>Total gastado</td>
+          <td class="cat-amount">S/ {{expenseTotalFormatted}}</td>
+        </tr>
+        {{#if hasDirectaDeposit}}
+        <tr class="comprobantes-total">
+          <td>Saldo disponible</td>
+          <td class="cat-amount">S/ {{saldoFormatted}}</td>
+        </tr>
+        {{/if}}
+      </table>
+      {{/if}}
 
       <p>Ingresa a la plataforma para revisar los comprobantes y aprobar o rechazar la rendición.</p>
 

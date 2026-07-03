@@ -11,7 +11,7 @@ export class AuthService {
   constructor(
     private userService: UserService,
     private jwtService: JwtService,
-    private clientService: ClientService,
+    private clientService: ClientService
   ) {}
 
   async register(registerDto: RegisterDto): Promise<any> {
@@ -39,19 +39,23 @@ export class AuthService {
 
   async login(email: string, password: string) {
     const allUsers = await this.userService.findAllByEmail(email)
-    if (!allUsers.length) throw new BadRequestException('Credenciales inválidas')
+    if (!allUsers.length)
+      throw new BadRequestException('Credenciales inválidas')
 
     // Validate password against each user record (same email, different companies)
     const validUsers: IUserResponse[] = []
     for (const user of allUsers) {
-      if (user.password && await bcrypt.compare(password, user.password as string)) {
+      if (user.password && (await bcrypt.compare(password, user.password))) {
         validUsers.push(user)
       }
     }
-    if (!validUsers.length) throw new BadRequestException('Credenciales inválidas')
+    if (!validUsers.length)
+      throw new BadRequestException('Credenciales inválidas')
 
     // Contabilidad: global role, issues hub token + returns all companies
-    const contabilidadUser = validUsers.find(u => (u.role as any)?.name === ROLES.CONTABILIDAD)
+    const contabilidadUser = validUsers.find(
+      u => (u.role as any)?.name === ROLES.CONTABILIDAD
+    )
     if (contabilidadUser) {
       if (contabilidadUser.isActive === false) return { isActive: false }
       const allClients = await this.clientService.findAll()
@@ -60,7 +64,12 @@ export class AuthService {
         userId: (contabilidadUser._id as any).toString(),
         roles: [(contabilidadUser.role as any)?.name],
         clientId: '',
-        permissions: contabilidadUser.permissions || { modules: [], canApproveL1: false, canApproveL2: false, categoryIds: [] },
+        permissions: contabilidadUser.permissions || {
+          modules: [],
+          canApproveL1: false,
+          canApproveL2: false,
+          categoryIds: [],
+        },
         mustChangePassword: !!contabilidadUser.mustChangePassword,
         isHubToken: true,
       }
@@ -81,7 +90,9 @@ export class AuthService {
     }
 
     // Administrador: hub flow — can manage all companies
-    const adminUser = validUsers.find(u => (u.role as any)?.name === ROLES.ADMIN)
+    const adminUser = validUsers.find(
+      u => (u.role as any)?.name === ROLES.ADMIN
+    )
     if (adminUser) {
       if (adminUser.isActive === false) return { isActive: false }
       const allClients = await this.clientService.findAll()
@@ -90,7 +101,12 @@ export class AuthService {
         userId: (adminUser._id as any).toString(),
         roles: [ROLES.ADMIN],
         clientId: '',
-        permissions: adminUser.permissions || { modules: [], canApproveL1: false, canApproveL2: false, categoryIds: [] },
+        permissions: adminUser.permissions || {
+          modules: [],
+          canApproveL1: false,
+          canApproveL2: false,
+          categoryIds: [],
+        },
         mustChangePassword: !!adminUser.mustChangePassword,
         isHubToken: true,
       }
@@ -128,7 +144,10 @@ export class AuthService {
         .filter(u => u.client)
         .map(u => ({
           clientId: (u.client as any)?._id?.toString() || '',
-          name: (u.client as any)?.comercialName || (u.client as any)?.businessName || 'Empresa',
+          name:
+            (u.client as any)?.comercialName ||
+            (u.client as any)?.businessName ||
+            'Empresa',
           logo: (u.client as any)?.logo || null,
         })),
     }
@@ -153,15 +172,19 @@ export class AuthService {
       if (!payload.isHubToken) throw new BadRequestException('Token inválido')
       const user = await this.userService.findOne(payload.userId)
       if (!user?._id) throw new BadRequestException('Usuario no encontrado')
-      return this.issueToken(user as IUserResponse, clientId)
+      return this.issueToken(user, clientId)
     }
 
     // Regular multi-company: email + password + clientId
-    if (!email || !password) throw new BadRequestException('Credenciales requeridas')
+    if (!email || !password)
+      throw new BadRequestException('Credenciales requeridas')
     const allUsers = await this.userService.findAllByEmail(email)
-    const user = allUsers.find(u => (u.client as any)?._id?.toString() === clientId)
-    if (!user) throw new BadRequestException('Usuario no encontrado para esta empresa')
-    if (!user.password || !(await bcrypt.compare(password, user.password as string))) {
+    const user = allUsers.find(
+      u => (u.client as any)?._id?.toString() === clientId
+    )
+    if (!user)
+      throw new BadRequestException('Usuario no encontrado para esta empresa')
+    if (!user.password || !(await bcrypt.compare(password, user.password))) {
       throw new BadRequestException('Credenciales inválidas')
     }
     return this.issueToken(user)
@@ -181,13 +204,18 @@ export class AuthService {
     const clientId =
       overrideClientId !== undefined
         ? overrideClientId
-        : ((user.client as any)?._id?.toString() || '')
+        : (user.client as any)?._id?.toString() || ''
     const payload = {
       email: user.email,
       userId: (user._id as any).toString(),
       roles: [(user.role as any)?.name],
       clientId,
-      permissions: user.permissions || { modules: [], canApproveL1: false, canApproveL2: false, categoryIds: [] },
+      permissions: user.permissions || {
+        modules: [],
+        canApproveL1: false,
+        canApproveL2: false,
+        categoryIds: [],
+      },
       mustChangePassword,
     }
     const { password: _, ...userData } = user as any

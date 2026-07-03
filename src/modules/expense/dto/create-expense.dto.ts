@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsArray,
   IsNumber,
+  IsObject,
 } from 'class-validator'
 import {
   ExpenseStatus,
@@ -107,4 +108,38 @@ export class CreateExpenseDto {
   @IsString()
   @IsOptional()
   rucEmisor?: string
+
+  // --- Desglose contable (asientos Contanet) ---
+  @IsNumber()
+  @IsOptional()
+  baseAfecta?: number
+
+  @IsNumber()
+  @IsOptional()
+  igv?: number
+
+  @IsNumber()
+  @IsOptional()
+  tasaIgv?: number
+
+  @IsNumber()
+  @IsOptional()
+  inafecto?: number
+
+  @IsArray()
+  @IsOptional()
+  detalleAnalitico?: {
+    proyectId?: string
+    condicion: 'afecto' | 'inafecto'
+    monto: number
+  }[]
+
+  @IsBoolean()
+  @IsOptional()
+  desgloseRevisado?: boolean
+
+  /** Información completa del comprobante extraída por OCR/IA (objeto libre). */
+  @IsObject()
+  @IsOptional()
+  comprobanteDetallado?: Record<string, any>
 }

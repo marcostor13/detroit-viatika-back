@@ -24,6 +24,11 @@ async function bootstrap() {
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
+  // Configurar timeouts antes de empezar a escuchar conexiones.
+  const server = app.getHttpServer()
+  server.setTimeout(300000)
+  server.keepAliveTimeout = 300000
+  server.headersTimeout = 301000
   await app.listen(process.env.PORT ?? 3000)
 }
 bootstrap()

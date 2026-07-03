@@ -23,12 +23,23 @@ import { PettyCashModule } from './modules/petty-cash/petty-cash.module'
 import { CategoryGroupModule } from './modules/category-group/category-group.module'
 import { ScheduleModule } from '@nestjs/schedule'
 import { SchedulerModule } from './modules/scheduler/scheduler.module'
+import { DashboardModule } from './modules/dashboard/dashboard.module'
+import { LineaNegocioModule } from './modules/linea-negocio/linea-negocio.module'
+import { CajaChicaReportModule } from './modules/caja-chica-report/caja-chica-report.module'
+import { AccountingConfigModule } from './modules/accounting-config/accounting-config.module'
+import { AccountingEntriesModule } from './modules/accounting-entries/accounting-entries.module'
+import { ExchangeRateModule } from './modules/exchange-rate/exchange-rate.module'
+import { SaldoModule } from './modules/saldo/saldo.module'
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    MongooseModule.forRoot(process.env.MONGO_URI as string),
+    MongooseModule.forRoot(process.env.MONGO_URI as string, {
+      serverSelectionTimeoutMS: 8000,
+      connectTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    }),
     AuthModule,
     UserModule,
     RoleModule,
@@ -49,6 +60,13 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module'
     CategoryGroupModule,
     ScheduleModule.forRoot(),
     SchedulerModule,
+    DashboardModule,
+    LineaNegocioModule,
+    CajaChicaReportModule,
+    AccountingConfigModule,
+    AccountingEntriesModule,
+    ExchangeRateModule,
+    SaldoModule,
   ],
   controllers: [AppController],
   providers: [AppService],

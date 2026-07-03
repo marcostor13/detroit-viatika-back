@@ -25,6 +25,7 @@ import { ROLES } from '../auth/enums/roles.enum'
 import { Roles } from '../auth/decorators/roles.decorador'
 import { AuthGuard } from '@nestjs/passport'
 import { AuditLogService } from '../audit-log/audit-log.service'
+import { CategoryGroupService } from '../category-group/category-group.service'
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN)
@@ -32,14 +33,38 @@ import { AuditLogService } from '../audit-log/audit-log.service'
 export class CategoryController {
   constructor(
     private readonly categoryService: CategoryService,
-    private readonly auditLogService: AuditLogService
+    private readonly auditLogService: AuditLogService,
+    private readonly categoryGroupService: CategoryGroupService
   ) {}
+
+  /**
+   * Categorías permitidas: las categorías asignadas directamente al usuario.
+   * El perfil de categoría es solo una referencia (agrupa/deriva proyectos), no se asigna.
+   * Sin categorías asignadas => no se filtra (compatibilidad).
+   */
+  private async resolveAllowedCategoryIds(
+    req: any,
+    _clientId: string
+  ): Promise<string[] | undefined> {
+    const ids: string[] = req.user?.permissions?.categoryIds ?? []
+    return ids.length > 0 ? ids.map(String) : undefined
+  }
 
   @Post()
   @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  async create(@Body() createCategoryDto: CreateCategoryDto, @Request() req: any) {
+  async create(
+    @Body() createCategoryDto: CreateCategoryDto,
+    @Request() req: any
+  ) {
     const result = await this.categoryService.create(createCategoryDto)
+    if (createCategoryDto.perfilIds !== undefined) {
+      await this.categoryGroupService.setCategoryMembership(
+        (result as any)?._id?.toString(),
+        createCategoryDto.perfilIds,
+        createCategoryDto.clientId
+      )
+    }
     this.auditLogService.log({
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email,
@@ -63,11 +88,17 @@ export class CategoryController {
         const allowed = [
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'application/vnd.ms-excel',
+          'application/octet-stream', // algunos navegadores envían .xlsx así
         ]
-        if (allowed.includes(file.mimetype)) {
+        const nombre = (file.originalname || '').toLowerCase()
+        const okExt = nombre.endsWith('.xlsx') || nombre.endsWith('.xls')
+        if (allowed.includes(file.mimetype) || okExt) {
           cb(null, true)
         } else {
-          cb(new BadRequestException('Solo se permiten archivos Excel (.xlsx)'), false)
+          cb(
+            new BadRequestException('Solo se permiten archivos Excel (.xlsx)'),
+            false
+          )
         }
       },
     })
@@ -83,17 +114,28 @@ export class CategoryController {
     const workbook = XLSX.read(file.buffer, { type: 'buffer' })
     const sheetName = workbook.SheetNames[0]
     const sheet = workbook.Sheets[sheetName]
-    const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' })
+    const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
+      defval: '',
+    })
 
-    const mapped = rows.map((row) => ({
+    const mapped = rows.map(row => ({
       name: String(row['Nombre*'] || row['Nombre'] || '').trim(),
       cuenta: String(row['Cuenta'] || '').trim() || undefined,
-      description: String(row['Descripción'] || row['Descripcion'] || '').trim() || undefined,
+      description:
+        String(row['Descripción'] || row['Descripcion'] || '').trim() ||
+        undefined,
       observaciones: String(row['Observaciones'] || '').trim() || undefined,
       limit:
         row['Límite'] != null && row['Límite'] !== ''
           ? parseFloat(String(row['Límite']))
           : null,
+      perfil:
+        String(
+          row['Perfil de Categoría'] ||
+            row['Perfil de Categoria'] ||
+            row['Perfil'] ||
+            ''
+        ).trim() || undefined,
     }))
 
     const result = await this.categoryService.bulkCreate(mapped, clientId)
@@ -118,17 +160,18 @@ export class CategoryController {
 
   @Get(':clientId/flat')
   @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
-  findAllFlat(@Param('clientId') clientId: string, @Request() req: any) {
-    const categoryIds: string[] | undefined = req.user?.permissions?.categoryIds
-    const filter = categoryIds && categoryIds.length > 0 ? categoryIds : undefined
+  async findAllFlat(@Param('clientId') clientId: string, @Request() req: any) {
+    const filter = await this.resolveAllowedCategoryIds(req, clientId)
     return this.categoryService.findAllFlat(clientId, filter)
   }
 
   @Get('flat/:clientId')
   @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
-  findAllFlatLegacy(@Param('clientId') clientId: string, @Request() req: any) {
-    const categoryIds: string[] | undefined = req.user?.permissions?.categoryIds
-    const filter = categoryIds && categoryIds.length > 0 ? categoryIds : undefined
+  async findAllFlatLegacy(
+    @Param('clientId') clientId: string,
+    @Request() req: any
+  ) {
+    const filter = await this.resolveAllowedCategoryIds(req, clientId)
     return this.categoryService.findAllFlat(clientId, filter)
   }
 
@@ -170,8 +213,21 @@ export class CategoryController {
     @Body() updateCategoryDto: UpdateCategoryDto,
     @Request() req: any
   ) {
-    const before = await this.categoryService.findOne(id, clientId).catch(() => null)
-    const result = await this.categoryService.update(id, updateCategoryDto, clientId)
+    const before = await this.categoryService
+      .findOne(id, clientId)
+      .catch(() => null)
+    const result = await this.categoryService.update(
+      id,
+      updateCategoryDto,
+      clientId
+    )
+    if (updateCategoryDto.perfilIds !== undefined) {
+      await this.categoryGroupService.setCategoryMembership(
+        id,
+        updateCategoryDto.perfilIds,
+        clientId
+      )
+    }
     this.auditLogService.log({
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email,

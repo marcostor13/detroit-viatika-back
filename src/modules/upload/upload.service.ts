@@ -4,6 +4,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { ConfigService } from '@nestjs/config'
 
 @Injectable()
@@ -96,6 +97,26 @@ export class UploadService {
     } catch (error) {
       throw new Error(`Error al subir el archivo a S3: ${error.message}`)
     }
+  }
+
+  async getPresignedUploadUrl(
+    filename: string,
+    contentType: string,
+  ): Promise<{ presignedUrl: string; fileUrl: string }> {
+    const bucketName = this.getBucketName()
+    const key = `${Date.now()}-${filename}`
+
+    const command = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+      ContentType: contentType,
+    })
+
+    const presignedUrl = await getSignedUrl(this.s3Client, command, {
+      expiresIn: 300,
+    })
+
+    return { presignedUrl, fileUrl: this.buildPublicUrl(bucketName, key) }
   }
 
   async deleteFile(key: string) {

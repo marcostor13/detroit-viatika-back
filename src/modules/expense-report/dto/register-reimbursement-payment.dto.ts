@@ -47,4 +47,25 @@ export class RegisterReimbursementPaymentDto {
   @IsOptional()
   @IsNumber()
   paymentReceiptSizeBytes?: number
+
+  // Datos extraídos del comprobante por OCR/visión (informativos)
+  @IsOptional()
+  @IsNumber()
+  scannedAmount?: number
+
+  @IsString()
+  @IsOptional()
+  operationNumber?: string
+
+  @IsString()
+  @IsOptional()
+  operationDate?: string
+
+  @IsString()
+  @IsOptional()
+  operationTime?: string
+
+  @IsString()
+  @IsOptional()
+  titular?: string
 }

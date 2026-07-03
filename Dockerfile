@@ -1,16 +1,18 @@
-# Stage 1: Build
-FROM node:20-slim AS build
+# Build stage
+FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package*.json .
-RUN npm install --force
+COPY package*.json ./
+RUN npm install
 COPY . .
 RUN npm run build
 
-# Stage 2: Production
-FROM node:20-slim
+# Production stage
+FROM node:20-alpine AS production
 WORKDIR /app
-COPY package*.json .
-RUN npm install --omit=dev --force
-COPY --from=build /app/dist ./dist
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/docs ./docs
 EXPOSE 3016
-CMD ["node", "dist/main.js"]
+CMD ["node", "--max-old-space-size=1400", "--expose-gc", "dist/main"]

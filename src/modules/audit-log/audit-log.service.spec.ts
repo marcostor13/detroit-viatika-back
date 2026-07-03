@@ -57,7 +57,12 @@ describe('AuditLogService', () => {
     it('no lanza excepcion si el modelo falla', async () => {
       mockModel.create.mockRejectedValue(new Error('DB error'))
       await expect(
-        service.log({ userId, userName: 'Admin', action: 'create_user', module: 'usuarios' })
+        service.log({
+          userId,
+          userName: 'Admin',
+          action: 'create_user',
+          module: 'usuarios',
+        })
       ).resolves.toBeUndefined()
     })
   })
@@ -70,8 +75,16 @@ describe('AuditLogService', () => {
 
       const result = await service.findAll(clientId, { page: 1, limit: 20 })
 
-      expect(result).toEqual({ data: logs, total: 1, page: 1, pages: 1, limit: 20 })
-      expect(mockModel.find).toHaveBeenCalledWith(expect.objectContaining({ clientId }))
+      expect(result).toEqual({
+        data: logs,
+        total: 1,
+        page: 1,
+        pages: 1,
+        limit: 20,
+      })
+      expect(mockModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ clientId })
+      )
     })
 
     it('aplica filtro de modulo', async () => {

@@ -44,6 +44,14 @@ export class UpdatePermissionsDto {
   @IsArray()
   @IsOptional()
   categoryIds?: string[]
+
+  @IsString()
+  @IsOptional()
+  categoryProfileId?: string
+
+  @IsArray()
+  @IsOptional()
+  categoryProfileIds?: string[]
 }
 
 export class UpdateUserDto {
@@ -78,6 +86,10 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   employeeCode?: string
+
+  @IsString()
+  @IsOptional()
+  subcuenta14?: string
 
   @IsString()
   @IsOptional()

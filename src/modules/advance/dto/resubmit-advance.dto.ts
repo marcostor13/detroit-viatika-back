@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsNumber,
   Min,
+  Max,
   IsMongoId,
   IsArray,
   ValidateNested,
@@ -38,6 +39,18 @@ export class ResubmitAdvanceDto {
   @ValidateNested({ each: true })
   @Type(() => CreateAdvanceLineDto)
   lines: CreateAdvanceLineDto[]
+
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  @IsOptional()
+  lat?: number
+
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  @IsOptional()
+  lng?: number
 
   @IsString()
   @IsOptional()

@@ -3,8 +3,7 @@
 /node_modules
 /build
 /temp
-package-lock.json
-bun.lock
+
 
 # Logs
 logs

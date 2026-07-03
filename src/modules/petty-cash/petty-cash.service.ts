@@ -16,13 +16,19 @@ export class PettyCashService {
     @InjectModel(PettyCash.name)
     private readonly model: Model<PettyCashDocument>,
     private readonly emailService: EmailService,
-    private readonly userService: UserService,
+    private readonly userService: UserService
   ) {}
 
-  private async generateCode(clientId: string, period: string): Promise<string> {
+  private async generateCode(
+    clientId: string,
+    period: string
+  ): Promise<string> {
     const prefix = `CCH-${period}-`
     const last = await this.model
-      .findOne({ clientId: new Types.ObjectId(clientId), code: { $regex: `^${prefix}` } })
+      .findOne({
+        clientId: new Types.ObjectId(clientId),
+        code: { $regex: `^${prefix}` },
+      })
       .sort({ code: -1 })
       .lean()
       .exec()
@@ -34,18 +40,25 @@ export class PettyCashService {
     return `${prefix}${String(seq).padStart(3, '0')}`
   }
 
-  async create(dto: CreatePettyCashDto, createdBy: string): Promise<PettyCashDocument> {
+  async create(
+    dto: CreatePettyCashDto,
+    createdBy: string
+  ): Promise<PettyCashDocument> {
     if (dto.fundAmount <= 0) {
       throw new BadRequestException('El monto debe ser mayor a S/ 0')
     }
-    const existing = await this.model.findOne({
-      responsibleId: new Types.ObjectId(dto.responsibleId),
-      clientId: new Types.ObjectId(dto.clientId),
-      period: dto.period,
-      status: { $in: ['pending_funding', 'active'] },
-    }).exec()
+    const existing = await this.model
+      .findOne({
+        responsibleId: new Types.ObjectId(dto.responsibleId),
+        clientId: new Types.ObjectId(dto.clientId),
+        period: dto.period,
+        status: { $in: ['pending_funding', 'active'] },
+      })
+      .exec()
     if (existing) {
-      throw new BadRequestException('El responsable ya tiene una caja chica activa para este período')
+      throw new BadRequestException(
+        'El responsable ya tiene una caja chica activa para este período'
+      )
     }
     const code = await this.generateCode(dto.clientId, dto.period)
     const doc = await this.model.create({
@@ -61,15 +74,22 @@ export class PettyCashService {
       status: 'pending_funding',
       expenses: [],
     })
-    const responsible = await this.userService.findEmailNameClient(dto.responsibleId)
-    if (responsible?.email && await this.userService.isEmailEnabled(dto.responsibleId)) {
-      this.emailService.sendCajaChicaCreada(responsible.email, {
-        clientId: dto.clientId,
-        recipientName: responsible.name,
-        code,
-        period: dto.period,
-        fundAmount: dto.fundAmount,
-      }).catch(() => {})
+    const responsible = await this.userService.findEmailNameClient(
+      dto.responsibleId
+    )
+    if (
+      responsible?.email &&
+      (await this.userService.isEmailEnabled(dto.responsibleId))
+    ) {
+      this.emailService
+        .sendCajaChicaCreada(responsible.email, {
+          clientId: dto.clientId,
+          recipientName: responsible.name,
+          code,
+          period: dto.period,
+          fundAmount: dto.fundAmount,
+        })
+        .catch(() => {})
     }
     return doc
   }
@@ -87,7 +107,9 @@ export class PettyCashService {
     const doc = await this.model.findById(id).exec()
     if (!doc) throw new NotFoundException(`Caja chica ${id} no encontrada`)
     if (doc.status !== 'pending_funding') {
-      throw new BadRequestException('Solo se puede fondear una caja en estado pending_funding')
+      throw new BadRequestException(
+        'Solo se puede fondear una caja en estado pending_funding'
+      )
     }
     if (funding.amount !== doc.fundAmount) {
       throw new BadRequestException(
@@ -113,14 +135,21 @@ export class PettyCashService {
         { new: true }
       )
       .exec()
-    const responsible = await this.userService.findEmailNameClient(doc.responsibleId.toString())
-    if (responsible?.email && await this.userService.isEmailEnabled(doc.responsibleId.toString())) {
-      this.emailService.sendCajaChicaFondeada(responsible.email, {
-        clientId: doc.clientId?.toString(),
-        recipientName: responsible.name,
-        code: doc.code,
-        fundAmount: doc.fundAmount,
-      }).catch(() => {})
+    const responsible = await this.userService.findEmailNameClient(
+      doc.responsibleId.toString()
+    )
+    if (
+      responsible?.email &&
+      (await this.userService.isEmailEnabled(doc.responsibleId.toString()))
+    ) {
+      this.emailService
+        .sendCajaChicaFondeada(responsible.email, {
+          clientId: doc.clientId?.toString(),
+          recipientName: responsible.name,
+          code: doc.code,
+          fundAmount: doc.fundAmount,
+        })
+        .catch(() => {})
     }
     return updated!
   }
@@ -134,7 +163,9 @@ export class PettyCashService {
     const doc = await this.model.findById(id).exec()
     if (!doc) throw new NotFoundException(`Caja chica ${id} no encontrada`)
     if (doc.status !== 'active') {
-      throw new BadRequestException('Solo se pueden registrar gastos en una caja activa')
+      throw new BadRequestException(
+        'Solo se pueden registrar gastos en una caja activa'
+      )
     }
     const errors = this.validateExpenseRules(doc, amount, category)
     if (errors.length > 0) {
@@ -168,26 +199,37 @@ export class PettyCashService {
     const errors: string[] = []
     const available = doc.fundAmount - doc.spentAmount
     if (amount > available) {
-      errors.push(`Saldo insuficiente. Disponible: S/ ${available.toFixed(2)}, solicitado: S/ ${amount}`)
+      errors.push(
+        `Saldo insuficiente. Disponible: S/ ${available.toFixed(2)}, solicitado: S/ ${amount}`
+      )
     }
     if (doc.maxPerExpense && amount > doc.maxPerExpense) {
-      errors.push(`El gasto (S/ ${amount}) supera el tope por comprobante (S/ ${doc.maxPerExpense})`)
+      errors.push(
+        `El gasto (S/ ${amount}) supera el tope por comprobante (S/ ${doc.maxPerExpense})`
+      )
     }
     if (doc.allowedCategories && doc.allowedCategories.length > 0 && category) {
       if (!doc.allowedCategories.includes(category)) {
-        errors.push(`La categoría "${category}" no está permitida en esta caja chica`)
+        errors.push(
+          `La categoría "${category}" no está permitida en esta caja chica`
+        )
       }
     }
     if (doc.maxPerDay) {
       const today = new Date().toISOString().slice(0, 10)
       const todayTotal = doc.expenses
         .filter(e => {
-          const d = e.registeredAt instanceof Date ? e.registeredAt : new Date(e.registeredAt)
+          const d =
+            e.registeredAt instanceof Date
+              ? e.registeredAt
+              : new Date(e.registeredAt)
           return d.toISOString().slice(0, 10) === today
         })
         .reduce((sum, e) => sum + e.amount, 0)
       if (todayTotal + amount > doc.maxPerDay) {
-        errors.push(`Tope diario superado. Ya se gastaron S/ ${todayTotal.toFixed(2)} hoy (máximo S/ ${doc.maxPerDay})`)
+        errors.push(
+          `Tope diario superado. Ya se gastaron S/ ${todayTotal.toFixed(2)} hoy (máximo S/ ${doc.maxPerDay})`
+        )
       }
     }
     return errors
@@ -226,7 +268,10 @@ export class PettyCashService {
       .exec()
   }
 
-  async findByResponsible(responsibleId: string, clientId: string): Promise<PettyCashDocument[]> {
+  async findByResponsible(
+    responsibleId: string,
+    clientId: string
+  ): Promise<PettyCashDocument[]> {
     return this.model
       .find({
         responsibleId: new Types.ObjectId(responsibleId),

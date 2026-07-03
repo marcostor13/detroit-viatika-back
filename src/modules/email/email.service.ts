@@ -12,16 +12,24 @@ const CLIENT_LOGO_CACHE_TTL_MS = 60_000
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name)
-  private readonly clientLogoCache = new Map<string, { url: string; expiresAt: number }>()
+  private readonly clientLogoCache = new Map<
+    string,
+    { url: string; expiresAt: number }
+  >()
 
   constructor(
     private readonly mailerService: MailerService,
-    @InjectModel(Client.name) private readonly clientModel: Model<ClientDocument>
+    @InjectModel(Client.name)
+    private readonly clientModel: Model<ClientDocument>
   ) {}
 
-  private async send(options: Parameters<MailerService['sendMail']>[0]): Promise<void> {
+  private async send(
+    options: Parameters<MailerService['sendMail']>[0]
+  ): Promise<void> {
     if (process.env.EMAILS_ENABLED === 'false') {
-      this.logger.debug(`[EMAILS DISABLED] Omitiendo envío a ${options.to} — ${options.subject}`)
+      this.logger.debug(
+        `[EMAILS DISABLED] Omitiendo envío a ${options.to} — ${options.subject}`
+      )
       return
     }
     // Pase final: normaliza cualquier `yyyy-mm-dd` que aún pueda haberse colado
@@ -107,7 +115,9 @@ export class EmailService {
    *  - Si no, recurre al logo global (`APP_LOGO_URL` / `/logo.svg`).
    * Cache en memoria por 60s para no golpear la BD por cada correo.
    */
-  async resolveLogoUrl(clientId?: string | Types.ObjectId | null): Promise<string> {
+  async resolveLogoUrl(
+    clientId?: string | Types.ObjectId | null
+  ): Promise<string> {
     if (!clientId) return this.getLogoUrl()
     const key = String(clientId)
     if (!Types.ObjectId.isValid(key)) return this.getLogoUrl()
@@ -135,7 +145,10 @@ export class EmailService {
       )
     }
 
-    this.clientLogoCache.set(key, { url: resolved, expiresAt: now + CLIENT_LOGO_CACHE_TTL_MS })
+    this.clientLogoCache.set(key, {
+      url: resolved,
+      expiresAt: now + CLIENT_LOGO_CACHE_TTL_MS,
+    })
     return resolved || this.getLogoUrl()
   }
 
@@ -814,6 +827,10 @@ export class EmailService {
       reportTitle: string
       budgetFormatted: string
       expenseCount: number
+      hasDirectaDeposit?: boolean
+      depositFormatted?: string
+      expenseTotalFormatted?: string
+      saldoFormatted?: string
       platformUrl?: string
     }
   ) {
@@ -832,9 +849,14 @@ export class EmailService {
           platformUrl: this.resolvePlatformHref(platformUrl),
         },
       })
-      this.logger.debug(`Confirmación de rendición enviada al colaborador ${email}`)
+      this.logger.debug(
+        `Confirmación de rendición enviada al colaborador ${email}`
+      )
     } catch (error) {
-      this.logger.error(`Error confirmación rendición colaborador ${email}:`, error)
+      this.logger.error(
+        `Error confirmación rendición colaborador ${email}:`,
+        error
+      )
     }
   }
 
@@ -866,9 +888,14 @@ export class EmailService {
           platformUrl: this.resolvePlatformHref(platformUrl),
         },
       })
-      this.logger.debug(`Correo rendición pendiente contabilidad enviado a ${email}`)
+      this.logger.debug(
+        `Correo rendición pendiente contabilidad enviado a ${email}`
+      )
     } catch (error) {
-      this.logger.error(`Error rendición pendiente contabilidad a ${email}:`, error)
+      this.logger.error(
+        `Error rendición pendiente contabilidad a ${email}:`,
+        error
+      )
     }
   }
 
@@ -899,9 +926,96 @@ export class EmailService {
           platformUrl: this.resolvePlatformHref(platformUrl),
         },
       })
-      this.logger.debug(`Correo rendición aprobada al coordinador enviado a ${email}`)
+      this.logger.debug(
+        `Correo rendición aprobada al coordinador enviado a ${email}`
+      )
     } catch (error) {
-      this.logger.error(`Error rendición aprobada coordinador a ${email}:`, error)
+      this.logger.error(
+        `Error rendición aprobada coordinador a ${email}:`,
+        error
+      )
+    }
+  }
+
+  /** Notifica a Tesorería que una rendición fue aprobada y requiere pago al colaborador. */
+  async sendRendicionAprobadaTesoreria(
+    email: string,
+    data: {
+      clientId?: string
+      reportTitle: string
+      collaboratorName: string
+      collaboratorDni?: string
+      budgetFormatted: string
+      bankName?: string
+      accountType?: string
+      accountNumber?: string
+      cci?: string
+      hasBankAccount: boolean
+      platformUrl?: string
+    }
+  ) {
+    console.log(`[EMAIL] sendRendicionAprobadaTesoreria -> ${email}`)
+    try {
+      const { platformUrl, ...rest } = data
+      const reportTitle = this.normalizeIsoDatesInText(data.reportTitle)
+      await this.send({
+        to: email,
+        subject: `Rendicion aprobada - Pendiente de pago — ${reportTitle}`,
+        template: './rendicion-aprobada-tesoreria',
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...rest,
+          reportTitle,
+          platformUrl: this.resolvePlatformHref(platformUrl),
+        },
+      })
+      console.log(`[EMAIL] sendRendicionAprobadaTesoreria ENVIADO a ${email}`)
+    } catch (error) {
+      console.error(`[EMAIL] sendRendicionAprobadaTesoreria ERROR a ${email}:`, error)
+      this.logger.error(
+        `Error rendicion aprobada tesoreria a ${email}:`,
+        error
+      )
+    }
+  }
+
+  /** Notifica a Tesorería que un viático ≤ S/500 fue aprobado por el coordinador y requiere desembolso. */
+  async sendViaticoAprobadoTesoreria(
+    email: string,
+    data: {
+      clientId?: string
+      advanceDescription: string
+      collaboratorName: string
+      collaboratorDni?: string
+      budgetFormatted: string
+      projectLabel?: string
+      bankName?: string
+      accountType?: string
+      accountNumber?: string
+      cci?: string
+      hasBankAccount: boolean
+      platformUrl?: string
+    }
+  ) {
+    console.log(`[EMAIL] sendViaticoAprobadoTesoreria -> ${email}`)
+    try {
+      const { platformUrl, ...rest } = data
+      await this.send({
+        to: email,
+        subject: `Viatico aprobado - Pendiente de pago — ${data.advanceDescription}`,
+        template: './viatico-aprobado-tesoreria',
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...rest,
+          platformUrl: this.resolvePlatformHref(platformUrl),
+        },
+      })
+      console.log(`[EMAIL] sendViaticoAprobadoTesoreria ENVIADO a ${email}`)
+    } catch (error) {
+      console.error(`[EMAIL] sendViaticoAprobadoTesoreria ERROR a ${email}:`, error)
+      this.logger.error(`Error viatico aprobado tesoreria a ${email}:`, error)
     }
   }
 
@@ -932,9 +1046,14 @@ export class EmailService {
           platformUrl: this.resolvePlatformHref(platformUrl),
         },
       })
-      this.logger.debug(`Correo rendición rechazada (colaborador) enviado a ${email}`)
+      this.logger.debug(
+        `Correo rendición rechazada (colaborador) enviado a ${email}`
+      )
     } catch (error) {
-      this.logger.error(`Error rendición rechazada (colaborador) a ${email}:`, error)
+      this.logger.error(
+        `Error rendición rechazada (colaborador) a ${email}:`,
+        error
+      )
     }
   }
 
@@ -965,9 +1084,14 @@ export class EmailService {
           platformUrl: this.resolvePlatformHref(platformUrl),
         },
       })
-      this.logger.debug(`Correo rendición rechazada (coordinador) enviado a ${email}`)
+      this.logger.debug(
+        `Correo rendición rechazada (coordinador) enviado a ${email}`
+      )
     } catch (error) {
-      this.logger.error(`Error rendición rechazada (coordinador) a ${email}:`, error)
+      this.logger.error(
+        `Error rendición rechazada (coordinador) a ${email}:`,
+        error
+      )
     }
   }
 
@@ -1013,6 +1137,16 @@ export class EmailService {
       reportTitle: string
       budgetFormatted: string
       expenseCount: number
+      expenseTotalFormatted?: string
+      expenseItems?: Array<{
+        categoryName: string
+        description: string
+        totalFormatted: string
+      }>
+      isDirecta?: boolean
+      hasDirectaDeposit?: boolean
+      depositFormatted?: string
+      saldoFormatted?: string
       platformUrl?: string
     }
   ) {
@@ -1138,7 +1272,9 @@ export class EmailService {
           platformUrl: this.resolvePlatformHref(platformUrl),
         },
       })
-      this.logger.debug(`Correo aprobación viático (contabilidad) enviado a ${email}`)
+      this.logger.debug(
+        `Correo aprobación viático (contabilidad) enviado a ${email}`
+      )
     } catch (error) {
       this.logger.error(`Error aprobación viático a ${email}:`, error)
       throw error
@@ -1217,9 +1353,14 @@ export class EmailService {
           platformUrl: this.resolvePlatformHref(platformUrl),
         },
       })
-      this.logger.debug(`Confirmación de solicitud de viáticos enviada al colaborador ${email}`)
+      this.logger.debug(
+        `Confirmación de solicitud de viáticos enviada al colaborador ${email}`
+      )
     } catch (error) {
-      this.logger.error(`Error confirmación solicitud viáticos colaborador ${email}:`, error)
+      this.logger.error(
+        `Error confirmación solicitud viáticos colaborador ${email}:`,
+        error
+      )
     }
   }
 
@@ -1253,9 +1394,14 @@ export class EmailService {
           platformUrl: this.resolvePlatformHref(platformUrl),
         },
       })
-      this.logger.debug(`Correo solicitud viáticos (contabilidad) enviado a ${email}`)
+      this.logger.debug(
+        `Correo solicitud viáticos (contabilidad) enviado a ${email}`
+      )
     } catch (error) {
-      this.logger.error(`Error solicitud viáticos (contabilidad) a ${email}:`, error)
+      this.logger.error(
+        `Error solicitud viáticos (contabilidad) a ${email}:`,
+        error
+      )
       throw error
     }
   }
@@ -1293,7 +1439,10 @@ export class EmailService {
       })
       this.logger.debug(`Correo cancelación viático enviado a ${email}`)
     } catch (error) {
-      this.logger.error(`Error al enviar cancelación viático a ${email}:`, error)
+      this.logger.error(
+        `Error al enviar cancelación viático a ${email}:`,
+        error
+      )
     }
   }
 
@@ -1330,7 +1479,10 @@ export class EmailService {
         },
       })
     } catch (error) {
-      this.logger.error(`Error correo reembolso contabilidad a ${email}:`, error)
+      this.logger.error(
+        `Error correo reembolso contabilidad a ${email}:`,
+        error
+      )
       throw error
     }
   }
@@ -1416,7 +1568,8 @@ export class EmailService {
           ? [
               {
                 filename:
-                  data.paymentReceiptFileName || 'comprobante-pago-viaticos.pdf',
+                  data.paymentReceiptFileName ||
+                  'comprobante-pago-viaticos.pdf',
                 path: data.paymentReceiptUrl,
               },
             ]
@@ -1440,7 +1593,12 @@ export class EmailService {
 
   async sendRendicionCerrada(
     email: string,
-    data: { clientId?: string; recipientName: string; reportTitle: string; closedAt: string }
+    data: {
+      clientId?: string
+      recipientName: string
+      reportTitle: string
+      closedAt: string
+    }
   ) {
     try {
       const reportTitle = this.normalizeIsoDatesInText(data.reportTitle)
@@ -1448,7 +1606,13 @@ export class EmailService {
         to: email,
         subject: `Rendición Cerrada Definitivamente — ${reportTitle}`,
         template: './rendicion-cerrada',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data, reportTitle, closedAt: this.formatDateDDMMYYYY(data.closedAt) },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+          reportTitle,
+          closedAt: this.formatDateDDMMYYYY(data.closedAt),
+        },
       })
     } catch (error) {
       this.logger.error(`Error correo rendición cerrada a ${email}:`, error)
@@ -1457,7 +1621,14 @@ export class EmailService {
 
   async sendRendicionDevolucionColaborador(
     email: string,
-    data: { clientId?: string; recipientName: string; reportTitle: string; amountFormatted: string; closedAt: string; platformUrl?: string }
+    data: {
+      clientId?: string
+      recipientName: string
+      reportTitle: string
+      amountFormatted: string
+      closedAt: string
+      platformUrl?: string
+    }
   ) {
     try {
       const reportTitle = this.normalizeIsoDatesInText(data.reportTitle)
@@ -1465,16 +1636,36 @@ export class EmailService {
         to: email,
         subject: `Devolución pendiente — ${reportTitle} — S/ ${data.amountFormatted}`,
         template: './rendicion-devolucion-colaborador',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data, reportTitle, closedAt: this.formatDateDDMMYYYY(data.closedAt), platformUrl: this.resolvePlatformHref(data.platformUrl) },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+          reportTitle,
+          closedAt: this.formatDateDDMMYYYY(data.closedAt),
+          platformUrl: this.resolvePlatformHref(data.platformUrl),
+        },
       })
     } catch (error) {
-      this.logger.error(`Error correo devolucion colaborador a ${email}:`, error)
+      this.logger.error(
+        `Error correo devolucion colaborador a ${email}:`,
+        error
+      )
     }
   }
 
   async sendRendicionDevolucionCargada(
     email: string,
-    data: { clientId?: string; recipientName: string; collaboratorName: string; reportTitle: string; amountFormatted: string; depositDate: string; bankOrigin?: string; operationNumber?: string; platformUrl?: string }
+    data: {
+      clientId?: string
+      recipientName: string
+      collaboratorName: string
+      reportTitle: string
+      amountFormatted: string
+      depositDate: string
+      bankOrigin?: string
+      operationNumber?: string
+      platformUrl?: string
+    }
   ) {
     try {
       const reportTitle = this.normalizeIsoDatesInText(data.reportTitle)
@@ -1482,7 +1673,14 @@ export class EmailService {
         to: email,
         subject: `Comprobante de devolución cargado — ${reportTitle} — ${data.collaboratorName}`,
         template: './rendicion-devolucion-cargada',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data, reportTitle, depositDate: this.formatDateDDMMYYYY(data.depositDate), platformUrl: this.resolvePlatformHref(data.platformUrl) },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+          reportTitle,
+          depositDate: this.formatDateDDMMYYYY(data.depositDate),
+          platformUrl: this.resolvePlatformHref(data.platformUrl),
+        },
       })
     } catch (error) {
       this.logger.error(`Error correo devolucion cargada a ${email}:`, error)
@@ -1491,7 +1689,13 @@ export class EmailService {
 
   async sendRendicionCancelada(
     email: string,
-    data: { clientId?: string; adminName: string; collaboratorName: string; reportTitle: string; cancelReason?: string }
+    data: {
+      clientId?: string
+      adminName: string
+      collaboratorName: string
+      reportTitle: string
+      cancelReason?: string
+    }
   ) {
     try {
       const reportTitle = this.normalizeIsoDatesInText(data.reportTitle)
@@ -1499,7 +1703,12 @@ export class EmailService {
         to: email,
         subject: `Rendición cancelada por el colaborador — ${reportTitle}`,
         template: './rendicion-cancelada',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data, reportTitle },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+          reportTitle,
+        },
       })
     } catch (error) {
       this.logger.error(`Error correo rendición cancelada a ${email}:`, error)
@@ -1510,14 +1719,25 @@ export class EmailService {
 
   async sendDevolucionPendiente(
     email: string,
-    data: { clientId?: string; recipientName: string; amountDue: string; dueDate: string; advanceId: string }
+    data: {
+      clientId?: string
+      recipientName: string
+      amountDue: string
+      dueDate: string
+      advanceId: string
+    }
   ) {
     try {
       await this.send({
         to: email,
         subject: `DEVOLUCIÓN PENDIENTE — Viático N° ${data.advanceId} — Monto S/ ${data.amountDue}`,
         template: './devolucion-pendiente',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data, dueDate: this.formatDateDDMMYYYY(data.dueDate) },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+          dueDate: this.formatDateDDMMYYYY(data.dueDate),
+        },
       })
     } catch (error) {
       this.logger.error(`Error correo devolución pendiente a ${email}:`, error)
@@ -1526,14 +1746,23 @@ export class EmailService {
 
   async sendDevolucionValidada(
     email: string,
-    data: { clientId?: string; recipientName: string; amountDue: string; advanceId: string }
+    data: {
+      clientId?: string
+      recipientName: string
+      amountDue: string
+      advanceId: string
+    }
   ) {
     try {
       await this.send({
         to: email,
         subject: `Devolución validada — Viático N° ${data.advanceId}`,
         template: './devolucion-validada',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+        },
       })
     } catch (error) {
       this.logger.error(`Error correo devolución validada a ${email}:`, error)
@@ -1542,14 +1771,24 @@ export class EmailService {
 
   async sendDevolucionRechazada(
     email: string,
-    data: { clientId?: string; recipientName: string; amountDue: string; rejectionReason?: string; advanceId: string }
+    data: {
+      clientId?: string
+      recipientName: string
+      amountDue: string
+      rejectionReason?: string
+      advanceId: string
+    }
   ) {
     try {
       await this.send({
         to: email,
         subject: `Comprobante de devolución rechazado — Viático N° ${data.advanceId}`,
         template: './devolucion-rechazada',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+        },
       })
     } catch (error) {
       this.logger.error(`Error correo devolución rechazada a ${email}:`, error)
@@ -1560,14 +1799,24 @@ export class EmailService {
 
   async sendCajaChicaCreada(
     email: string,
-    data: { clientId?: string; recipientName: string; code: string; period: string; fundAmount: number }
+    data: {
+      clientId?: string
+      recipientName: string
+      code: string
+      period: string
+      fundAmount: number
+    }
   ) {
     try {
       await this.send({
         to: email,
         subject: `Caja Chica Creada — ${data.code}`,
         template: './caja-chica-creada',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+        },
       })
     } catch (error) {
       this.logger.error(`Error correo caja chica creada a ${email}:`, error)
@@ -1576,14 +1825,23 @@ export class EmailService {
 
   async sendCajaChicaFondeada(
     email: string,
-    data: { clientId?: string; recipientName: string; code: string; fundAmount: number }
+    data: {
+      clientId?: string
+      recipientName: string
+      code: string
+      fundAmount: number
+    }
   ) {
     try {
       await this.send({
         to: email,
         subject: `Caja Chica Fondeada y Activa — ${data.code}`,
         template: './caja-chica-fondeada',
-        context: { logoUrl: await this.resolveLogoUrl(this.extractClientId(data)), year: new Date().getFullYear(), ...data },
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          ...data,
+        },
       })
     } catch (error) {
       this.logger.error(`Error correo caja chica fondeada a ${email}:`, error)
@@ -1603,7 +1861,8 @@ export class EmailService {
     }
   ) {
     try {
-      const periodoLabel = data.frequency === 'semanal' ? 'esta semana' : 'este mes'
+      const periodoLabel =
+        data.frequency === 'semanal' ? 'esta semana' : 'este mes'
       await this.send({
         to: email,
         subject: `Recordatorio: Rinde tus viáticos — ${periodoLabel}`,
@@ -1620,7 +1879,10 @@ export class EmailService {
         },
       })
     } catch (error) {
-      this.logger.error(`Error recordatorio rendición colaborador a ${email}:`, error)
+      this.logger.error(
+        `Error recordatorio rendición colaborador a ${email}:`,
+        error
+      )
     }
   }
 
@@ -1650,7 +1912,10 @@ export class EmailService {
         },
       })
     } catch (error) {
-      this.logger.error(`Error recordatorio último día colaborador a ${email}:`, error)
+      this.logger.error(
+        `Error recordatorio último día colaborador a ${email}:`,
+        error
+      )
     }
   }
 
@@ -1688,6 +1953,64 @@ export class EmailService {
       })
     } catch (error) {
       this.logger.error(`Error resumen viáticos coordinador a ${email}:`, error)
+    }
+  }
+
+  async sendRendicionRecordatorioCoordinador(
+    email: string,
+    data: {
+      clientId?: string
+      coordinatorName: string
+      pendingCount: number
+      reports: { collaboratorName: string; title: string; endDateFormatted?: string }[]
+      platformUrl?: string
+    }
+  ) {
+    try {
+      await this.send({
+        to: email,
+        subject: `Recordatorio: tienes ${data.pendingCount} rendicion(es) pendiente(s) de revision`,
+        template: './rendicion-recordatorio-coordinador',
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          coordinatorName: data.coordinatorName,
+          pendingCount: data.pendingCount,
+          reports: data.reports,
+          platformUrl: this.resolvePlatformHref(data.platformUrl ?? '/invoice-approval'),
+        },
+      })
+    } catch (error) {
+      this.logger.error(`Error recordatorio rendición coordinador a ${email}:`, error)
+    }
+  }
+
+  async sendRendicionRecordatorioContabilidad(
+    email: string,
+    data: {
+      clientId?: string
+      recipientName: string
+      pendingCount: number
+      reports: { collaboratorName: string; title: string; endDateFormatted?: string }[]
+      platformUrl?: string
+    }
+  ) {
+    try {
+      await this.send({
+        to: email,
+        subject: `Recordatorio: ${data.pendingCount} rendicion(es) pendiente(s) de aprobacion contable`,
+        template: './rendicion-recordatorio-contabilidad',
+        context: {
+          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
+          year: new Date().getFullYear(),
+          recipientName: data.recipientName,
+          pendingCount: data.pendingCount,
+          reports: data.reports,
+          platformUrl: this.resolvePlatformHref(data.platformUrl ?? '/tesoreria'),
+        },
+      })
+    } catch (error) {
+      this.logger.error(`Error recordatorio rendición contabilidad a ${email}:`, error)
     }
   }
 }

@@ -1,10 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Document, Types } from 'mongoose'
 
-export type PettyCashStatus =
-  | 'pending_funding'
-  | 'active'
-  | 'closed'
+export type PettyCashStatus = 'pending_funding' | 'active' | 'closed'
 
 export interface PettyCashFunding {
   transferDate: Date

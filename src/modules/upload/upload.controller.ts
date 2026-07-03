@@ -1,6 +1,8 @@
 import {
   Controller,
   Post,
+  Get,
+  Query,
   UploadedFile,
   UseInterceptors,
   ParseFilePipe,
@@ -15,6 +17,17 @@ import { FileInterceptor } from '@nestjs/platform-express'
 @Controller('upload')
 export class UploadController {
   constructor(private readonly uploadService: UploadService) {}
+
+  @Get('presigned-url')
+  async getPresignedUrl(
+    @Query('filename') filename: string,
+    @Query('contentType') contentType: string,
+  ): Promise<{ presignedUrl: string; fileUrl: string }> {
+    if (!filename || !contentType) {
+      throw new BadRequestException('filename y contentType son requeridos')
+    }
+    return this.uploadService.getPresignedUploadUrl(filename, contentType)
+  }
 
   @Post()
   @UseInterceptors(

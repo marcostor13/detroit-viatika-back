@@ -35,7 +35,13 @@ export class AuthController {
   @Post('select-client')
   @HttpCode(HttpStatus.OK)
   async selectClient(
-    @Body() body: { hubToken?: string; email?: string; password?: string; clientId: string }
+    @Body()
+    body: {
+      hubToken?: string
+      email?: string
+      password?: string
+      clientId: string
+    }
   ) {
     return this.authService.selectClient(body)
   }

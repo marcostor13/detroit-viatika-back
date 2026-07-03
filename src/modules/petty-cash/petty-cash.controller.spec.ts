@@ -25,7 +25,9 @@ const mockService = {
   findAllByClient: jest.fn().mockResolvedValue([]),
   findByResponsible: jest.fn().mockResolvedValue([]),
   findOne: jest.fn().mockResolvedValue({ _id: boxId }),
-  registerFunding: jest.fn().mockResolvedValue({ _id: boxId, status: 'funded' }),
+  registerFunding: jest
+    .fn()
+    .mockResolvedValue({ _id: boxId, status: 'funded' }),
   addExpense: jest.fn().mockResolvedValue({ _id: boxId }),
   close: jest.fn().mockResolvedValue({ _id: boxId, status: 'closed' }),
 }
@@ -50,14 +52,21 @@ describe('PettyCashController', () => {
   describe('create', () => {
     it('crea la caja chica y registra auditoria', async () => {
       const req = makeReq()
-      const dto: any = { clientId, name: 'Caja Chica Operaciones', initialAmount: 500 }
+      const dto: any = {
+        clientId,
+        name: 'Caja Chica Operaciones',
+        initialAmount: 500,
+      }
       const result = await controller.create(dto, req as never)
       expect(mockService.create).toHaveBeenCalledWith(
         expect.objectContaining({ clientId }),
         userId
       )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'create_petty_cash', module: 'caja-chica' })
+        expect.objectContaining({
+          action: 'create_petty_cash',
+          module: 'caja-chica',
+        })
       )
       expect(result).toBeDefined()
     })
@@ -74,7 +83,10 @@ describe('PettyCashController', () => {
     it('extrae responsibleId del JWT y delega al servicio', async () => {
       const req = makeReq()
       await controller.findMine(clientId, req as never)
-      expect(mockService.findByResponsible).toHaveBeenCalledWith(userId, clientId)
+      expect(mockService.findByResponsible).toHaveBeenCalledWith(
+        userId,
+        clientId
+      )
     })
   })
 
@@ -95,7 +107,11 @@ describe('PettyCashController', () => {
         receiptUrl: 'https://cdn.example.com/receipt.pdf',
       }
       const result = await controller.registerFunding(boxId, body, req as never)
-      expect(mockService.registerFunding).toHaveBeenCalledWith(boxId, body, userId)
+      expect(mockService.registerFunding).toHaveBeenCalledWith(
+        boxId,
+        body,
+        userId
+      )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'fund_petty_cash' })
       )
@@ -107,7 +123,12 @@ describe('PettyCashController', () => {
     it('agrega un gasto a la caja chica', async () => {
       const body = { expenseId: 'exp1', amount: 50, category: 'Alimentación' }
       await controller.addExpense(boxId, body)
-      expect(mockService.addExpense).toHaveBeenCalledWith(boxId, 'exp1', 50, 'Alimentación')
+      expect(mockService.addExpense).toHaveBeenCalledWith(
+        boxId,
+        'exp1',
+        50,
+        'Alimentación'
+      )
     })
   })
 

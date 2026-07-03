@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsOptional, IsString, IsBoolean, IsNumber, Min } from 'class-validator'
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsBoolean,
+  IsNumber,
+  Min,
+  IsArray,
+} from 'class-validator'
 
 export class CreateCategoryDto {
   @IsString()
@@ -19,6 +27,10 @@ export class CreateCategoryDto {
 
   @IsString()
   @IsOptional()
+  cuentaDestino6x?: string
+
+  @IsString()
+  @IsOptional()
   observaciones?: string
 
   @IsBoolean()
@@ -33,4 +45,9 @@ export class CreateCategoryDto {
   @IsString()
   @IsNotEmpty()
   clientId: string
+
+  /** Perfiles de categoría a los que pertenece (M:N). */
+  @IsArray()
+  @IsOptional()
+  perfilIds?: string[]
 }

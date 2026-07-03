@@ -17,7 +17,7 @@ export class AuditLogController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('module') module?: string,
-    @Query('search') search?: string,
+    @Query('search') search?: string
   ) {
     const clientId = req.user.clientId
     return this.auditLogService.findAll(clientId, {

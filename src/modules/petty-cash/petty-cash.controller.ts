@@ -21,7 +21,7 @@ import { AuditLogService } from '../audit-log/audit-log.service'
 export class PettyCashController {
   constructor(
     private readonly service: PettyCashService,
-    private readonly auditLogService: AuditLogService,
+    private readonly auditLogService: AuditLogService
   ) {}
 
   @Post()
@@ -64,7 +64,8 @@ export class PettyCashController {
   @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN)
   async registerFunding(
     @Param('id') id: string,
-    @Body() body: {
+    @Body()
+    body: {
       transferDate: string
       amount: number
       operationNumber: string
@@ -73,7 +74,11 @@ export class PettyCashController {
     @Request() req: any
   ) {
     const registeredBy = req.user._id || req.user.sub
-    const result = await this.service.registerFunding(id, body, String(registeredBy))
+    const result = await this.service.registerFunding(
+      id,
+      body,
+      String(registeredBy)
+    )
     this.auditLogService.log({
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email,
@@ -91,7 +96,12 @@ export class PettyCashController {
     @Param('id') id: string,
     @Body() body: { expenseId: string; amount: number; category?: string }
   ) {
-    return this.service.addExpense(id, body.expenseId, body.amount, body.category)
+    return this.service.addExpense(
+      id,
+      body.expenseId,
+      body.amount,
+      body.category
+    )
   }
 
   @Patch(':id/close')

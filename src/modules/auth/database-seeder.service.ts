@@ -14,7 +14,7 @@ export class DatabaseSeederService implements OnApplicationBootstrap {
   constructor(
     private readonly roleService: RoleService,
     private readonly userService: UserService,
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>
   ) {}
 
   async onApplicationBootstrap() {
@@ -30,7 +30,9 @@ export class DatabaseSeederService implements OnApplicationBootstrap {
       const oldIndex = indexes.find((idx: any) => idx.name === 'email_1')
       if (oldIndex) {
         await this.userModel.collection.dropIndex('email_1')
-        this.logger.log('Dropped legacy email_1 unique index from users collection')
+        this.logger.log(
+          'Dropped legacy email_1 unique index from users collection'
+        )
       }
     } catch (err: any) {
       this.logger.warn(`Index migration skipped: ${err?.message}`)
@@ -80,18 +82,19 @@ export class DatabaseSeederService implements OnApplicationBootstrap {
     if (!newRole) return
 
     // Both docs may be the same if seedRoles already renamed it
-    if ((legacyRole as any)._id.toString() === (newRole as any)._id.toString()) return
+    if ((legacyRole as any)._id.toString() === (newRole as any)._id.toString())
+      return
 
     const legacyId = (legacyRole as any)._id
     const newId = (newRole as any)._id
 
     const updated = await this.userModel.updateMany(
       { roleId: legacyId },
-      { $set: { roleId: newId } },
+      { $set: { roleId: newId } }
     )
     if (updated.modifiedCount > 0) {
       this.logger.log(
-        `Migrated ${updated.modifiedCount} user(s) from 'Coordinador' to '${ROLES.ADMIN}'`,
+        `Migrated ${updated.modifiedCount} user(s) from 'Coordinador' to '${ROLES.ADMIN}'`
       )
     }
   }
@@ -121,7 +124,9 @@ export class DatabaseSeederService implements OnApplicationBootstrap {
         mustChangePassword: false,
         permissions: { modules: [], canApproveL1: false, canApproveL2: false },
       })
-      this.logger.log('Default SuperAdmin seeded: admin@viatika.com / @Libido2010')
+      this.logger.log(
+        'Default SuperAdmin seeded: admin@viatika.com / @Libido2010'
+      )
     }
   }
 }

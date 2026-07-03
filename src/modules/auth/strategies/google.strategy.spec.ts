@@ -36,6 +36,9 @@ describe('GoogleStrategy', () => {
       displayName: 'Multi Email',
     }
     await strategy.validate('tok', 'ref', profile, done)
-    expect(done).toHaveBeenCalledWith(null, expect.objectContaining({ email: 'first@test.com' }))
+    expect(done).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ email: 'first@test.com' })
+    )
   })
 })

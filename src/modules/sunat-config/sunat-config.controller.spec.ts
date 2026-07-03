@@ -8,7 +8,13 @@ const clientId = new Types.ObjectId().toHexString()
 const configId = new Types.ObjectId().toHexString()
 
 function makeConfig() {
-  return { _id: configId, clientId, clientIdSunat: 'C', clientSecret: 'S', isActive: true }
+  return {
+    _id: configId,
+    clientId,
+    clientIdSunat: 'C',
+    clientSecret: 'S',
+    isActive: true,
+  }
 }
 
 const mockService = {
@@ -16,7 +22,9 @@ const mockService = {
   findOne: jest.fn().mockResolvedValue(makeConfig()),
   update: jest.fn().mockResolvedValue(makeConfig()),
   remove: jest.fn().mockResolvedValue(makeConfig()),
-  getActiveCredentials: jest.fn().mockResolvedValue({ clientId: 'C', clientSecret: 'S' }),
+  getActiveCredentials: jest
+    .fn()
+    .mockResolvedValue({ clientId: 'C', clientSecret: 'S' }),
 }
 
 describe('SunatConfigController', () => {
@@ -26,9 +34,7 @@ describe('SunatConfigController', () => {
     jest.clearAllMocks()
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SunatConfigController],
-      providers: [
-        { provide: SunatConfigService, useValue: mockService },
-      ],
+      providers: [{ provide: SunatConfigService, useValue: mockService }],
     }).compile()
     controller = module.get<SunatConfigController>(SunatConfigController)
   })
@@ -50,8 +56,12 @@ describe('SunatConfigController', () => {
     })
 
     it('lanza HttpException si el servicio falla', async () => {
-      mockService.getActiveCredentials.mockRejectedValue(new NotFoundException('No encontrado'))
-      await expect(controller.getCredentials(clientId)).rejects.toThrow(HttpException)
+      mockService.getActiveCredentials.mockRejectedValue(
+        new NotFoundException('No encontrado')
+      )
+      await expect(controller.getCredentials(clientId)).rejects.toThrow(
+        HttpException
+      )
     })
   })
 
@@ -63,7 +73,9 @@ describe('SunatConfigController', () => {
     })
 
     it('lanza HttpException si el servicio falla', async () => {
-      mockService.findOne.mockRejectedValue(new NotFoundException('No encontrado'))
+      mockService.findOne.mockRejectedValue(
+        new NotFoundException('No encontrado')
+      )
       await expect(controller.findOne(clientId)).rejects.toThrow(HttpException)
     })
   })
@@ -77,8 +89,12 @@ describe('SunatConfigController', () => {
     })
 
     it('lanza HttpException si el servicio falla', async () => {
-      mockService.update.mockRejectedValue(new NotFoundException('No encontrado'))
-      await expect(controller.update(configId, {} as any)).rejects.toThrow(HttpException)
+      mockService.update.mockRejectedValue(
+        new NotFoundException('No encontrado')
+      )
+      await expect(controller.update(configId, {} as any)).rejects.toThrow(
+        HttpException
+      )
     })
   })
 
@@ -90,7 +106,9 @@ describe('SunatConfigController', () => {
     })
 
     it('lanza HttpException si el servicio falla', async () => {
-      mockService.remove.mockRejectedValue(new NotFoundException('No encontrado'))
+      mockService.remove.mockRejectedValue(
+        new NotFoundException('No encontrado')
+      )
       await expect(controller.remove(configId)).rejects.toThrow(HttpException)
     })
   })

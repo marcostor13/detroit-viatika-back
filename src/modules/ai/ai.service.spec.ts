@@ -36,10 +36,7 @@ describe('AiService', () => {
 
   describe('chat', () => {
     it('delega al openAiAgent con mensajes y contexto', async () => {
-      const chunks = [
-        { type: 'content', content: 'Hola' },
-        { type: 'done' },
-      ]
+      const chunks = [{ type: 'content', content: 'Hola' }, { type: 'done' }]
       mockOpenAiAgent.chat.mockReturnValue(makeStream(chunks))
 
       const context = {
@@ -48,7 +45,9 @@ describe('AiService', () => {
         userRole: 'Colaborador',
         userName: 'Juan',
       }
-      const messages = [{ role: 'user' as const, content: '¿Qué anticipos tengo?' }]
+      const messages = [
+        { role: 'user' as const, content: '¿Qué anticipos tengo?' },
+      ]
 
       const stream = service.chat(messages, context)
 

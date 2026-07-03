@@ -51,9 +51,17 @@ export class CreateExpenseReportDto {
   @IsOptional()
   motivo?: string
 
+  @IsString()
+  @IsOptional()
+  gestion?: string
+
   @IsBoolean()
   @IsOptional()
   isDirecta?: boolean
+
+  @IsBoolean()
+  @IsOptional()
+  isCajaChica?: boolean
 
   @IsMongoId()
   userId: string // The collaborator assigned
@@ -99,4 +107,18 @@ export class CreateExpenseReportDto {
   @ValidateNested({ each: true })
   @Type(() => BudgetItemDto)
   items?: BudgetItemDto[]
+
+  @IsMongoId()
+  @IsOptional()
+  pendingBalanceFromReportId?: string
+
+  @IsNumber()
+  @IsOptional()
+  pendingBalanceAmount?: number
+
+  /** Saldos de la bolsa seleccionados para financiar esta rendición directa (consumo completo). */
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  saldoIds?: string[]
 }

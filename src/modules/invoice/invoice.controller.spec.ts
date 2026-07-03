@@ -34,7 +34,9 @@ const makeInvoice = () => ({
 
 const mockService = {
   generateTokenSunat: jest.fn().mockResolvedValue({ access_token: 'token123' }),
-  validateInvoiceFromImage: jest.fn().mockResolvedValue({ rucEmisor: '12345678901' }),
+  validateInvoiceFromImage: jest
+    .fn()
+    .mockResolvedValue({ rucEmisor: '12345678901' }),
   create: jest.fn().mockResolvedValue(makeInvoice()),
   findAll: jest.fn().mockResolvedValue([]),
   findOne: jest.fn().mockResolvedValue(makeInvoice()),
@@ -85,7 +87,10 @@ describe('InvoiceController', () => {
       const result = await controller.create(dto, req as never)
       expect(mockService.create).toHaveBeenCalledWith(dto, clientId)
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'create_invoice', module: 'invoices' })
+        expect.objectContaining({
+          action: 'create_invoice',
+          module: 'invoices',
+        })
       )
       expect(result).toBeDefined()
     })
@@ -138,7 +143,10 @@ describe('InvoiceController', () => {
         req as never
       )
       expect(mockService.updateStatus).toHaveBeenCalledWith(
-        invoiceId, InvoiceStatus.APPROVED, companyId, undefined
+        invoiceId,
+        InvoiceStatus.APPROVED,
+        companyId,
+        undefined
       )
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'approve_invoice' })
@@ -178,7 +186,9 @@ describe('InvoiceController', () => {
 
     it('lanza HttpException si el buffer esta vacio', async () => {
       const file = { originalname: 'test.pdf', size: 0, buffer: null } as any
-      await expect(controller.validateInvoice(file)).rejects.toThrow(HttpException)
+      await expect(controller.validateInvoice(file)).rejects.toThrow(
+        HttpException
+      )
     })
 
     it('procesa el archivo y retorna el resultado de validacion', async () => {
@@ -206,14 +216,21 @@ describe('InvoiceController', () => {
         buffer: Buffer.from('content'),
         mimetype: 'application/pdf',
       } as any
-      await expect(controller.validateInvoice(file)).rejects.toThrow(HttpException)
+      await expect(controller.validateInvoice(file)).rejects.toThrow(
+        HttpException
+      )
     })
   })
 
   describe('rejectInvoice', () => {
     it('rechaza la factura con razon', async () => {
-      await controller.rejectInvoice(invoiceId, { rejectionReason: 'Datos incorrectos' })
-      expect(mockService.rejectInvoice).toHaveBeenCalledWith(invoiceId, 'Datos incorrectos')
+      await controller.rejectInvoice(invoiceId, {
+        rejectionReason: 'Datos incorrectos',
+      })
+      expect(mockService.rejectInvoice).toHaveBeenCalledWith(
+        invoiceId,
+        'Datos incorrectos'
+      )
     })
   })
 
@@ -221,14 +238,18 @@ describe('InvoiceController', () => {
     it('actualiza el estado de pago', async () => {
       await controller.updatePaymentStatus(invoiceId, { status: 'APPROVED' })
       expect(mockService.updatePaymentStatus).toHaveBeenCalledWith(
-        invoiceId, 'APPROVED', undefined
+        invoiceId,
+        'APPROVED',
+        undefined
       )
     })
   })
 
   describe('uploadInvoiceAndActa', () => {
     it('lanza HttpException si falla la subida', async () => {
-      mockService.uploadInvoiceAndActa.mockRejectedValue(new Error('Upload error'))
+      mockService.uploadInvoiceAndActa.mockRejectedValue(
+        new Error('Upload error')
+      )
       await expect(
         controller.uploadInvoiceAndActa([], makeReq() as never)
       ).rejects.toThrow(HttpException)
@@ -236,10 +257,11 @@ describe('InvoiceController', () => {
 
     it('retorna resultado exitoso cuando la subida funciona', async () => {
       mockService.uploadInvoiceAndActa.mockResolvedValue(makeInvoice())
-      const result = await controller.uploadInvoiceAndActa([], makeReq() as never)
-      expect(result).toEqual(
-        expect.objectContaining({ success: true })
+      const result = await controller.uploadInvoiceAndActa(
+        [],
+        makeReq() as never
       )
+      expect(result).toEqual(expect.objectContaining({ success: true }))
     })
   })
 })

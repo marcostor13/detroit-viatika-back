@@ -27,7 +27,12 @@ const mockGroupModel = {
 
 // Constructor mock for new this.groupModel(...)
 function MockGroupModel(data: any) {
-  return { ...data, save: jest.fn().mockResolvedValue({ ...data, _id: new Types.ObjectId(groupId) }) }
+  return {
+    ...data,
+    save: jest
+      .fn()
+      .mockResolvedValue({ ...data, _id: new Types.ObjectId(groupId) }),
+  }
 }
 Object.assign(MockGroupModel, mockGroupModel)
 
@@ -39,7 +44,10 @@ describe('CategoryGroupService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CategoryGroupService,
-        { provide: getModelToken(CategoryGroup.name), useValue: MockGroupModel },
+        {
+          provide: getModelToken(CategoryGroup.name),
+          useValue: MockGroupModel,
+        },
       ],
     }).compile()
     service = module.get<CategoryGroupService>(CategoryGroupService)
@@ -52,7 +60,9 @@ describe('CategoryGroupService', () => {
   describe('findAll', () => {
     it('returns groups filtered by clientId', async () => {
       const groups = [makeGroup()]
-      ;(MockGroupModel as any).find.mockReturnValue({ exec: jest.fn().mockResolvedValue(groups) })
+      ;(MockGroupModel as any).find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(groups),
+      })
       const result = await service.findAll(clientId)
       expect(result).toEqual(groups)
       expect((MockGroupModel as any).find).toHaveBeenCalledWith(
@@ -64,24 +74,37 @@ describe('CategoryGroupService', () => {
   describe('findOne', () => {
     it('returns group when found', async () => {
       const group = makeGroup()
-      ;(MockGroupModel as any).findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(group) })
+      ;(MockGroupModel as any).findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(group),
+      })
       const result = await service.findOne(groupId, clientId)
       expect(result).toBe(group)
     })
 
     it('throws NotFoundException when group is not found', async () => {
-      ;(MockGroupModel as any).findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
-      await expect(service.findOne(groupId, clientId)).rejects.toThrow(NotFoundException)
+      ;(MockGroupModel as any).findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
+      await expect(service.findOne(groupId, clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
 
     it('throws BadRequestException for invalid id', async () => {
-      await expect(service.findOne('invalid-id', clientId)).rejects.toThrow(BadRequestException)
+      await expect(service.findOne('invalid-id', clientId)).rejects.toThrow(
+        BadRequestException
+      )
     })
   })
 
   describe('create', () => {
     it('creates and saves a new group', async () => {
-      const dto = { name: 'New Group', description: 'Desc', clientId, categoryIds: [] }
+      const dto = {
+        name: 'New Group',
+        description: 'Desc',
+        clientId,
+        categoryIds: [],
+      }
       const saved = makeGroup({ name: 'New Group' })
       ;(MockGroupModel as any).save = jest.fn().mockResolvedValue(saved)
       const result = await service.create(dto)
@@ -92,19 +115,31 @@ describe('CategoryGroupService', () => {
   describe('update', () => {
     it('updates group and returns updated document', async () => {
       const updated = makeGroup({ name: 'Updated Name' })
-      ;(MockGroupModel as any).findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue(updated) })
-      const result = await service.update(groupId, { name: 'Updated Name' }, clientId)
+      ;(MockGroupModel as any).findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(updated),
+      })
+      const result = await service.update(
+        groupId,
+        { name: 'Updated Name' },
+        clientId
+      )
       expect(result).toBe(updated)
     })
 
     it('throws NotFoundException when group to update is not found', async () => {
-      ;(MockGroupModel as any).findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
-      await expect(service.update(groupId, { name: 'X' }, clientId)).rejects.toThrow(NotFoundException)
+      ;(MockGroupModel as any).findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
+      await expect(
+        service.update(groupId, { name: 'X' }, clientId)
+      ).rejects.toThrow(NotFoundException)
     })
 
     it('updates only provided fields', async () => {
       const updated = makeGroup()
-      ;(MockGroupModel as any).findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue(updated) })
+      ;(MockGroupModel as any).findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(updated),
+      })
       await service.update(groupId, { description: 'New desc' }, clientId)
       expect((MockGroupModel as any).findOneAndUpdate).toHaveBeenCalledWith(
         expect.any(Object),
@@ -116,13 +151,19 @@ describe('CategoryGroupService', () => {
 
   describe('remove', () => {
     it('removes group successfully', async () => {
-      ;(MockGroupModel as any).findOneAndDelete.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeGroup()) })
+      ;(MockGroupModel as any).findOneAndDelete.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(makeGroup()),
+      })
       await expect(service.remove(groupId, clientId)).resolves.toBeUndefined()
     })
 
     it('throws NotFoundException when group to remove is not found', async () => {
-      ;(MockGroupModel as any).findOneAndDelete.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
-      await expect(service.remove(groupId, clientId)).rejects.toThrow(NotFoundException)
+      ;(MockGroupModel as any).findOneAndDelete.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
+      await expect(service.remove(groupId, clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 })

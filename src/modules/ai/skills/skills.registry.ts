@@ -118,13 +118,13 @@ export class SkillsExecutor {
         ? reports.filter(r => r.status === input['status'])
         : reports
       const data = filtered.map(r => ({
-        id: String((r as any)._id),
+        id: String(r._id),
         titulo: r.title,
         estado: r.status,
         presupuesto: `S/ ${r.budget}`,
         gastos: r.expenseIds?.length ?? 0,
-        anticipos: (r as any).advanceIds?.length ?? 0,
-        fecha: new Date((r as any).createdAt).toLocaleDateString('es-PE'),
+        anticipos: r.advanceIds?.length ?? 0,
+        fecha: new Date(r.createdAt).toLocaleDateString('es-PE'),
       }))
       return JSON.stringify({ total: data.length, rendiciones: data })
     } catch {

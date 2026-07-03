@@ -8,6 +8,8 @@ export interface ClientLimits {
 export interface ClientNotificationSettings {
   enabled: boolean
   frequency: 'semanal' | 'mensual'
+  /** Día de la semana para notificaciones semanales: 0=Domingo … 6=Sábado (default 1=Lunes) */
+  notificationDay?: number
 }
 
 export interface ClientDocument extends Document {
@@ -21,6 +23,7 @@ export interface ClientDocument extends Document {
   logo: string
   limits?: ClientLimits
   notificationSettings?: ClientNotificationSettings
+  tesoreriaEmails?: string[]
 }
 
 export interface GetClientDocument extends ClientDocument {
@@ -61,10 +64,18 @@ export class Client {
   })
   limits: ClientLimits
 
+  @Prop({ type: [String], default: [] })
+  tesoreriaEmails: string[]
+
   @Prop({
     type: {
       enabled: { type: Boolean, default: false },
-      frequency: { type: String, enum: ['semanal', 'mensual'], default: 'semanal' },
+      frequency: {
+        type: String,
+        enum: ['semanal', 'mensual'],
+        default: 'semanal',
+      },
+      notificationDay: { type: Number, min: 0, max: 6, default: 1 },
       _id: false,
     },
     required: false,

@@ -12,7 +12,12 @@ export interface UserPermissions {
   modules: string[]
   canApproveL1: boolean
   canApproveL2: boolean
+  /** Categorías sueltas asignadas directamente (independientes de los perfiles). */
   categoryIds: string[]
+  /** @deprecated usar categoryProfileIds. Se conserva para migración. */
+  categoryProfileId?: string
+  /** Perfiles de categoría asignados (deriva centros de costo y categorías visibles). */
+  categoryProfileIds?: string[]
 }
 
 export interface UserDocument extends Document {
@@ -25,6 +30,8 @@ export interface UserDocument extends Document {
   isActive: boolean
   dni?: string
   employeeCode?: string
+  /** Subcuenta contable 14 del colaborador (asientos Contanet). Si vacío, se usa el DNI en cols AN-AS. */
+  subcuenta14?: string
   /** Área organizacional (notificaciones viáticos Fase 3). */
   area?: string
   /** Cargo del colaborador (notificaciones viáticos Fase 3). */
@@ -68,6 +75,9 @@ export class User {
   employeeCode?: string
 
   @Prop()
+  subcuenta14?: string
+
+  @Prop()
   area?: string
 
   @Prop()
@@ -96,9 +106,16 @@ export class User {
       canApproveL1: { type: Boolean, default: false },
       canApproveL2: { type: Boolean, default: false },
       categoryIds: { type: [String], default: [] },
+      categoryProfileId: { type: String, default: null },
+      categoryProfileIds: { type: [String], default: [] },
       _id: false,
     },
-    default: () => ({ modules: [], canApproveL1: false, canApproveL2: false, categoryIds: [] }),
+    default: () => ({
+      modules: [],
+      canApproveL1: false,
+      canApproveL2: false,
+      categoryIds: [],
+    }),
   })
   permissions: UserPermissions
 

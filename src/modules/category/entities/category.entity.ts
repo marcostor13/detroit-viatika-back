@@ -6,7 +6,10 @@ export interface CategoryDocument extends Document {
   name: string
   key: string
   description?: string
+  /** Cuenta analítica 9X del gasto (clase 9). Ej. 91.3.1.410 (alimentación). */
   cuenta?: string
+  /** Cuenta destino 6X (gasto por naturaleza). Ej. 63.1.4.100 (alimentación). */
+  cuentaDestino6x?: string
   observaciones?: string
   isActive: boolean
   limit: number | null
@@ -33,6 +36,9 @@ export class Category {
 
   @Prop()
   cuenta?: string
+
+  @Prop()
+  cuentaDestino6x?: string
 
   @Prop()
   observaciones?: string

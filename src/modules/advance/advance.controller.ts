@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Request,
@@ -64,10 +65,13 @@ export class AdvanceController {
     const userRole = req.user?.roles?.[0] || req.user?.role
     const isAdminRole = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(userRole)
     const canApproveL1 = req.user?.permissions?.canApproveL1 === true
-    const hasViaticosModule = req.user?.permissions?.modules?.includes('viaticos') === true
+    const hasViaticosModule =
+      req.user?.permissions?.modules?.includes('viaticos') === true
 
     if (!isAdminRole && !canApproveL1 && !hasViaticosModule) {
-      throw new ForbiddenException('Sin permiso para acceder a la gestión de viáticos')
+      throw new ForbiddenException(
+        'Sin permiso para acceder a la gestión de viáticos'
+      )
     }
 
     const rawClient = req.user?.clientId
@@ -99,6 +103,16 @@ export class AdvanceController {
   @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
   getStats(@Param('clientId') clientId: string) {
     return this.advanceService.getStats(clientId)
+  }
+
+  /** Advances sin ExpenseReport vinculado — para vista unificada de rendiciones */
+  @Get('orphaned/client/:clientId')
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.COORDINADOR)
+  findOrphaned(@Param('clientId') clientId: string, @Request() req) {
+    return this.advanceService.findOrphaned(clientId, {
+      userId: req.user?.sub || req.user?._id,
+      role: req.user?.roles?.[0] || req.user?.role,
+    })
   }
 
   /** Detalle de un anticipo */
@@ -296,7 +310,8 @@ export class AdvanceController {
   @Roles(ROLES.COLABORADOR, ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
   uploadReturnProof(
     @Param('id') id: string,
-    @Body() body: {
+    @Body()
+    body: {
       depositDate: string
       amountReturned: number
       bankOrigin: string
@@ -304,6 +319,10 @@ export class AdvanceController {
       fileUrl: string
       fileKey?: string
       note?: string
+      scannedAmount?: number
+      operationDate?: string
+      operationTime?: string
+      titular?: string
     }
   ) {
     return this.advanceService.uploadReturnProof(id, {
@@ -352,4 +371,26 @@ export class AdvanceController {
     return result
   }
 
+  /**
+   * Elimina una solicitud de viáticos. El colaborador propietario puede eliminarla
+   * mientras no tenga ninguna aprobación; una vez aprobada por alguien, solo
+   * Contabilidad (o Superadmin) puede hacerlo.
+   */
+  @Delete(':id')
+  @Roles(ROLES.COLABORADOR, ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
+  async remove(@Param('id') id: string, @Request() req) {
+    const result = await this.advanceService.remove(id, {
+      userId: req.user._id || req.user.sub,
+      role: req.user.roles?.[0],
+    })
+    this.auditLogService.log({
+      userId: req.user._id || req.user.sub,
+      userName: req.user.name || req.user.email,
+      action: 'delete_advance',
+      module: 'tesoreria',
+      entityId: id,
+      clientId: req.user.clientId,
+    })
+    return result
+  }
 }

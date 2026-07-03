@@ -1,8 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing'
-import {
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common'
+import { BadRequestException, ForbiddenException } from '@nestjs/common'
 import { Types } from 'mongoose'
 import { ExpenseReportController } from './expense-report.controller'
 import { ExpenseReportService } from './expense-report.service'
@@ -15,9 +12,13 @@ describe('ExpenseReportController — Fase 6 (reembolsos / documentos)', () => {
   let controller: ExpenseReportController
 
   const mockExpenseReportService = {
-    findPendingReimbursementsByClient: jest.fn().mockResolvedValue({ items: [] }),
+    findPendingReimbursementsByClient: jest
+      .fn()
+      .mockResolvedValue({ items: [] }),
     findMyDocuments: jest.fn().mockResolvedValue({ items: [] }),
-    registerReimbursementPayment: jest.fn().mockResolvedValue({ _id: 'r1', status: 'reimbursed' }),
+    registerReimbursementPayment: jest
+      .fn()
+      .mockResolvedValue({ _id: 'r1', status: 'reimbursed' }),
   }
 
   const mockAuditLogService = {

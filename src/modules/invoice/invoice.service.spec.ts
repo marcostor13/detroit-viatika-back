@@ -83,7 +83,11 @@ describe('InvoiceService', () => {
 
   describe('create', () => {
     it('crea una factura con companyId y estado PENDING', async () => {
-      const dto: any = { rucEmisor: '12345678901', serie: 'F001', correlativo: '00001' }
+      const dto: any = {
+        rucEmisor: '12345678901',
+        serie: 'F001',
+        correlativo: '00001',
+      }
       const result = await service.create(dto, companyId)
       expect(MockInvoiceModel).toHaveBeenCalledWith(
         expect.objectContaining({ companyId, status: 'PENDING' })
@@ -108,7 +112,9 @@ describe('InvoiceService', () => {
         exec: jest.fn().mockResolvedValue(invoices),
       })
       const result = await service.findAll(companyId)
-      expect(mockModel.find).toHaveBeenCalledWith(expect.objectContaining({ companyId }))
+      expect(mockModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ companyId })
+      )
       expect(result).toHaveLength(1)
     })
 
@@ -117,7 +123,10 @@ describe('InvoiceService', () => {
         populate: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue([]),
       })
-      await service.findAll(companyId, { status: 'PENDING', projectId: 'proj1' })
+      await service.findAll(companyId, {
+        status: 'PENDING',
+        projectId: 'proj1',
+      })
       expect(mockModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'PENDING', projectId: 'proj1' })
       )
@@ -140,7 +149,9 @@ describe('InvoiceService', () => {
         populate: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue(null),
       })
-      await expect(service.findOne(invoiceId, companyId)).rejects.toThrow(NotFoundException)
+      await expect(service.findOne(invoiceId, companyId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -160,7 +171,9 @@ describe('InvoiceService', () => {
         populate: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue([]),
       })
-      await expect(service.findByClient(companyId)).rejects.toThrow(NotFoundException)
+      await expect(service.findByClient(companyId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -180,7 +193,9 @@ describe('InvoiceService', () => {
         populate: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue([]),
       })
-      await expect(service.findByProject('proj1')).rejects.toThrow(NotFoundException)
+      await expect(service.findByProject('proj1')).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -191,7 +206,11 @@ describe('InvoiceService', () => {
         populate: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue(updated),
       })
-      const result = await service.update(invoiceId, { status: 'APPROVED' } as any, companyId)
+      const result = await service.update(
+        invoiceId,
+        { status: 'APPROVED' } as any,
+        companyId
+      )
       expect(result.status).toBe('APPROVED')
     })
 
@@ -200,7 +219,9 @@ describe('InvoiceService', () => {
         populate: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue(null),
       })
-      await expect(service.update(invoiceId, {} as any, companyId)).rejects.toThrow(NotFoundException)
+      await expect(
+        service.update(invoiceId, {} as any, companyId)
+      ).rejects.toThrow(NotFoundException)
     })
   })
 
@@ -241,12 +262,16 @@ describe('InvoiceService', () => {
 
     it('lanza NotFoundException si no existe la factura', async () => {
       mockModel.findById.mockReturnValue(null)
-      await expect(service.downloadActaAceptacion(invoiceId)).rejects.toThrow(NotFoundException)
+      await expect(service.downloadActaAceptacion(invoiceId)).rejects.toThrow(
+        NotFoundException
+      )
     })
 
     it('lanza NotFoundException si no hay acta adjunta', async () => {
       mockModel.findById.mockReturnValue(makeInvoice({ actaAceptacion: null }))
-      await expect(service.downloadActaAceptacion(invoiceId)).rejects.toThrow(NotFoundException)
+      await expect(service.downloadActaAceptacion(invoiceId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -255,14 +280,18 @@ describe('InvoiceService', () => {
       mockModel.findOneAndDelete.mockReturnValue({
         exec: jest.fn().mockResolvedValue(makeInvoice()),
       })
-      await expect(service.remove(invoiceId, companyId)).resolves.toBeUndefined()
+      await expect(
+        service.remove(invoiceId, companyId)
+      ).resolves.toBeUndefined()
     })
 
     it('lanza NotFoundException si no existe', async () => {
       mockModel.findOneAndDelete.mockReturnValue({
         exec: jest.fn().mockResolvedValue(null),
       })
-      await expect(service.remove(invoiceId, companyId)).rejects.toThrow(NotFoundException)
+      await expect(service.remove(invoiceId, companyId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
@@ -282,15 +311,27 @@ describe('InvoiceService', () => {
       )
       expect(mockEmailService.sendInvoiceNotification).toHaveBeenCalledWith(
         'test@test.com',
-        expect.objectContaining({ invoiceNumber: 'F001-00001', providerName: 'Proveedor S.A.' })
+        expect.objectContaining({
+          invoiceNumber: 'F001-00001',
+          providerName: 'Proveedor S.A.',
+        })
       )
-      expect(result).toEqual({ success: true, message: 'Notificación enviada exitosamente' })
+      expect(result).toEqual({
+        success: true,
+        message: 'Notificación enviada exitosamente',
+      })
     })
 
     it('lanza HttpException si el envio falla', async () => {
-      mockEmailService.sendInvoiceNotification.mockRejectedValue(new Error('SMTP error'))
+      mockEmailService.sendInvoiceNotification.mockRejectedValue(
+        new Error('SMTP error')
+      )
       await expect(
-        service.sendInvoiceUploadedNotification('test@test.com', 'F001-00001', 'Proveedor')
+        service.sendInvoiceUploadedNotification(
+          'test@test.com',
+          'F001-00001',
+          'Proveedor'
+        )
       ).rejects.toThrow(HttpException)
     })
   })
@@ -303,7 +344,10 @@ describe('InvoiceService', () => {
         'Proveedor S.A.'
       )
       expect(mockEmailService.sendActaNotification).toHaveBeenCalled()
-      expect(result).toEqual({ success: true, message: 'Notificación enviada exitosamente' })
+      expect(result).toEqual({
+        success: true,
+        message: 'Notificación enviada exitosamente',
+      })
     })
   })
 

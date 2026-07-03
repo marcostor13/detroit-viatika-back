@@ -31,12 +31,16 @@ describe('RolesGuard', () => {
   })
 
   it('blocks access when user has no roles', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['Administrador'])
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['Administrador'])
     expect(guard.canActivate(makeContext([]))).toBe(false)
   })
 
   it('blocks access when user is undefined on request', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['Administrador'])
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['Administrador'])
     const ctx = {
       getHandler: () => ({}),
       getClass: () => ({}),
@@ -46,22 +50,30 @@ describe('RolesGuard', () => {
   })
 
   it('allows access when role matches exactly', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['Administrador'])
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['Administrador'])
     expect(guard.canActivate(makeContext(['Administrador']))).toBe(true)
   })
 
   it('blocks access when role does not match', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['Superadministrador'])
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['Superadministrador'])
     expect(guard.canActivate(makeContext(['Colaborador']))).toBe(false)
   })
 
   it('applies Coordinador -> Administrador alias for backward compat', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['Administrador'])
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['Administrador'])
     expect(guard.canActivate(makeContext(['Coordinador']))).toBe(true)
   })
 
   it('allows access when one of multiple required roles matches', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['Administrador', 'Superadministrador'])
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['Administrador', 'Superadministrador'])
     expect(guard.canActivate(makeContext(['Superadministrador']))).toBe(true)
   })
 })

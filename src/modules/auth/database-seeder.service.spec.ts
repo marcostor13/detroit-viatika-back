@@ -47,7 +47,10 @@ describe('DatabaseSeederService', () => {
 
   describe('onApplicationBootstrap', () => {
     it('runs without error when all roles already exist', async () => {
-      mockRoleService.getByName.mockResolvedValue({ _id: 'existing-id', name: 'Role' })
+      mockRoleService.getByName.mockResolvedValue({
+        _id: 'existing-id',
+        name: 'Role',
+      })
       mockUserService.findAllWithClient.mockResolvedValue([
         { role: { name: ROLES.SUPER_ADMIN } },
       ])
@@ -67,7 +70,10 @@ describe('DatabaseSeederService', () => {
     })
 
     it('skips creation when role already exists', async () => {
-      mockRoleService.getByName.mockResolvedValue({ _id: 'role-id', name: 'ExistingRole' })
+      mockRoleService.getByName.mockResolvedValue({
+        _id: 'role-id',
+        name: 'ExistingRole',
+      })
       mockUserService.findAllWithClient.mockResolvedValue([
         { role: { name: ROLES.SUPER_ADMIN } },
       ])
@@ -86,14 +92,17 @@ describe('DatabaseSeederService', () => {
         { role: { name: ROLES.SUPER_ADMIN } },
       ])
       await service.onApplicationBootstrap()
-      expect(mockRoleService.update).toHaveBeenCalledWith('old-id', { name: ROLES.SUPER_ADMIN })
+      expect(mockRoleService.update).toHaveBeenCalledWith('old-id', {
+        name: ROLES.SUPER_ADMIN,
+      })
     })
   })
 
   describe('seedSuperAdmin', () => {
     it('creates superadmin when none exists', async () => {
       mockRoleService.getByName.mockImplementation(async (name: string) => {
-        if (name === ROLES.SUPER_ADMIN) return { _id: 'super-role-id', name: ROLES.SUPER_ADMIN }
+        if (name === ROLES.SUPER_ADMIN)
+          return { _id: 'super-role-id', name: ROLES.SUPER_ADMIN }
         return { _id: 'role-id', name }
       })
       mockUserService.findAllWithClient.mockResolvedValue([])
@@ -104,7 +113,10 @@ describe('DatabaseSeederService', () => {
     })
 
     it('skips superadmin creation when one already exists', async () => {
-      mockRoleService.getByName.mockResolvedValue({ _id: 'role-id', name: 'Role' })
+      mockRoleService.getByName.mockResolvedValue({
+        _id: 'role-id',
+        name: 'Role',
+      })
       mockUserService.findAllWithClient.mockResolvedValue([
         { role: { name: ROLES.SUPER_ADMIN } },
       ])
@@ -123,9 +135,13 @@ describe('DatabaseSeederService', () => {
     })
 
     it('drops legacy email_1 index if it exists', async () => {
-      mockUserModel.collection.indexes.mockResolvedValueOnce([{ name: 'email_1' }])
+      mockUserModel.collection.indexes.mockResolvedValueOnce([
+        { name: 'email_1' },
+      ])
       mockRoleService.getByName.mockResolvedValue({ _id: 'r', name: 'Role' })
-      mockUserService.findAllWithClient.mockResolvedValue([{ role: { name: ROLES.SUPER_ADMIN } }])
+      mockUserService.findAllWithClient.mockResolvedValue([
+        { role: { name: ROLES.SUPER_ADMIN } },
+      ])
       await service.onApplicationBootstrap()
       expect(mockUserModel.collection.dropIndex).toHaveBeenCalledWith('email_1')
     })

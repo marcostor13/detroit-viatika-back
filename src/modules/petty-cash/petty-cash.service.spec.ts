@@ -13,7 +13,9 @@ const mockEmailService = {
 }
 
 const mockUserService = {
-  findEmailNameClient: jest.fn().mockResolvedValue({ name: 'Responsable', email: 'r@test.com' }),
+  findEmailNameClient: jest
+    .fn()
+    .mockResolvedValue({ name: 'Responsable', email: 'r@test.com' }),
   isEmailEnabled: jest.fn().mockResolvedValue(true),
 }
 
@@ -69,14 +71,22 @@ describe('PettyCashService', () => {
   describe('create', () => {
     it('lanza BadRequestException si monto es 0 o negativo', async () => {
       await expect(
-        service.create({ responsibleId, clientId, period: '202605', fundAmount: 0 }, 'u1')
+        service.create(
+          { responsibleId, clientId, period: '202605', fundAmount: 0 },
+          'u1'
+        )
       ).rejects.toThrow(BadRequestException)
     })
 
     it('lanza BadRequestException si ya existe caja activa para el responsable y periodo', async () => {
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc()) })
+      mockModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(makeDoc()),
+      })
       await expect(
-        service.create({ responsibleId, clientId, period: '202605', fundAmount: 500 }, 'u1')
+        service.create(
+          { responsibleId, clientId, period: '202605', fundAmount: 500 },
+          'u1'
+        )
       ).rejects.toThrow(BadRequestException)
     })
 
@@ -91,7 +101,9 @@ describe('PettyCashService', () => {
         }
         return {
           sort: jest.fn().mockReturnValue({
-            lean: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }),
+            lean: jest
+              .fn()
+              .mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }),
           }),
         }
       })
@@ -103,7 +115,9 @@ describe('PettyCashService', () => {
         'u1'
       )
 
-      expect(mockModel.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'pending_funding', fundAmount: 500 }))
+      expect(mockModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'pending_funding', fundAmount: 500 })
+      )
       expect(result).toBeDefined()
     })
   })
@@ -117,24 +131,40 @@ describe('PettyCashService', () => {
     }
 
     it('lanza NotFoundException si la caja no existe', async () => {
-      mockModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
-      await expect(service.registerFunding(docId, fundingDto, 'u1')).rejects.toThrow(NotFoundException)
+      mockModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
+      await expect(
+        service.registerFunding(docId, fundingDto, 'u1')
+      ).rejects.toThrow(NotFoundException)
     })
 
     it('lanza BadRequestException si el estado no es pending_funding', async () => {
-      mockModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc({ status: 'active' })) })
-      await expect(service.registerFunding(docId, fundingDto, 'u1')).rejects.toThrow(BadRequestException)
+      mockModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(makeDoc({ status: 'active' })),
+      })
+      await expect(
+        service.registerFunding(docId, fundingDto, 'u1')
+      ).rejects.toThrow(BadRequestException)
     })
 
     it('lanza BadRequestException si monto no coincide', async () => {
-      mockModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc({ fundAmount: 2000 })) })
-      await expect(service.registerFunding(docId, { ...fundingDto, amount: 1000 }, 'u1')).rejects.toThrow(/coincidir/)
+      mockModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(makeDoc({ fundAmount: 2000 })),
+      })
+      await expect(
+        service.registerFunding(docId, { ...fundingDto, amount: 1000 }, 'u1')
+      ).rejects.toThrow(/coincidir/)
     })
 
     it('activa la caja y envía email', async () => {
-      mockModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc()) })
+      mockModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(makeDoc()),
+      })
       const updated = makeDoc({ status: 'active' })
-      mockModel.findByIdAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue(updated) })
+      mockModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(updated),
+      })
 
       const result = await service.registerFunding(docId, fundingDto, 'u1')
       expect(result.status).toBe('active')
@@ -156,7 +186,10 @@ describe('PettyCashService', () => {
     })
 
     it('detecta categoria no permitida', () => {
-      const doc = makeDoc({ allowedCategories: ['alimentacion'], spentAmount: 0 }) as any
+      const doc = makeDoc({
+        allowedCategories: ['alimentacion'],
+        spentAmount: 0,
+      }) as any
       const errors = service.validateExpenseRules(doc, 50, 'combustible')
       expect(errors.some(e => e.includes('categor'))).toBe(true)
     })
@@ -166,14 +199,21 @@ describe('PettyCashService', () => {
       const doc = makeDoc({
         maxPerDay: 100,
         spentAmount: 0,
-        expenses: [{ amount: 80, registeredAt: today, expenseId: new Types.ObjectId() }],
+        expenses: [
+          { amount: 80, registeredAt: today, expenseId: new Types.ObjectId() },
+        ],
       }) as any
       const errors = service.validateExpenseRules(doc, 30)
       expect(errors.some(e => e.includes('Tope diario'))).toBe(true)
     })
 
     it('no devuelve errores cuando todo está dentro de los límites', () => {
-      const doc = makeDoc({ maxPerExpense: 200, maxPerDay: 500, allowedCategories: ['alimentacion'], spentAmount: 0 }) as any
+      const doc = makeDoc({
+        maxPerExpense: 200,
+        maxPerDay: 500,
+        allowedCategories: ['alimentacion'],
+        spentAmount: 0,
+      }) as any
       const errors = service.validateExpenseRules(doc, 100, 'alimentacion')
       expect(errors).toHaveLength(0)
     })
@@ -181,22 +221,38 @@ describe('PettyCashService', () => {
 
   describe('addExpense', () => {
     it('lanza BadRequestException si la caja no está activa', async () => {
-      mockModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc({ status: 'pending_funding' })) })
-      await expect(service.addExpense(docId, new Types.ObjectId().toString(), 100)).rejects.toThrow(BadRequestException)
+      mockModel.findById.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockResolvedValue(makeDoc({ status: 'pending_funding' })),
+      })
+      await expect(
+        service.addExpense(docId, new Types.ObjectId().toString(), 100)
+      ).rejects.toThrow(BadRequestException)
     })
 
     it('lanza BadRequestException si viola reglas de validacion', async () => {
       mockModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(makeDoc({ status: 'active', fundAmount: 50, spentAmount: 0 })),
+        exec: jest
+          .fn()
+          .mockResolvedValue(
+            makeDoc({ status: 'active', fundAmount: 50, spentAmount: 0 })
+          ),
       })
-      await expect(service.addExpense(docId, new Types.ObjectId().toString(), 100)).rejects.toThrow(BadRequestException)
+      await expect(
+        service.addExpense(docId, new Types.ObjectId().toString(), 100)
+      ).rejects.toThrow(BadRequestException)
     })
 
     it('registra el gasto y actualiza saldo', async () => {
       const expenseId = new Types.ObjectId().toString()
-      mockModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc({ status: 'active' })) })
+      mockModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(makeDoc({ status: 'active' })),
+      })
       const updated = makeDoc({ status: 'active', spentAmount: 150 })
-      mockModel.findByIdAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue(updated) })
+      mockModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(updated),
+      })
 
       const result = await service.addExpense(docId, expenseId, 150)
       expect(mockModel.findByIdAndUpdate).toHaveBeenCalledWith(
@@ -210,14 +266,24 @@ describe('PettyCashService', () => {
 
   describe('close', () => {
     it('lanza BadRequestException si la caja no está activa', async () => {
-      mockModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc({ status: 'pending_funding' })) })
-      await expect(service.close(docId, 'u1')).rejects.toThrow(BadRequestException)
+      mockModel.findById.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockResolvedValue(makeDoc({ status: 'pending_funding' })),
+      })
+      await expect(service.close(docId, 'u1')).rejects.toThrow(
+        BadRequestException
+      )
     })
 
     it('cierra la caja', async () => {
-      mockModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(makeDoc({ status: 'active' })) })
+      mockModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(makeDoc({ status: 'active' })),
+      })
       const updated = makeDoc({ status: 'closed' })
-      mockModel.findByIdAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue(updated) })
+      mockModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(updated),
+      })
 
       const result = await service.close(docId, 'u1')
       expect(result.status).toBe('closed')

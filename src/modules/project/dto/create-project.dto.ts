@@ -20,4 +20,37 @@ export class CreateProjectDto {
   @IsString()
   @IsOptional()
   clientName?: string
+
+  @IsString()
+  @IsOptional()
+  lineaNegocioId?: string
+
+  @IsString()
+  @IsOptional()
+  categoryGroupId?: string
+
+  // --- Mapeo contable (asientos Contanet) ---
+  @IsString()
+  @IsOptional()
+  cuentaAnalitica9x?: string
+
+  @IsString()
+  @IsOptional()
+  cuentaDestino6x?: string
+
+  @IsString()
+  @IsOptional()
+  centroCosto?: string
+
+  @IsString()
+  @IsOptional()
+  subCentroCosto?: string
+
+  @IsString()
+  @IsOptional()
+  area?: string
+
+  @IsBoolean()
+  @IsOptional()
+  esAdministrativo?: boolean
 }

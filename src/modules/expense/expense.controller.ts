@@ -45,6 +45,41 @@ export class ExpenseController {
     }
   }
 
+  /**
+   * Escanea un comprobante de depósito (imagen o PDF, por URL) y extrae monto, fecha,
+   * hora, n° de operación y titular. Lo usan tanto Contabilidad (depósito de rendición
+   * directa, reembolso) como el Colaborador/Coordinador (comprobante de devolución de saldo).
+   */
+  @Post('scan-deposit-amount')
+  @Roles(
+    ROLES.CONTABILIDAD,
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.COLABORADOR,
+    ROLES.COORDINADOR
+  )
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async scanDepositAmount(@Body() body: { url?: string; mimeType?: string }) {
+    if (!body?.url) {
+      throw new Error('No se proporcionó la URL del comprobante.')
+    }
+    return this.expenseService.extractDepositInfo(body.url, body.mimeType)
+  }
+
+  /**
+   * Escanea un comprobante de caja (imagen o PDF, por URL ya subida a S3) y
+   * extrae los campos para autorellenar el formulario. Ligero: no persiste.
+   */
+  @Post('scan-cash-voucher')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async scanCashVoucher(@Body() body: { url?: string; mimeType?: string }) {
+    if (!body?.url) {
+      throw new Error('No se proporcionó la URL del comprobante de caja.')
+    }
+    return this.expenseService.scanCashVoucher(body.url, body.mimeType)
+  }
+
   @Post('analyze-image')
   @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR)
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -220,19 +255,15 @@ export class ExpenseController {
         success: false,
         message: 'Error en credenciales SUNAT',
         sunat_error: body?.sunat_error ?? body?.error ?? null,
-        sunat_description: body?.sunat_description ?? body?.error_description ?? null,
+        sunat_description:
+          body?.sunat_description ?? body?.error_description ?? null,
         detail: body?.message ?? error.message ?? 'Sin detalles adicionales',
       }
     }
   }
 
   @Get('invoice/:id/sunat-validation')
-  @Roles(
-    ROLES.SUPER_ADMIN,
-    ROLES.ADMIN,
-    ROLES.COLABORADOR,
-    ROLES.CONTABILIDAD
-  )
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
   @UseGuards(JwtAuthGuard, RolesGuard)
   getSunatValidation(
     @Param('id') id: string,
@@ -246,12 +277,7 @@ export class ExpenseController {
   }
 
   @Get('invoice/:id')
-  @Roles(
-    ROLES.SUPER_ADMIN,
-    ROLES.ADMIN,
-    ROLES.COLABORADOR,
-    ROLES.CONTABILIDAD
-  )
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
   @UseGuards(JwtAuthGuard, RolesGuard)
   findOne(
     @Param('id') id: string,
@@ -273,13 +299,18 @@ export class ExpenseController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string
   ) {
     const userId = req.user._id || req.user.sub
     const raw = req.user?.clientId
-    const clientId = raw && typeof raw === 'object' && '_id' in raw ? String(raw._id) : String(raw ?? '')
+    const clientId =
+      raw && typeof raw === 'object' && '_id' in raw
+        ? String(raw._id)
+        : String(raw ?? '')
     return this.expenseService.findMyDirectExpenses(userId, clientId, {
-      tipo, dateFrom, dateTo,
+      tipo,
+      dateFrom,
+      dateTo,
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
     })
@@ -294,17 +325,19 @@ export class ExpenseController {
   ) {
     const userId = req.user._id || req.user.sub
     const raw = req.user?.clientId
-    const clientId = raw && typeof raw === 'object' && '_id' in raw ? String(raw._id) : String(raw ?? '')
-    return this.expenseService.submitMyDirectExpenses(userId, clientId, body.motivo)
+    const clientId =
+      raw && typeof raw === 'object' && '_id' in raw
+        ? String(raw._id)
+        : String(raw ?? '')
+    return this.expenseService.submitMyDirectExpenses(
+      userId,
+      clientId,
+      body.motivo
+    )
   }
 
   @Get('stats')
-  @Roles(
-    ROLES.SUPER_ADMIN,
-    ROLES.ADMIN,
-    ROLES.COLABORADOR,
-    ROLES.CONTABILIDAD
-  )
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
   @UseGuards(JwtAuthGuard, RolesGuard)
   getStatusCounts(@Request() req) {
     const clientId = req.user?.clientId
@@ -313,12 +346,7 @@ export class ExpenseController {
   }
 
   @Get(':clientId')
-  @Roles(
-    ROLES.SUPER_ADMIN,
-    ROLES.ADMIN,
-    ROLES.COLABORADOR,
-    ROLES.CONTABILIDAD
-  )
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
   @UseGuards(JwtAuthGuard, RolesGuard)
   findAll(
     @Param('clientId') clientId: string,
@@ -334,7 +362,13 @@ export class ExpenseController {
   }
 
   @Patch('invoice/:id')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.COORDINADOR)
+  @Roles(
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.COLABORADOR,
+    ROLES.CONTABILIDAD,
+    ROLES.COORDINADOR
+  )
   @UseGuards(JwtAuthGuard, RolesGuard)
   update(
     @Param('id') id: string,
@@ -347,6 +381,35 @@ export class ExpenseController {
       updateExpenseDto,
       this.toActorContext(req.user)
     )
+  }
+
+  /**
+   * Edición del desglose contable (base/IGV/tasa/inafecto/detalleAnalitico) por
+   * Contabilidad antes de generar los asientos. Marca el desglose como revisado.
+   */
+  @Patch('invoice/:id/desglose')
+  @Roles(ROLES.CONTABILIDAD, ROLES.ADMIN, ROLES.SUPER_ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async updateDesglose(
+    @Param('id') id: string,
+    @Body() updateExpenseDto: UpdateExpenseDto,
+    @Request() req
+  ) {
+    const result = await this.expenseService.update(
+      id,
+      { ...updateExpenseDto, desgloseRevisado: true },
+      this.toActorContext(req.user)
+    )
+    this.auditLogService.log({
+      userId: req.user?._id || req.user?.sub,
+      userName: req.user?.name || req.user?.email || 'Usuario',
+      action: 'update_expense_desglose',
+      module: 'facturas',
+      entityId: id,
+      details: 'Edición de desglose contable',
+      clientId: req.user?.clientId,
+    })
+    return result
   }
 
   @Patch('invoice/:id/approve')
@@ -393,7 +456,13 @@ export class ExpenseController {
   }
 
   @Delete('invoice/:id')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.COORDINADOR)
+  @Roles(
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.COLABORADOR,
+    ROLES.CONTABILIDAD,
+    ROLES.COORDINADOR
+  )
   @UseGuards(JwtAuthGuard, RolesGuard)
   async remove(@Param('id') id: string, @Request() req) {
     const result = await this.expenseService.remove(
@@ -418,7 +487,8 @@ export class ExpenseController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   approveByCoord(
     @Param('id') id: string,
-    @Request() req: { user: { _id?: string; roles?: string[]; clientId?: string } }
+    @Request()
+    req: { user: { _id?: string; roles?: string[]; clientId?: string } }
   ) {
     return this.expenseService.approveByCoord(id, this.toActorContext(req.user))
   }
@@ -429,9 +499,14 @@ export class ExpenseController {
   rejectByCoord(
     @Param('id') id: string,
     @Body() body: { reason: string },
-    @Request() req: { user: { _id?: string; roles?: string[]; clientId?: string } }
+    @Request()
+    req: { user: { _id?: string; roles?: string[]; clientId?: string } }
   ) {
-    return this.expenseService.rejectByCoord(id, this.toActorContext(req.user), body.reason)
+    return this.expenseService.rejectByCoord(
+      id,
+      this.toActorContext(req.user),
+      body.reason
+    )
   }
 
   @Patch('invoice/:id/approve-cont')
@@ -439,9 +514,13 @@ export class ExpenseController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   approveByContabilidad(
     @Param('id') id: string,
-    @Request() req: { user: { _id?: string; roles?: string[]; clientId?: string } }
+    @Request()
+    req: { user: { _id?: string; roles?: string[]; clientId?: string } }
   ) {
-    return this.expenseService.approveByContabilidad(id, this.toActorContext(req.user))
+    return this.expenseService.approveByContabilidad(
+      id,
+      this.toActorContext(req.user)
+    )
   }
 
   @Patch('invoice/:id/reject-cont')
@@ -450,9 +529,14 @@ export class ExpenseController {
   rejectByContabilidad(
     @Param('id') id: string,
     @Body() body: { reason: string },
-    @Request() req: { user: { _id?: string; roles?: string[]; clientId?: string } }
+    @Request()
+    req: { user: { _id?: string; roles?: string[]; clientId?: string } }
   ) {
-    return this.expenseService.rejectByContabilidad(id, this.toActorContext(req.user), body.reason)
+    return this.expenseService.rejectByContabilidad(
+      id,
+      this.toActorContext(req.user),
+      body.reason
+    )
   }
 
   @Patch('report/:reportId/batch-approve-collab')
@@ -460,9 +544,13 @@ export class ExpenseController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   batchApproveByCollaborator(
     @Param('reportId') reportId: string,
-    @Request() req: { user: { _id?: string; roles?: string[]; clientId?: string } }
+    @Request()
+    req: { user: { _id?: string; roles?: string[]; clientId?: string } }
   ) {
-    return this.expenseService.batchApproveByCollaborator(reportId, this.toActorContext(req.user))
+    return this.expenseService.batchApproveByCollaborator(
+      reportId,
+      this.toActorContext(req.user)
+    )
   }
 
   @Patch('report/:reportId/batch-approve-coord')
@@ -470,13 +558,23 @@ export class ExpenseController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   batchApproveByCoord(
     @Param('reportId') reportId: string,
-    @Request() req: { user: { _id?: string; roles?: string[]; clientId?: string } }
+    @Request()
+    req: { user: { _id?: string; roles?: string[]; clientId?: string } }
   ) {
-    return this.expenseService.batchApproveByCoord(reportId, this.toActorContext(req.user))
+    return this.expenseService.batchApproveByCoord(
+      reportId,
+      this.toActorContext(req.user)
+    )
   }
 
   @Post('invoice/:id/validate-sunat')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.COORDINADOR)
+  @Roles(
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.COLABORADOR,
+    ROLES.CONTABILIDAD,
+    ROLES.COORDINADOR
+  )
   @UseGuards(JwtAuthGuard, RolesGuard)
   async validateWithSunat(
     @Param('id') id: string,

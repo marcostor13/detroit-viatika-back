@@ -1,4 +1,12 @@
-import { IsString, IsNumber, IsMongoId, IsOptional, Min, Matches, IsArray } from 'class-validator'
+import {
+  IsString,
+  IsNumber,
+  IsMongoId,
+  IsOptional,
+  Min,
+  Matches,
+  IsArray,
+} from 'class-validator'
 
 export class CreatePettyCashDto {
   @IsMongoId()
@@ -9,7 +17,9 @@ export class CreatePettyCashDto {
 
   /** AAAAMM format, e.g. 202605 */
   @IsString()
-  @Matches(/^\d{6}$/, { message: 'El período debe tener formato AAAAMM (ej: 202605)' })
+  @Matches(/^\d{6}$/, {
+    message: 'El período debe tener formato AAAAMM (ej: 202605)',
+  })
   period: string
 
   @IsNumber()

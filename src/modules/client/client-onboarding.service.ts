@@ -80,7 +80,9 @@ export class ClientOnboardingService {
       })
     } catch (error) {
       // Rollback manual: eliminar el cliente recién creado
-      await this.clientService.remove(createdClient._id.toString()).catch(() => {})
+      await this.clientService
+        .remove(createdClient._id.toString())
+        .catch(() => {})
       this.logger.error(
         'Error creando usuario admin, cliente revertido:',
         error

@@ -6,6 +6,7 @@ export type AdvanceStatus =
   | 'pending_l1'
   | 'pending_l2'
   | 'approved'
+  | 'partially_paid'
   | 'paid'
   | 'settled'
   | 'rejected'
@@ -27,6 +28,11 @@ export interface ReturnProof {
   fileKey?: string
   uploadedAt: Date
   note?: string
+  /** Datos extraídos del comprobante por OCR/visión (informativos). */
+  scannedAmount?: number
+  operationDate?: string
+  operationTime?: string
+  titular?: string
 }
 
 export interface ReturnValidation {
@@ -62,10 +68,36 @@ export interface PaymentInfo {
   cci?: string
   transferDate: Date
   reference?: string
-  paymentReceiptUrl: string
+  paymentReceiptUrl?: string
   paymentReceiptFileName?: string
   paymentReceiptMimeType?: string
   paymentReceiptSizeBytes?: number
+}
+
+/**
+ * Pago parcial de un viático. Contabilidad puede registrar varios (incluso en
+ * días distintos) y acumular incluso por encima de lo solicitado. Cada pago
+ * guarda su comprobante y los datos extraídos por OCR/visión.
+ */
+export interface AdvancePayment {
+  amount: number
+  method: 'transferencia_bancaria' | 'efectivo' | 'cheque'
+  bankName?: string
+  accountNumber?: string
+  cci?: string
+  transferDate: Date
+  reference?: string
+  paymentReceiptUrl?: string
+  paymentReceiptFileName?: string
+  paymentReceiptMimeType?: string
+  paymentReceiptSizeBytes?: number
+  // Datos extraídos del comprobante (OCR/visión)
+  scannedAmount?: number
+  scannedTitular?: string
+  operationNumber?: string
+  operationDate?: string
+  operationTime?: string
+  createdAt: Date
 }
 
 /** Detalle por categoría — Fase 2 (Funcionalidades.md §2.1) */
@@ -95,6 +127,8 @@ export interface AdvanceDocument extends Document {
   expenseReportId?: Types.ObjectId
   projectId?: Types.ObjectId
   place?: string
+  lat?: number
+  lng?: number
   startDate?: Date
   endDate?: Date
   lines?: AdvanceLineItem[]
@@ -107,6 +141,8 @@ export interface AdvanceDocument extends Document {
   requiredLevels: number
   approvalHistory: ApprovalEntry[]
   paymentInfo?: PaymentInfo
+  payments?: AdvancePayment[]
+  paidAmount?: number
   settlement?: {
     expenseTotal: number
     advanceAmount: number
@@ -128,6 +164,12 @@ export interface AdvanceDocument extends Document {
   pendingBalanceAmount?: number
   /** Monto adicional solicitado por encima del saldo pendiente. */
   additionalAmount?: number
+  /** Saldos de la bolsa consumidos para financiar esta solicitud de viáticos. */
+  saldoIds?: Types.ObjectId[]
+  /** Datos bancarios alternativos ingresados en la solicitud (opcionales). */
+  requestBankName?: string
+  requestAccountNumber?: string
+  requestCci?: string
 }
 
 // Umbrales de aprobación multinivel
@@ -155,6 +197,12 @@ export class Advance {
 
   @Prop({ required: false })
   place?: string
+
+  @Prop({ required: false })
+  lat?: number
+
+  @Prop({ required: false })
+  lng?: number
 
   @Prop({ type: Date, required: false })
   startDate?: Date
@@ -212,6 +260,7 @@ export class Advance {
       'pending_l1',
       'pending_l2',
       'approved',
+      'partially_paid',
       'paid',
       'settled',
       'rejected',
@@ -255,7 +304,9 @@ export class Advance {
       cci: { type: String },
       transferDate: { type: Date },
       reference: { type: String },
-      paymentReceiptUrl: { type: String, required: true },
+      // Opcional: en pagos en efectivo no hay comprobante. La obligatoriedad
+      // para transferencia/cheque se valida en advance.service.registerPayment.
+      paymentReceiptUrl: { type: String },
       paymentReceiptFileName: { type: String },
       paymentReceiptMimeType: { type: String },
       paymentReceiptSizeBytes: { type: Number },
@@ -263,6 +314,42 @@ export class Advance {
     },
   })
   paymentInfo?: PaymentInfo
+
+  @Prop({
+    type: [
+      {
+        amount: { type: Number, required: true },
+        method: {
+          type: String,
+          enum: ['transferencia_bancaria', 'efectivo', 'cheque'],
+        },
+        bankName: { type: String },
+        accountNumber: { type: String },
+        cci: { type: String },
+        transferDate: { type: Date },
+        reference: { type: String },
+        // Opcional: efectivo no lleva comprobante; transferencia/cheque se
+        // valida en advance.service.registerPayment.
+        paymentReceiptUrl: { type: String },
+        paymentReceiptFileName: { type: String },
+        paymentReceiptMimeType: { type: String },
+        paymentReceiptSizeBytes: { type: Number },
+        scannedAmount: { type: Number },
+        scannedTitular: { type: String },
+        operationNumber: { type: String },
+        operationDate: { type: String },
+        operationTime: { type: String },
+        createdAt: { type: Date },
+        _id: false,
+      },
+    ],
+    default: undefined,
+  })
+  payments?: AdvancePayment[]
+
+  /** Suma acumulada de los pagos parciales registrados. */
+  @Prop({ type: Number, required: false })
+  paidAmount?: number
 
   /**
    * Se define como objeto plano para evitar conflicto de casteo con la clave
@@ -303,6 +390,18 @@ export class Advance {
 
   @Prop({ type: Number, required: false })
   additionalAmount?: number
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Saldo' }], default: undefined })
+  saldoIds?: Types.ObjectId[]
+
+  @Prop({ type: String, required: false })
+  requestBankName?: string
+
+  @Prop({ type: String, required: false })
+  requestAccountNumber?: string
+
+  @Prop({ type: String, required: false })
+  requestCci?: string
 }
 
 export const AdvanceSchema = SchemaFactory.createForClass(Advance)

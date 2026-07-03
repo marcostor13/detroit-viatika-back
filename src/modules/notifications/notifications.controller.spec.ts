@@ -27,16 +27,19 @@ describe('NotificationsController', () => {
     jest.clearAllMocks()
     const module: TestingModule = await Test.createTestingModule({
       controllers: [NotificationsController],
-      providers: [
-        { provide: NotificationsService, useValue: mockService },
-      ],
+      providers: [{ provide: NotificationsService, useValue: mockService }],
     }).compile()
     controller = module.get<NotificationsController>(NotificationsController)
   })
 
   describe('create', () => {
     it('crea la notificacion con el DTO proporcionado', async () => {
-      const dto: any = { userId, title: 'Test', message: 'Mensaje', type: 'info' }
+      const dto: any = {
+        userId,
+        title: 'Test',
+        message: 'Mensaje',
+        type: 'info',
+      }
       const result = await controller.create(dto)
       expect(mockService.create).toHaveBeenCalledWith(dto)
       expect(result).toBeDefined()
@@ -53,7 +56,9 @@ describe('NotificationsController', () => {
 
     it('lanza UnauthorizedException si no se puede identificar el usuario', () => {
       const req = { user: {} }
-      expect(() => controller.findAll(req as never)).toThrow(UnauthorizedException)
+      expect(() => controller.findAll(req as never)).toThrow(
+        UnauthorizedException
+      )
     })
   })
 

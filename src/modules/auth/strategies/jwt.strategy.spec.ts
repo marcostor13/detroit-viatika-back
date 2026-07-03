@@ -17,7 +17,11 @@ describe('JwtStrategy', () => {
       email: 'test@test.com',
       roles: ['Colaborador'],
       clientId: 'client-id-456',
-      permissions: { modules: ['tesoreria'], canApproveL1: true, canApproveL2: false },
+      permissions: {
+        modules: ['tesoreria'],
+        canApproveL1: true,
+        canApproveL2: false,
+      },
     }
     const result = await strategy.validate(payload)
     expect(result).toEqual({
@@ -25,7 +29,11 @@ describe('JwtStrategy', () => {
       email: 'test@test.com',
       roles: ['Colaborador'],
       clientId: 'client-id-456',
-      permissions: { modules: ['tesoreria'], canApproveL1: true, canApproveL2: false },
+      permissions: {
+        modules: ['tesoreria'],
+        canApproveL1: true,
+        canApproveL2: false,
+      },
     })
   })
 
@@ -46,7 +54,12 @@ describe('JwtStrategy', () => {
   })
 
   it('validate() maps userId to _id', async () => {
-    const payload = { userId: 'abc', email: 'a@b.com', roles: [], clientId: 'c1' }
+    const payload = {
+      userId: 'abc',
+      email: 'a@b.com',
+      roles: [],
+      clientId: 'c1',
+    }
     const result = await strategy.validate(payload)
     expect(result._id).toBe('abc')
   })

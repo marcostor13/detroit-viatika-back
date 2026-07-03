@@ -7,12 +7,17 @@ import { EmailService } from '../email/email.service'
 import { RoleService } from '../role/role.service'
 import { ROLES } from '../auth/enums/roles.enum'
 
-const adminRole = { _id: { toString: () => 'role-admin-id' }, name: ROLES.ADMIN }
+const adminRole = {
+  _id: { toString: () => 'role-admin-id' },
+  name: ROLES.ADMIN,
+}
 const createdClient = {
   _id: { toString: () => 'client-id-1' },
   comercialName: 'Test Co',
   email: 'test@co.com',
-  toObject: jest.fn().mockReturnValue({ _id: 'client-id-1', comercialName: 'Test Co' }),
+  toObject: jest
+    .fn()
+    .mockReturnValue({ _id: 'client-id-1', comercialName: 'Test Co' }),
 }
 const createdUser = {
   _id: 'user-id-1',
@@ -77,7 +82,9 @@ describe('ClientOnboardingService', () => {
           isCompanyAdmin: true,
         })
       )
-      expect(result.message).toBe('Cliente registrado correctamente con usuario')
+      expect(result.message).toBe(
+        'Cliente registrado correctamente con usuario'
+      )
       expect(result.adminUser.email).toBe('admin@testco.com')
       expect(result.adminUser.temporaryPassword).toBe('Temp@1234')
     })
@@ -106,19 +113,29 @@ describe('ClientOnboardingService', () => {
   describe('registerClientWithUser — error paths', () => {
     it('throws NotFoundException when admin role does not exist', async () => {
       mockRoleService.getByName.mockResolvedValueOnce(null)
-      await expect(service.registerClientWithUser(payload)).rejects.toThrow(NotFoundException)
+      await expect(service.registerClientWithUser(payload)).rejects.toThrow(
+        NotFoundException
+      )
     })
 
     it('rolls back client when user creation fails', async () => {
-      mockUserService.create.mockRejectedValueOnce(new Error('Email already exists'))
-      await expect(service.registerClientWithUser(payload)).rejects.toThrow('Email already exists')
+      mockUserService.create.mockRejectedValueOnce(
+        new Error('Email already exists')
+      )
+      await expect(service.registerClientWithUser(payload)).rejects.toThrow(
+        'Email already exists'
+      )
       expect(mockClientService.remove).toHaveBeenCalledWith('client-id-1')
     })
 
     it('does not throw when welcome email fails', async () => {
-      mockEmailService.sendProviderWelcomeEmail.mockRejectedValueOnce(new Error('SMTP error'))
+      mockEmailService.sendProviderWelcomeEmail.mockRejectedValueOnce(
+        new Error('SMTP error')
+      )
       const result = await service.registerClientWithUser(payload)
-      expect(result.message).toBe('Cliente registrado correctamente con usuario')
+      expect(result.message).toBe(
+        'Cliente registrado correctamente con usuario'
+      )
     })
   })
 

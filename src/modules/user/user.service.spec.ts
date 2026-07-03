@@ -122,7 +122,10 @@ describe('UserService', () => {
       // La contraseña que se hashea es la temporal generada automáticamente, no la del DTO
       expect(bcrypt.hash).toHaveBeenCalledWith(expect.any(String), 10)
       expect(mockUserModel.create).toHaveBeenCalledWith(
-        expect.objectContaining({ password: 'hashed_pw', mustChangePassword: true })
+        expect.objectContaining({
+          password: 'hashed_pw',
+          mustChangePassword: true,
+        })
       )
       expect(result).toMatchObject({ email: 'user@example.com' })
       expect((result as any).temporaryPassword).toBeDefined()

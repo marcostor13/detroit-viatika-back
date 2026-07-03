@@ -26,12 +26,17 @@ describe('LocalStrategy', () => {
 
   it('validate() throws BadRequestException when validateUser returns null', async () => {
     mockAuthService.validateUser.mockResolvedValue(null)
-    await expect(strategy.validate('bad@b.com', 'wrongpass')).rejects.toThrow(BadRequestException)
+    await expect(strategy.validate('bad@b.com', 'wrongpass')).rejects.toThrow(
+      BadRequestException
+    )
   })
 
   it('validate() calls authService.validateUser with email and password', async () => {
     mockAuthService.validateUser.mockResolvedValue({ _id: 'u1' })
     await strategy.validate('a@b.com', 'mypass')
-    expect(mockAuthService.validateUser).toHaveBeenCalledWith('a@b.com', 'mypass')
+    expect(mockAuthService.validateUser).toHaveBeenCalledWith(
+      'a@b.com',
+      'mypass'
+    )
   })
 })

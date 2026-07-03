@@ -68,6 +68,15 @@ export class ClientController {
     return this.clientService.updateNotificationSettings(id, dto)
   }
 
+  @Patch(':id/tesoreria-emails')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD)
+  updateTesoreriaEmails(
+    @Param('id') id: string,
+    @Body() body: { emails: string[] }
+  ) {
+    return this.clientService.updateTesoreriaEmails(id, body.emails ?? [])
+  }
+
   @Delete(':id')
   @Roles(ROLES.SUPER_ADMIN)
   async remove(@Param('id') id: string) {

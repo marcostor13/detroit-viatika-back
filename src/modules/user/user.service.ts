@@ -260,6 +260,20 @@ export class UserService {
     }
   }
 
+  async findUserIdsByCoordinator(
+    coordinatorId: string,
+    clientId: string
+  ): Promise<Types.ObjectId[]> {
+    const users = await this.userModel
+      .find({
+        coordinatorId: new Types.ObjectId(coordinatorId),
+        clientId: new Types.ObjectId(clientId),
+      })
+      .select('_id')
+      .exec()
+    return users.map(u => u._id)
+  }
+
   async findAll(clientId: Types.ObjectId) {
     const users = await this.userModel
       .find({ clientId })
@@ -274,6 +288,27 @@ export class UserService {
       client: user.clientId,
       isActive: user.isActive,
       isCompanyAdmin: (user as any).isCompanyAdmin ?? false,
+    }))
+  }
+
+  /** Lista mínima de trabajadores activos del cliente, para selectores. */
+  async findColaboradoresBasic(clientId: Types.ObjectId | string) {
+    // clientId llega como string desde el token JWT pero se almacena como ObjectId:
+    // se convierte explícitamente (igual que findAll vía ParseObjectIdPipe).
+    const idStr = clientId.toString()
+    if (!Types.ObjectId.isValid(idStr)) return []
+    const cid = new Types.ObjectId(idStr)
+    const users = await this.userModel
+      .find({ clientId: cid, isActive: { $ne: false } })
+      .select('_id name email dni')
+      .sort({ name: 1 })
+      .lean()
+      .exec()
+    return users.map((u: any) => ({
+      _id: u._id,
+      name: u.name,
+      email: u.email,
+      dni: u.dni,
     }))
   }
 
@@ -510,9 +545,14 @@ export class UserService {
    * porque hay flujos que separan notificación in-app del correo).
    * NO incluye usuarios cuyo único vínculo con contabilidad sean permisos de módulo.
    */
-  async findContabilidadUsersForNotif(
-    clientId: string
-  ): Promise<{ _id: string; email: string; name: string; emailNotificationsEnabled: boolean }[]> {
+  async findContabilidadUsersForNotif(clientId: string): Promise<
+    {
+      _id: string
+      email: string
+      name: string
+      emailNotificationsEnabled: boolean
+    }[]
+  > {
     const contabilidadRole = await this.roleService.getByName('Contabilidad')
     if (!contabilidadRole) return []
 
@@ -537,7 +577,12 @@ export class UserService {
       : []
 
     const seen = new Set<string>()
-    const out: { _id: string; email: string; name: string; emailNotificationsEnabled: boolean }[] = []
+    const out: {
+      _id: string
+      email: string
+      name: string
+      emailNotificationsEnabled: boolean
+    }[] = []
     for (const u of [...scopedUsers, ...globalContabilidad]) {
       const em = u.email?.trim().toLowerCase()
       if (!em || seen.has(em)) continue
@@ -569,7 +614,9 @@ export class UserService {
         isActive: true,
         emailNotificationsEnabled: true,
         $or: [
-          ...(contabilidadRole ? [{ roleId: (contabilidadRole as any)._id }] : []),
+          ...(contabilidadRole
+            ? [{ roleId: (contabilidadRole as any)._id }]
+            : []),
           { 'permissions.canApproveL2': true },
         ],
       })
@@ -663,56 +710,285 @@ export class UserService {
     return { temporaryPassword }
   }
 
+  /** Normaliza un encabezado: minúsculas, sin tildes, sin espacios extra. */
+  private normalizeHeader(h: string): string {
+    return String(h)
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  /** Alias de encabezados (ES/EN) a los campos canónicos del importador. */
+  private static readonly BULK_HEADER_ALIASES: Record<string, string> = {
+    name: 'name',
+    nombre: 'name',
+    nombres: 'name',
+    'nombre completo': 'name',
+    email: 'email',
+    correo: 'email',
+    'correo electronico': 'email',
+    'e-mail': 'email',
+    mail: 'email',
+    dni: 'dni',
+    documento: 'dni',
+    'nro documento': 'dni',
+    'numero de documento': 'dni',
+    employeecode: 'employeeCode',
+    codigo: 'employeeCode',
+    'codigo empleado': 'employeeCode',
+    'codigo de empleado': 'employeeCode',
+    'codigo colaborador': 'employeeCode',
+    area: 'area',
+    cargo: 'cargo',
+    puesto: 'cargo',
+    phone: 'phone',
+    telefono: 'phone',
+    celular: 'phone',
+    movil: 'phone',
+    address: 'address',
+    direccion: 'address',
+    domicilio: 'address',
+    role: 'role',
+    rol: 'role',
+    perfil: 'role',
+    coordinatoremail: 'coordinatorEmail',
+    'email coordinador': 'coordinatorEmail',
+    emailcoordinador: 'coordinatorEmail',
+    'correo coordinador': 'coordinatorEmail',
+    coordinador: 'coordinatorEmail',
+    bankname: 'bankName',
+    banco: 'bankName',
+    'nombre banco': 'bankName',
+    accountnumber: 'accountNumber',
+    'numero cuenta': 'accountNumber',
+    'numero de cuenta': 'accountNumber',
+    cuenta: 'accountNumber',
+    'nro cuenta': 'accountNumber',
+    cci: 'cci',
+    'codigo cci': 'cci',
+    accounttype: 'accountType',
+    'tipo cuenta': 'accountType',
+    'tipo de cuenta': 'accountType',
+    tipocuenta: 'accountType',
+  }
+
+  private mapBulkRow(raw: Record<string, any>): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(raw)) {
+      const field = UserService.BULK_HEADER_ALIASES[this.normalizeHeader(key)]
+      if (field && value !== undefined && value !== null) {
+        out[field] = String(value).trim()
+      }
+    }
+    return out
+  }
+
+  /** Permisos por defecto según el rol (espejo de la creación manual en el front). */
+  private defaultPermissionsForRole(roleName: string): IUserPermissions & {
+    categoryIds: string[]
+  } {
+    const ALL_NON_COLAB = [
+      'nueva-rendicion',
+      'rendiciones',
+      'viaticos',
+      'consolidated-invoices',
+      'tesoreria',
+      'configuracion',
+      'audit-log',
+    ]
+    switch (roleName) {
+      case 'Coordinador':
+        return {
+          modules: ['rendiciones', 'viaticos', 'tesoreria'],
+          canApproveL1: true,
+          canApproveL2: false,
+          categoryIds: [],
+        }
+      case 'Contabilidad':
+        return {
+          modules: ALL_NON_COLAB,
+          canApproveL1: true,
+          canApproveL2: true,
+          categoryIds: [],
+        }
+      case 'Administrador':
+        return {
+          modules: ALL_NON_COLAB,
+          canApproveL1: false,
+          canApproveL2: false,
+          categoryIds: [],
+        }
+      case 'Colaborador':
+      default:
+        return {
+          modules: ['mis-rendiciones', 'nueva-rendicion', 'viaticos'],
+          canApproveL1: false,
+          canApproveL2: false,
+          categoryIds: [],
+        }
+    }
+  }
+
   async bulkImportUsers(
-    rows: Array<{
-      name: string
-      email: string
-      password: string
-      roleId: string
-      clientId: string
-      coordinatorId?: string
-    }>,
-    defaultClientId: string,
-    defaultRoleId: string
-  ): Promise<{ created: number; skipped: string[]; errors: string[] }> {
+    rawRows: Array<Record<string, any>>,
+    clientId: string
+  ): Promise<{
+    created: number
+    skipped: string[]
+    errors: string[]
+    credentials: { name: string; email: string; temporaryPassword: string }[]
+  }> {
     let created = 0
     const skipped: string[] = []
     const errors: string[] = []
+    const credentials: {
+      name: string
+      email: string
+      temporaryPassword: string
+    }[] = []
 
-    for (const row of rows) {
+    if (!clientId) {
+      return {
+        created,
+        skipped,
+        errors: ['No se pudo determinar la empresa destino'],
+        credentials,
+      }
+    }
+    const clientObjectId = new Types.ObjectId(clientId)
+
+    const allowedRoles = [
+      'Colaborador',
+      'Coordinador',
+      'Contabilidad',
+      'Administrador',
+    ]
+    const roleCache = new Map<string, Types.ObjectId | null>()
+    const resolveRole = async (
+      name: string
+    ): Promise<Types.ObjectId | null> => {
+      const match = allowedRoles.find(
+        r => r.toLowerCase() === name.toLowerCase()
+      )
+      const roleName = match || 'Colaborador'
+      if (roleCache.has(roleName)) return roleCache.get(roleName)!
+      const role = await this.roleService.getByName(roleName)
+      const id = role ? ((role as any)._id as Types.ObjectId) : null
+      roleCache.set(roleName, id)
+      return id
+    }
+
+    const coordinatorCache = new Map<string, Types.ObjectId | null>()
+    const resolveCoordinator = async (
+      email: string
+    ): Promise<Types.ObjectId | null> => {
+      const key = email.toLowerCase()
+      if (coordinatorCache.has(key)) return coordinatorCache.get(key)!
+      const u = await this.userModel
+        .findOne({ email: key, clientId: clientObjectId })
+        .select('_id')
+        .exec()
+      const id = u ? u._id : null
+      coordinatorCache.set(key, id)
+      return id
+    }
+
+    let rowNumber = 1
+    for (const raw of rawRows) {
+      rowNumber++
+      const row = this.mapBulkRow(raw)
+      const email = (row.email || '').toLowerCase()
       try {
-        const email = (row.email || '').trim().toLowerCase()
         if (!email) {
-          errors.push(`Fila sin email`)
+          errors.push(`Fila ${rowNumber}: sin email`)
           continue
         }
-        const exists = await this.userModel.findOne({ email }).exec()
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          errors.push(`Fila ${rowNumber} (${email}): email inválido`)
+          continue
+        }
+        const exists = await this.userModel
+          .findOne({ email, clientId: clientObjectId })
+          .exec()
         if (exists) {
           skipped.push(email)
           continue
         }
-        const roleId = row.roleId?.trim() || defaultRoleId
-        const clientId = row.clientId?.trim() || defaultClientId
-        const password =
-          row.password?.trim() || Math.random().toString(36).slice(-8)
-        const hashed = await bcrypt.hash(password, 10)
+
+        const roleName =
+          allowedRoles.find(
+            r => r.toLowerCase() === (row.role || '').toLowerCase()
+          ) || 'Colaborador'
+        const roleId = await resolveRole(roleName)
+        if (!roleId) {
+          errors.push(
+            `Fila ${rowNumber} (${email}): rol "${roleName}" no existe`
+          )
+          continue
+        }
+
+        let coordinatorId: Types.ObjectId | undefined
+        if (row.coordinatorEmail) {
+          const coordId = await resolveCoordinator(row.coordinatorEmail)
+          if (!coordId) {
+            errors.push(
+              `Fila ${rowNumber} (${email}): coordinador "${row.coordinatorEmail}" no encontrado en la empresa`
+            )
+            continue
+          }
+          coordinatorId = coordId
+        }
+
+        const accountType =
+          row.accountType?.toLowerCase() === 'corriente'
+            ? 'corriente'
+            : row.accountType?.toLowerCase() === 'ahorros'
+              ? 'ahorros'
+              : undefined
+        const bankAccount =
+          row.bankName || row.accountNumber || row.cci
+            ? {
+                bankName: row.bankName || '',
+                accountNumber: row.accountNumber || '',
+                cci: row.cci || '',
+                accountType: accountType || 'ahorros',
+              }
+            : undefined
+
+        const temporaryPassword =
+          Math.random().toString(36).slice(-8) +
+          Math.random().toString(36).slice(-4).toUpperCase()
+        const hashed = await bcrypt.hash(temporaryPassword, 10)
+
+        const name = row.name || email
         await this.userModel.create({
-          name: row.name?.trim() || email,
+          name,
           email,
           password: hashed,
-          roleId: new Types.ObjectId(roleId),
-          clientId: new Types.ObjectId(clientId),
+          roleId,
+          clientId: clientObjectId,
           mustChangePassword: true,
-          coordinatorId: row.coordinatorId?.trim()
-            ? new Types.ObjectId(row.coordinatorId.trim())
-            : undefined,
+          permissions: this.defaultPermissionsForRole(roleName),
+          ...(coordinatorId ? { coordinatorId } : {}),
+          ...(row.dni ? { dni: row.dni } : {}),
+          ...(row.employeeCode ? { employeeCode: row.employeeCode } : {}),
+          ...(row.area ? { area: row.area } : {}),
+          ...(row.cargo ? { cargo: row.cargo } : {}),
+          ...(row.address ? { address: row.address } : {}),
+          ...(row.phone ? { phone: row.phone } : {}),
+          ...(bankAccount ? { bankAccount } : {}),
         })
+        credentials.push({ name, email, temporaryPassword })
         created++
       } catch (e: any) {
-        errors.push(`${row.email}: ${e?.message || 'error desconocido'}`)
+        errors.push(
+          `Fila ${rowNumber} (${email || 'sin email'}): ${e?.message || 'error desconocido'}`
+        )
       }
     }
-    return { created, skipped, errors }
+    return { created, skipped, errors, credentials }
   }
 
   async findAdminsByClient(clientId: string): Promise<UserDocument[]> {
@@ -752,5 +1028,55 @@ export class UserService {
     await this.userModel
       .findByIdAndUpdate(userId, { emailNotificationsEnabled: enabled })
       .exec()
+  }
+
+  /** Retorna el coordinatorId del usuario, o null si no tiene coordinador asignado. */
+  async findUserCoordinatorId(userId: string): Promise<Types.ObjectId | null> {
+    const u = await this.userModel
+      .findById(userId)
+      .select('coordinatorId')
+      .lean<{ coordinatorId?: Types.ObjectId }>()
+      .exec()
+    return u?.coordinatorId ?? null
+  }
+
+  /**
+   * Usuarios de Administrador + Contabilidad de un cliente que tienen email habilitado.
+   * Usados para enviar recordatorios semanales de rendiciones pendientes de contabilidad.
+   */
+  /**
+   * Administradores + Contabilidad activos de un cliente.
+   * Incluye `emailNotificationsEnabled` para que el caller decida si enviar correo.
+   * El in-app se envía siempre; el correo solo si el flag está activo.
+   */
+  async findRendicionApprovalUsers(
+    clientId: string
+  ): Promise<{ _id: string; email: string; name: string; emailNotificationsEnabled: boolean }[]> {
+    const [contabilidadRole, adminRoles] = await Promise.all([
+      this.roleService.getByName('Contabilidad'),
+      this.roleService.getAdminRoles(),
+    ])
+
+    const roleIds = [
+      ...adminRoles.map(r => (r as any)._id),
+      ...(contabilidadRole ? [(contabilidadRole as any)._id] : []),
+    ]
+
+    const users = await this.userModel
+      .find({
+        clientId: new Types.ObjectId(clientId),
+        roleId: { $in: roleIds },
+        isActive: true,
+      })
+      .select('_id email name emailNotificationsEnabled')
+      .lean<{ _id: Types.ObjectId; email: string; name: string; emailNotificationsEnabled?: boolean }[]>()
+      .exec()
+
+    return users.map(u => ({
+      _id: u._id.toString(),
+      email: u.email,
+      name: u.name,
+      emailNotificationsEnabled: !!u.emailNotificationsEnabled,
+    }))
   }
 }

@@ -54,7 +54,11 @@ describe('SunatConfigService', () => {
         exec: jest.fn().mockResolvedValue(makeConfig()),
       })
       await expect(
-        service.create({ clientId, clientIdSunat: 'C', clientSecret: 'S' } as any)
+        service.create({
+          clientId,
+          clientIdSunat: 'C',
+          clientSecret: 'S',
+        } as any)
       ).rejects.toThrow('Ya existe configuración SUNAT para esta empresa')
     })
 
@@ -63,7 +67,11 @@ describe('SunatConfigService', () => {
         session: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue(null),
       })
-      const result = await service.create({ clientId, clientIdSunat: 'C', clientSecret: 'S' } as any)
+      const result = await service.create({
+        clientId,
+        clientIdSunat: 'C',
+        clientSecret: 'S',
+      } as any)
       expect(MockSunatConfigModel).toHaveBeenCalledWith(
         expect.objectContaining({ clientId })
       )
@@ -74,13 +82,17 @@ describe('SunatConfigService', () => {
   describe('findOne', () => {
     it('retorna la configuracion si existe', async () => {
       const config = makeConfig()
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(config) })
+      mockModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(config),
+      })
       const result = await service.findOne(clientId)
       expect(result).toEqual(config)
     })
 
     it('retorna null si no existe', async () => {
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
+      mockModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
       const result = await service.findOne(clientId)
       expect(result).toBeNull()
     })
@@ -89,27 +101,39 @@ describe('SunatConfigService', () => {
   describe('update', () => {
     it('actualiza la configuracion y retorna el documento actualizado', async () => {
       const updated = makeConfig({ clientIdSunat: 'NEW-CLIENT' })
-      mockModel.findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue(updated) })
-      const result = await service.update(configId, { clientIdSunat: 'NEW-CLIENT' } as any)
+      mockModel.findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(updated),
+      })
+      const result = await service.update(configId, {
+        clientIdSunat: 'NEW-CLIENT',
+      } as any)
       expect(result).toEqual(updated)
     })
 
     it('lanza NotFoundException si no existe la configuracion', async () => {
-      mockModel.findOneAndUpdate.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
-      await expect(service.update(configId, {} as any)).rejects.toThrow(NotFoundException)
+      mockModel.findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
+      await expect(service.update(configId, {} as any)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
   describe('remove', () => {
     it('elimina la configuracion y la retorna', async () => {
       const config = makeConfig()
-      mockModel.findOneAndDelete.mockReturnValue({ exec: jest.fn().mockResolvedValue(config) })
+      mockModel.findOneAndDelete.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(config),
+      })
       const result = await service.remove(configId)
       expect(result).toEqual(config)
     })
 
     it('lanza NotFoundException si no existe', async () => {
-      mockModel.findOneAndDelete.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
+      mockModel.findOneAndDelete.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
       await expect(service.remove(configId)).rejects.toThrow(NotFoundException)
     })
   })
@@ -117,7 +141,9 @@ describe('SunatConfigService', () => {
   describe('getActiveCredentials', () => {
     it('retorna clientId y clientSecret de la configuracion activa', async () => {
       const config = makeConfig()
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(config) })
+      mockModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(config),
+      })
       const result = await service.getActiveCredentials(clientId)
       expect(result).toEqual({
         clientId: 'CLIENT-SUNAT-123',
@@ -126,15 +152,21 @@ describe('SunatConfigService', () => {
     })
 
     it('lanza NotFoundException si no hay credenciales activas', async () => {
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
-      await expect(service.getActiveCredentials(clientId)).rejects.toThrow(NotFoundException)
+      mockModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
+      await expect(service.getActiveCredentials(clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 
   describe('getCredentials', () => {
     it('retorna _id, clientId y clientSecret', async () => {
       const config = makeConfig()
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(config) })
+      mockModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(config),
+      })
       const result = await service.getCredentials(clientId)
       expect(result).toEqual({
         _id: configId,
@@ -144,8 +176,12 @@ describe('SunatConfigService', () => {
     })
 
     it('lanza NotFoundException si no existe', async () => {
-      mockModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) })
-      await expect(service.getCredentials(clientId)).rejects.toThrow(NotFoundException)
+      mockModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      })
+      await expect(service.getCredentials(clientId)).rejects.toThrow(
+        NotFoundException
+      )
     })
   })
 })

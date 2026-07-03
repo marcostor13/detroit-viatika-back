@@ -7,6 +7,7 @@ import {
   ValidateNested,
   IsEmail,
   ValidateIf,
+  IsArray,
 } from 'class-validator'
 import { Type } from 'class-transformer'
 
@@ -41,7 +42,7 @@ export class CreateClientDto {
   phone?: string
 
   @IsOptional()
-  @ValidateIf((o) => typeof o.email === 'string' && o.email.trim() !== '')
+  @ValidateIf(o => typeof o.email === 'string' && o.email.trim() !== '')
   @IsEmail()
   email?: string
 
@@ -53,4 +54,9 @@ export class CreateClientDto {
   @ValidateNested()
   @Type(() => ClientLimitsDto)
   limits?: ClientLimitsDto
+
+  @IsOptional()
+  @IsArray()
+  @IsEmail({}, { each: true })
+  tesoreriaEmails?: string[]
 }
