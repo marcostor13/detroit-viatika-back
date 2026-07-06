@@ -35,10 +35,11 @@ export class ResubmitAdvanceDto {
   @IsMongoId()
   projectId: string
 
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateAdvanceLineDto)
-  lines: CreateAdvanceLineDto[]
+  lines?: CreateAdvanceLineDto[]
 
   @IsNumber()
   @Min(-90)

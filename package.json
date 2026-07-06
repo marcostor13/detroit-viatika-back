@@ -98,5 +98,8 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "forceExit": true
+  },
+  "patchedDependencies": {
+    "@nestjs/cli@11.0.7": "patches/@nestjs%2Fcli@11.0.7.patch"
   }
 }

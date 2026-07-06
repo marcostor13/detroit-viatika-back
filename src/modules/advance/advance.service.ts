@@ -126,7 +126,7 @@ export class AdvanceService implements OnModuleInit {
 
     if (this.isViaticoSolicitudPartial(dto)) {
       throw new BadRequestException(
-        'Solicitud de viáticos incompleta: lugar, fecha inicio, fecha fin, centro de costo y al menos una línea de detalle son obligatorios.'
+        'Solicitud de viáticos incompleta: lugar, fecha inicio, fecha fin y centro de costo son obligatorios.'
       )
     }
 
@@ -222,8 +222,7 @@ export class AdvanceService implements OnModuleInit {
       dto.place?.trim() &&
       dto.startDate &&
       dto.endDate &&
-      dto.projectId &&
-      dto.lines?.length
+      dto.projectId
     )
   }
 
@@ -273,8 +272,7 @@ export class AdvanceService implements OnModuleInit {
       !!dto.place?.trim() ||
       !!dto.startDate ||
       !!dto.endDate ||
-      !!dto.projectId ||
-      (dto.lines?.length ?? 0) > 0
+      !!dto.projectId
     if (!any) return false
     return !this.isViaticoSolicitud(dto)
   }
@@ -339,7 +337,7 @@ export class AdvanceService implements OnModuleInit {
       startDate: string
       endDate: string
       projectId: string
-      lines: CreateAdvanceLineDto[]
+      lines?: CreateAdvanceLineDto[]
       observations?: string
       amount: number
     },
@@ -382,8 +380,12 @@ export class AdvanceService implements OnModuleInit {
       lineTotal: number
     }[] = []
 
+    // El monto requerido lo ingresa directamente el colaborador; ya no se arma a
+    // partir de un detalle por categoría. `lines` solo se procesa si viene (datos
+    // legados o clientes antiguos en caché) y en ese caso valida contra `amount`.
+    const lines = dto.lines ?? []
     let sum = 0
-    for (const line of dto.lines) {
+    for (const line of lines) {
       const cat = await this.categoryService.findOne(line.categoryId, clientId)
       if (!cat.isActive) {
         throw new BadRequestException(
@@ -410,11 +412,19 @@ export class AdvanceService implements OnModuleInit {
       })
     }
 
-    const roundedSum = Math.round(sum * 100) / 100
-    if (Math.abs(roundedSum - dto.amount) > 0.02) {
-      throw new BadRequestException(
-        `El monto total (S/ ${dto.amount}) debe coincidir con la suma de líneas (S/ ${roundedSum}).`
-      )
+    let roundedSum: number
+    if (lines.length > 0) {
+      roundedSum = Math.round(sum * 100) / 100
+      if (Math.abs(roundedSum - dto.amount) > 0.02) {
+        throw new BadRequestException(
+          `El monto total (S/ ${dto.amount}) debe coincidir con la suma de líneas (S/ ${roundedSum}).`
+        )
+      }
+    } else {
+      if (!Number.isFinite(dto.amount) || dto.amount <= 0) {
+        throw new BadRequestException('Indique el monto requerido.')
+      }
+      roundedSum = Math.round(dto.amount * 100) / 100
     }
 
     const startFmt = this.emailService.formatDateDDMMYYYY(dto.startDate)
@@ -447,7 +457,7 @@ export class AdvanceService implements OnModuleInit {
           startDate: dto.startDate!,
           endDate: dto.endDate!,
           projectId: dto.projectId!,
-          lines: dto.lines!,
+          lines: dto.lines,
           observations: dto.observations,
           amount: linesOnlyAmount,
         },

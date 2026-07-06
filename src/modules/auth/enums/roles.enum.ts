@@ -4,4 +4,5 @@ export enum ROLES {
   COORDINADOR = 'Coordinador',
   COLABORADOR = 'Colaborador',
   CONTABILIDAD = 'Contabilidad',
+  TESORERIA = 'Tesoreria',
 }

@@ -700,9 +700,30 @@ export class ExpenseReportController {
     return result
   }
 
-  /** Rechazar viático (aprobador al que le toca el turno, o Superadmin). */
+  /** Aprobación final de Contabilidad, tras completarse la cadena de centro de costo. */
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
+  @Roles(ROLES.CONTABILIDAD, ROLES.SUPER_ADMIN)
+  @Patch(':id/viatico/contabilidad-approve')
+  async approveViaticoContabilidad(
+    @Param('id') id: string,
+    @Body() body: { notes?: string },
+    @Request() req: any
+  ) {
+    const actorId = String(req.user._id || req.user.sub)
+    const actorRole = req.user?.roles?.[0] ?? ''
+    const result = await this.expenseReportService.approveViaticoContabilidad(
+      id,
+      { approvedBy: actorId, notes: body.notes },
+      actorId,
+      actorRole
+    )
+    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'approve_viatico_contabilidad', module: 'viaticos', entityId: id, clientId: req.user.clientId })
+    return result
+  }
+
+  /** Rechazar viático (aprobador al que le toca el turno, Contabilidad en el gate final, o Superadmin). */
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(ROLES.COORDINADOR, ROLES.CONTABILIDAD, ROLES.SUPER_ADMIN)
   @Patch(':id/viatico/reject')
   async rejectViatico(
     @Param('id') id: string,

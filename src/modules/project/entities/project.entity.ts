@@ -27,6 +27,8 @@ export interface ProjectDocument extends Document {
   area?: string
   /** Marca si el centro de costo es administrativo (usa su propia cuenta, no la de proyecto). */
   esAdministrativo?: boolean
+  /** Aprobador de las solicitudes de viático que se imputan a este centro de costo. */
+  approverId?: Types.ObjectId
 }
 
 export interface GetProjectDocument {
@@ -81,6 +83,10 @@ export class Project {
 
   @Prop({ type: Boolean, default: false })
   esAdministrativo?: boolean
+
+  /** Aprobador de las solicitudes de viático que se imputan a este centro de costo. */
+  @Prop({ type: Types.ObjectId, ref: 'User', required: false })
+  approverId?: Types.ObjectId
 }
 
 export const ProjectSchema = SchemaFactory.createForClass(Project)

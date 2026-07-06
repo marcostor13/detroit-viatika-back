@@ -52,6 +52,12 @@ export class UpdatePermissionsDto {
   @IsArray()
   @IsOptional()
   categoryProfileIds?: string[]
+
+  /** Centros de costo asignados, ORDENADOS: el primero es el principal del colaborador. */
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  projectIds?: string[]
 }
 
 export class UpdateUserDto {

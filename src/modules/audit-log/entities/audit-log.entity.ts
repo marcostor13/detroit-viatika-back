@@ -70,6 +70,7 @@ export type AuditAction =
   | 'approve_viatico'
   | 'approve_viatico_l1'
   | 'approve_viatico_l2'
+  | 'approve_viatico_contabilidad'
   | 'reject_viatico'
   | 'resubmit_viatico'
   | 'register_viatico_payment'

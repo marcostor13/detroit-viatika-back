@@ -1,4 +1,10 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator'
+import {
+  IsBoolean,
+  IsMongoId,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 
 export class CreateProjectDto {
   @IsString()
@@ -53,4 +59,9 @@ export class CreateProjectDto {
   @IsBoolean()
   @IsOptional()
   esAdministrativo?: boolean
+
+  /** Aprobador de las solicitudes de viático imputadas a este centro de costo. */
+  @IsMongoId()
+  @IsOptional()
+  approverId?: string
 }

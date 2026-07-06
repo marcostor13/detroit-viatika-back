@@ -482,16 +482,18 @@ export class UserService {
     signature?: string
     coordinatorId?: Types.ObjectId
     approverIds?: Types.ObjectId[]
+    projectIds?: string[]
   } | null> {
     const u = await this.userModel
       .findById(userId)
-      .select('signature coordinatorId approverIds')
+      .select('signature coordinatorId approverIds permissions.projectIds')
       .exec()
     if (!u) return null
     return {
       signature: u.signature,
       coordinatorId: u.coordinatorId,
       approverIds: u.approverIds,
+      projectIds: u.permissions?.projectIds ?? [],
     }
   }
 
@@ -895,6 +897,13 @@ export class UserService {
           canApproveL2: true,
           categoryIds: [],
         }
+      case 'Tesoreria':
+        return {
+          modules: ['tesoreria'],
+          canApproveL1: false,
+          canApproveL2: false,
+          categoryIds: [],
+        }
       case 'Administrador':
         return {
           modules: ALL_NON_COLAB,
@@ -946,6 +955,7 @@ export class UserService {
       'Coordinador',
       'Contabilidad',
       'Administrador',
+      'Tesoreria',
     ]
     const roleCache = new Map<string, Types.ObjectId | null>()
     const resolveRole = async (

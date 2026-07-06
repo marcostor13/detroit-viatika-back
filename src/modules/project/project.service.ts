@@ -82,6 +82,17 @@ export class ProjectService {
       pc && typeof pc === 'object' && pc.name
         ? { _id: String(pc._id), name: pc.name }
         : undefined
+    const av: any = project.approverId
+    const approverId =
+      av && typeof av === 'object' && av._id
+        ? String(av._id)
+        : av
+          ? String(av)
+          : undefined
+    const approver =
+      av && typeof av === 'object' && av.name
+        ? { _id: String(av._id), name: av.name, email: av.email }
+        : undefined
     return {
       _id: project._id,
       name: project.name,
@@ -94,6 +105,8 @@ export class ProjectService {
       categoryGroupId,
       categoryGroup,
       committedAdvanceTotal: project.committedAdvanceTotal ?? 0,
+      approverId,
+      approver,
     }
   }
 
@@ -137,6 +150,9 @@ export class ProjectService {
     const categoryGroupId = createProjectDto.categoryGroupId?.trim()
       ? new Types.ObjectId(createProjectDto.categoryGroupId.trim())
       : undefined
+    const approverId = createProjectDto.approverId?.trim()
+      ? new Types.ObjectId(createProjectDto.approverId.trim())
+      : undefined
 
     let project: ProjectDocument
     try {
@@ -146,6 +162,7 @@ export class ProjectService {
         clientId,
         lineaNegocioId,
         categoryGroupId,
+        approverId,
       })
     } catch (error) {
       this.rethrowDuplicateCodeError(error, code)
@@ -194,6 +211,7 @@ export class ProjectService {
         .populate('clientId')
         .populate('lineaNegocioId', 'name code')
         .populate('categoryGroupId', 'name')
+        .populate('approverId', 'name email')
         .exec(),
       this.projectModel.countDocuments(filter).exec(),
     ])
@@ -213,11 +231,23 @@ export class ProjectService {
       .populate('clientId')
       .populate('lineaNegocioId', 'name code')
       .populate('categoryGroupId', 'name')
+      .populate('approverId', 'name email')
       .exec()
     if (!project) {
       throw new NotFoundException('Proyecto no encontrado')
     }
     return this.toResponse(project)
+  }
+
+  /** Carga varios centros de costo por ID (usado al armar la cadena de aprobación). */
+  async findManyByIds(ids: string[], clientId: string): Promise<ProjectDocument[]> {
+    if (!ids.length) return []
+    const clientIdObject = new Types.ObjectId(clientId)
+    const objectIds = ids.map(id => new Types.ObjectId(id))
+    return this.projectModel
+      .find({ _id: { $in: objectIds }, clientId: clientIdObject })
+      .select('approverId')
+      .exec()
   }
 
   async update(
@@ -247,6 +277,14 @@ export class ProjectService {
     if ('categoryGroupId' in updatePayload) {
       const raw = (updatePayload.categoryGroupId ?? '').toString().trim()
       ;(updatePayload as Record<string, unknown>).categoryGroupId = raw
+        ? new Types.ObjectId(raw)
+        : null
+    }
+
+    // Aprobador del centro de costo: cadena vacía/null limpia la asignación.
+    if ('approverId' in updatePayload) {
+      const raw = (updatePayload.approverId ?? '').toString().trim()
+      ;(updatePayload as Record<string, unknown>).approverId = raw
         ? new Types.ObjectId(raw)
         : null
     }
@@ -281,6 +319,8 @@ export class ProjectService {
         )
         .populate('clientId')
         .populate('lineaNegocioId', 'name code')
+        .populate('categoryGroupId', 'name')
+        .populate('approverId', 'name email')
         .exec()
     } catch (error) {
       this.rethrowDuplicateCodeError(
