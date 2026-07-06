@@ -37,9 +37,9 @@ import { UploadService } from '../upload/upload.service'
 import { ProjectService } from '../project/project.service'
 import { CategoryService } from '../category/category.service'
 import {
-  buildApproverChain,
   canActOnChain,
   advanceChain,
+  combineCostCenterChain,
 } from '../advance/approval-chain.util'
 import { CreateViaticoExpenseReportDto } from './dto/create-viatico-expense-report.dto'
 import { PayViaticoDto } from './dto/pay-viatico.dto'
@@ -3603,7 +3603,7 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   private async validateViaticoLines(
-    dto: { place: string; startDate: string; endDate: string; projectId: string; lines: CreateAdvanceLineDto[]; observations?: string; amount: number },
+    dto: { place: string; startDate: string; endDate: string; projectId: string; lines?: CreateAdvanceLineDto[]; observations?: string; amount: number },
     clientId: string
   ) {
     const start = this.viaticoStartOfDay(new Date(dto.startDate))
@@ -3617,9 +3617,13 @@ export class ExpenseReportService implements OnModuleInit {
 
     await this.projectService.findOne(dto.projectId, clientId)
 
+    // El monto requerido lo ingresa directamente el colaborador; ya no se arma a
+    // partir de un detalle por categoría. `lines` solo se procesa si viene (datos
+    // legados o clientes antiguos en caché) y en ese caso valida contra `amount`.
     const lineDocs: { categoryId: Types.ObjectId; detalle?: string; importe: number; peopleCount: number; glpPerDay: number; days: number; lineTotal: number }[] = []
+    const lines = dto.lines ?? []
     let sum = 0
-    for (const line of dto.lines) {
+    for (const line of lines) {
       const cat = await this.categoryService.findOne(line.categoryId, clientId)
       if (!cat.isActive) throw new BadRequestException(`La categoría "${cat.name}" está inactiva.`)
       const expected = this.computeViaticoLineTotal(line)
@@ -3631,9 +3635,17 @@ export class ExpenseReportService implements OnModuleInit {
       lineDocs.push({ categoryId: new Types.ObjectId(line.categoryId), detalle: det?.length ? det : undefined, importe: line.importe, peopleCount: line.peopleCount, glpPerDay: line.glpPerDay, days: line.days, lineTotal: line.lineTotal })
     }
 
-    const roundedSum = Math.round(sum * 100) / 100
-    if (Math.abs(roundedSum - dto.amount) > 0.02) {
-      throw new BadRequestException(`El monto total (S/ ${dto.amount}) debe coincidir con la suma de líneas (S/ ${roundedSum}).`)
+    let roundedSum: number
+    if (lines.length > 0) {
+      roundedSum = Math.round(sum * 100) / 100
+      if (Math.abs(roundedSum - dto.amount) > 0.02) {
+        throw new BadRequestException(`El monto total (S/ ${dto.amount}) debe coincidir con la suma de líneas (S/ ${roundedSum}).`)
+      }
+    } else {
+      if (!Number.isFinite(dto.amount) || dto.amount <= 0) {
+        throw new BadRequestException('Indique el monto requerido.')
+      }
+      roundedSum = Math.round(dto.amount * 100) / 100
     }
 
     const startFmt = this.emailService.formatDateDDMMYYYY(dto.startDate as any)
@@ -3645,6 +3657,29 @@ export class ExpenseReportService implements OnModuleInit {
     return { lineDocs, roundedSum, description }
   }
 
+  /**
+   * Arma la cadena de aprobadores por centro de costo para una solicitud de
+   * viático: 1 nivel si el centro de costo elegido está entre los asignados
+   * al colaborador, 2 niveles (principal → elegido) si no lo está.
+   */
+  private async buildViaticoCostCenterChain(
+    profile: { projectIds?: string[] },
+    selectedProjectId: string,
+    clientId: string
+  ): Promise<Types.ObjectId[]> {
+    const assignedProjectIds = profile.projectIds ?? []
+    const idsToLoad = [...new Set([...assignedProjectIds, selectedProjectId])]
+    const projects = await this.projectService.findManyByIds(idsToLoad, clientId)
+    const approverByProjectId = new Map(
+      projects.map(p => [String(p._id), p.approverId as Types.ObjectId | undefined])
+    )
+    return combineCostCenterChain({
+      assignedProjectIds,
+      selectedProjectId,
+      approverByProjectId,
+    })
+  }
+
   async createViatico(dto: CreateViaticoExpenseReportDto, userId: string, clientId: string): Promise<ExpenseReportDocument> {
     const profile = await this.userService.findTransactionalProfile(userId)
     if (!profile?.signature?.trim()) {
@@ -3652,7 +3687,7 @@ export class ExpenseReportService implements OnModuleInit {
     }
 
     const pendingAmt = Number(dto.pendingBalanceAmount ?? 0)
-    const chain = buildApproverChain(profile.approverIds)
+    const chain = await this.buildViaticoCostCenterChain(profile, dto.projectId, clientId)
 
     // `dto.amount` es el costo del viático (suma de líneas). El saldo heredado NO se
     // suma al anticipo: prefinancia ese costo igual que un saldo de la bolsa.
@@ -3893,20 +3928,65 @@ export class ExpenseReportService implements OnModuleInit {
     const { approvalLevel: nextLevel, isComplete } = advanceChain({ approvalLevel, requiredLevels: report.viaticoRequiredLevels ?? chain.length })
     report.viaticoApprovalLevel = nextLevel
 
-    let autoOpenedBySaldo = false
     if (isComplete) {
-      report.status = 'viatico_approved'
+      // Todos los aprobadores de centro de costo terminaron: siempre pasa por el
+      // gate de Contabilidad antes de quedar lista para pago (aplica incluso si
+      // el viático quedó 100% cubierto por saldo, sin desembolso real).
+      report.status = 'pending_contabilidad'
       await report.save()
-      autoOpenedBySaldo = await this.onViaticoFullyApproved(report as ExpenseReportDocument)
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en aprobación final', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada por los centros de costo y está pendiente de la aprobación final de Contabilidad.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
+      await this.notifyContabilidadPendingApproval(report as ExpenseReportDocument)
     } else {
       await report.save()
       this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en revisión', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada en el nivel ${nextLevel} de ${report.viaticoRequiredLevels ?? chain.length} y está pendiente del siguiente aprobador.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
       this.notifyViaticoCoordinator(report as ExpenseReportDocument, report.userId.toString(), report.clientId.toString()).catch(() => {})
     }
 
-    // Si quedó cubierto 100% con saldo (status 'open'), onViaticoFullyApproved ya
-    // notificó al colaborador; evitamos el mensaje genérico de "pago en proceso".
-    if (isComplete && !autoOpenedBySaldo) {
+    return this.findOne(id) as Promise<ExpenseReportDocument>
+  }
+
+  /** Notifica a Contabilidad que un viático terminó su cadena de centro de costo y espera su aprobación final. */
+  private async notifyContabilidadPendingApproval(report: ExpenseReportDocument): Promise<void> {
+    try {
+      const recipients = await this.userService.findViaticoAccountingNotifyRecipients(report.clientId.toString())
+      const collaborator = await this.userService.findEmailNameClient(report.userId.toString())
+      for (const r of recipients) {
+        await this.emailService.sendViaticoAprobacionContabilidad(r.email, {
+          clientId: report.clientId.toString(), recipientName: r.name, urgent: false, urgentBanner: '',
+          emailTitle: 'Solicitud de viáticos pendiente de tu aprobación',
+          detailBody: `<p>Viático por S/ ${this.viaticoEscapeHtml(this.viaticoFormatMoney(report.viaticoAmount ?? 0))} de ${this.viaticoEscapeHtml(collaborator?.name ?? '')} fue aprobado por los centros de costo correspondientes. Requiere tu aprobación final antes de quedar lista para pago.</p>`,
+          projectLabel: '', platformUrl: this.emailService.buildAppUrl('/viaticos'),
+        }).catch(() => {})
+      }
+    } catch (err: unknown) {
+      this.logger.error(`Notificación Contabilidad pendiente viático ${(report as any)._id}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /**
+   * Gate final: Contabilidad aprueba una solicitud de viático que ya completó
+   * su cadena de aprobadores de centro de costo. Solo entonces se registra el
+   * compromiso presupuestal y se notifica a Tesorería para el pago.
+   */
+  async approveViaticoContabilidad(id: string, opts: { approvedBy: string; notes?: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
+    const report = await this.expenseReportModel.findById(id)
+    if (!report) throw new NotFoundException(`Viático ${id} no encontrado`)
+    if (report.type !== 'viatico') throw new BadRequestException('Esta rendición no es de tipo viático')
+    if (report.status !== 'pending_contabilidad') throw new BadRequestException(`El viático no está pendiente de la aprobación de Contabilidad (estado actual: ${report.status})`)
+    if (actorRole !== ROLES.CONTABILIDAD && actorRole !== ROLES.SUPER_ADMIN) {
+      throw new ForbiddenException('Solo Contabilidad puede aprobar este paso.')
+    }
+
+    const chainLevels = report.viaticoRequiredLevels ?? report.viaticoApproverChain?.length ?? 0
+    ;(report.viaticoApprovalHistory ?? []).push({ level: chainLevels + 1, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
+    report.contabilidadApprovedAt = new Date()
+    report.contabilidadApprovedBy = new Types.ObjectId(actorId)
+    report.status = 'viatico_approved'
+    await report.save()
+
+    const autoOpenedBySaldo = await this.onViaticoFullyApproved(report as ExpenseReportDocument)
+
+    if (!autoOpenedBySaldo) {
       this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos aprobada', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada. El pago está siendo procesado.`, type: 'success', actionUrl: '/mis-rendiciones' }).catch(() => {})
     }
 
@@ -4013,20 +4093,33 @@ export class ExpenseReportService implements OnModuleInit {
     const report = await this.expenseReportModel.findById(id)
     if (!report) throw new NotFoundException(`Viático ${id} no encontrado`)
     if (report.type !== 'viatico') throw new BadRequestException('Esta rendición no es de tipo viático')
-    if (report.status !== 'pending_l1') throw new BadRequestException(`No se puede rechazar en estado "${report.status}"`)
+    if (!['pending_l1', 'pending_contabilidad'].includes(report.status)) {
+      throw new BadRequestException(`No se puede rechazar en estado "${report.status}"`)
+    }
 
-    const chain = report.viaticoApproverChain ?? []
-    const approvalLevel = report.viaticoApprovalLevel ?? 0
-    if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
-      throw new ForbiddenException('No tienes permiso para rechazar esta solicitud')
+    let rejectedByRole: 'centro_costo' | 'contabilidad'
+    if (report.status === 'pending_contabilidad') {
+      if (actorRole !== ROLES.CONTABILIDAD && actorRole !== ROLES.SUPER_ADMIN) {
+        throw new ForbiddenException('No tienes permiso para rechazar esta solicitud')
+      }
+      rejectedByRole = 'contabilidad'
+    } else {
+      const chain = report.viaticoApproverChain ?? []
+      const approvalLevel = report.viaticoApprovalLevel ?? 0
+      if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
+        throw new ForbiddenException('No tienes permiso para rechazar esta solicitud')
+      }
+      rejectedByRole = 'centro_costo'
     }
 
     if ((opts.rejectionReason?.trim() ?? '').length < 10) throw new BadRequestException('El motivo de rechazo debe tener al menos 10 caracteres.')
 
+    const approvalLevel = report.viaticoApprovalLevel ?? 0
     ;(report.viaticoApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.rejectedBy, action: 'rejected', notes: opts.rejectionReason, date: new Date() })
     report.status = 'rejected'
     report.viaticoRejectedBy = opts.rejectedBy
     report.viaticoRejectionReason = opts.rejectionReason
+    report.viaticoRejectedByRole = rejectedByRole
     await this.revertViaticoSaldoFinancing(report)
     await report.save()
 
@@ -4061,9 +4154,10 @@ export class ExpenseReportService implements OnModuleInit {
       clientId
     )
 
-    // La cadena de aprobadores se recalcula desde el perfil actual del colaborador
-    // (puede haber cambiado desde la solicitud original).
-    const chain = buildApproverChain(profile.approverIds)
+    // La cadena de aprobadores se recalcula desde el centro de costo elegido y
+    // los centros de costo asignados actuales del colaborador (pueden haber
+    // cambiado desde la solicitud original).
+    const chain = await this.buildViaticoCostCenterChain(profile, dto.projectId, clientId)
 
     const wasEditing = report.status === 'pending_l1'
     report.viaticoPlace = dto.place.trim()

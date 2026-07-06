@@ -18,6 +18,12 @@ export interface UserPermissions {
   categoryProfileId?: string
   /** Perfiles de categoría asignados (deriva centros de costo y categorías visibles). */
   categoryProfileIds?: string[]
+  /**
+   * Centros de costo (Project) asignados al colaborador, ORDENADOS: el primer
+   * elemento es su centro de costo principal — el que se usa como primer
+   * aprobador cuando solicita hacia un centro de costo que no tiene asignado.
+   */
+  projectIds: string[]
 }
 
 export interface UserDocument extends Document {
@@ -111,6 +117,7 @@ export class User {
       categoryIds: { type: [String], default: [] },
       categoryProfileId: { type: String, default: null },
       categoryProfileIds: { type: [String], default: [] },
+      projectIds: { type: [String], default: [] },
       _id: false,
     },
     default: () => ({
@@ -118,6 +125,7 @@ export class User {
       canApproveL1: false,
       canApproveL2: false,
       categoryIds: [],
+      projectIds: [],
     }),
   })
   permissions: UserPermissions

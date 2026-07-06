@@ -21,6 +21,7 @@ export type ExpenseReportStatus =
   | 'cancelled'
   | 'pending_l1'
   | 'pending_l2'
+  | 'pending_contabilidad'
   | 'viatico_approved'
   | 'partially_paid'
   | 'paid'
@@ -190,6 +191,8 @@ export interface ExpenseReportDocument extends Document {
   viaticoBudgetCommitmentRecorded?: boolean
   viaticoRejectedBy?: string
   viaticoRejectionReason?: string
+  /** Quién rechazó: aprobador de centro de costo o Contabilidad (gate final). */
+  viaticoRejectedByRole?: 'centro_costo' | 'contabilidad'
   viaticoBankName?: string
   viaticoAccountNumber?: string
   viaticoCci?: string
@@ -243,7 +246,7 @@ export class ExpenseReport {
     enum: [
       'solicited', 'open', 'submitted', 'pending_accounting',
       'approved', 'rejected', 'reimbursed', 'closed', 'cancelled',
-      'pending_l1', 'pending_l2', 'viatico_approved', 'partially_paid', 'paid', 'settled', 'returned',
+      'pending_l1', 'pending_l2', 'pending_contabilidad', 'viatico_approved', 'partially_paid', 'paid', 'settled', 'returned',
     ],
   })
   status: ExpenseReportStatus
@@ -575,6 +578,9 @@ export class ExpenseReport {
 
   @Prop({ type: String, required: false })
   viaticoRejectionReason?: string
+
+  @Prop({ required: false, enum: ['centro_costo', 'contabilidad'] })
+  viaticoRejectedByRole?: 'centro_costo' | 'contabilidad'
 
   @Prop({ type: String, required: false })
   viaticoBankName?: string

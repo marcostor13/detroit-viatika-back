@@ -25,6 +25,7 @@ export class RoleService {
           { name: 'Coordinador' },
           { name: 'Colaborador' },
           { name: 'Contabilidad' },
+          { name: 'Tesoreria' },
         ],
       })
       .exec()

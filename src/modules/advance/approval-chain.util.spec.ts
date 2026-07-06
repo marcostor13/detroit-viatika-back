@@ -6,6 +6,7 @@ import {
   expectedApproverId,
   canActOnChain,
   advanceChain,
+  combineCostCenterChain,
 } from './approval-chain.util'
 
 describe('approval-chain.util', () => {
@@ -143,6 +144,84 @@ describe('approval-chain.util', () => {
         approvalLevel: 3,
         isComplete: true,
       })
+    })
+  })
+
+  describe('combineCostCenterChain', () => {
+    const projA = 'projA'
+    const projB = 'projB'
+    const projC = 'projC'
+
+    it('returns a 1-level chain when the selected project is assigned to the collaborator', () => {
+      const approverByProjectId = new Map([
+        [projA, a1],
+        [projB, a2],
+      ])
+      expect(
+        combineCostCenterChain({
+          assignedProjectIds: [projA, projB],
+          selectedProjectId: projB,
+          approverByProjectId,
+        })
+      ).toEqual([a2])
+    })
+
+    it('returns a 2-level chain (principal then selected) when the selected project is not assigned', () => {
+      const approverByProjectId = new Map([
+        [projA, a1],
+        [projC, a3],
+      ])
+      expect(
+        combineCostCenterChain({
+          assignedProjectIds: [projA, projB],
+          selectedProjectId: projC,
+          approverByProjectId,
+        })
+      ).toEqual([a1, a3])
+    })
+
+    it('collapses to 1 level when the principal and selected approver are the same person', () => {
+      const approverByProjectId = new Map([
+        [projA, a1],
+        [projC, a1],
+      ])
+      expect(
+        combineCostCenterChain({
+          assignedProjectIds: [projA, projB],
+          selectedProjectId: projC,
+          approverByProjectId,
+        })
+      ).toEqual([a1])
+    })
+
+    it('throws BadRequestException when the collaborator has no assigned cost centers', () => {
+      expect(() =>
+        combineCostCenterChain({
+          assignedProjectIds: [],
+          selectedProjectId: projA,
+          approverByProjectId: new Map([[projA, a1]]),
+        })
+      ).toThrow(BadRequestException)
+    })
+
+    it('throws BadRequestException when the selected cost center has no approver configured', () => {
+      expect(() =>
+        combineCostCenterChain({
+          assignedProjectIds: [projA],
+          selectedProjectId: projB,
+          approverByProjectId: new Map([[projA, a1]]),
+        })
+      ).toThrow(BadRequestException)
+    })
+
+    it('throws BadRequestException when the principal cost center has no approver configured', () => {
+      expect(() =>
+        combineCostCenterChain({
+          assignedProjectIds: [projA, projB],
+          selectedProjectId: projC,
+          approverByProjectId: new Map([[projC, a3]]),
+        })
+      ).toThrow(BadRequestException)
     })
   })
 })

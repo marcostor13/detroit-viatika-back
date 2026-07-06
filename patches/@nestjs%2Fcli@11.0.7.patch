@@ -1,0 +1,37 @@
+diff --git a/node_modules/@nestjs/cli/.bun-tag-a67c4b91020a2ce8 b/.bun-tag-a67c4b91020a2ce8
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/actions/start.action.js b/actions/start.action.js
+index 42758d9248017ec3526108f69e2c708a97ee1bed..cc52f2b46b1fe14c7beac7a0087809e797d5be43 100644
+--- a/actions/start.action.js
++++ b/actions/start.action.js
+@@ -109,6 +109,15 @@ class StartAction extends build_action_1.BuildAction {
+             processArgs.unshift(envFileNodeArgs.join(' '));
+         }
+         processArgs.unshift('--enable-source-maps');
++        if (options.shell) {
++            // Passing an args array with shell:true triggers DEP0190 on Node >=22.
++            // The args are already quoted for shell use, so join into one command string.
++            const fullCommand = [binaryToRun, ...processArgs].join(' ');
++            return (0, child_process_1.spawn)(fullCommand, {
++                stdio: 'inherit',
++                shell: options.shell,
++            });
++        }
+         return (0, child_process_1.spawn)(binaryToRun, processArgs, {
+             stdio: 'inherit',
+             shell: options.shell,
+diff --git a/lib/runners/abstract.runner.js b/lib/runners/abstract.runner.js
+index f8bc13925b691588697d8596fdf491041cbcba25..41c53e83907189fab98780125ccb84b63cf7cb8d 100644
+--- a/lib/runners/abstract.runner.js
++++ b/lib/runners/abstract.runner.js
+@@ -17,7 +17,8 @@ class AbstractRunner {
+             shell: true,
+         };
+         return new Promise((resolve, reject) => {
+-            const child = (0, child_process_1.spawn)(`${this.binary}`, [...this.args, ...args], options);
++            const fullCommand = [this.binary, ...this.args, ...args].join(' ');
++            const child = (0, child_process_1.spawn)(fullCommand, options);
+             if (collect) {
+                 child.stdout.on('data', (data) => resolve(data.toString().replace(/\r\n|\n/, '')));
+             }

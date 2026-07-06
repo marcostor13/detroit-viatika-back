@@ -49,10 +49,11 @@ export class ResubmitViaticoDto {
   @IsOptional()
   ordenTrabajoId?: string
 
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateAdvanceLineDto)
-  lines: CreateAdvanceLineDto[]
+  lines?: CreateAdvanceLineDto[]
 
   @IsString()
   @IsOptional()
