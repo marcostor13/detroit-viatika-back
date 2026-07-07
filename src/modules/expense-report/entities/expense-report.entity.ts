@@ -135,6 +135,13 @@ export interface ExpenseReportDocument extends Document {
   createdBy: Types.ObjectId
   approvedBy?: Types.ObjectId
   projectId?: Types.ObjectId
+  /**
+   * Coordinador responsable de esta rendición (rol Coordinador), resuelto desde
+   * `Project.approverId` del centro de costo (`projectId`) al crearla o al cambiar
+   * su centro de costo. Es un snapshot: si luego cambia el aprobador del centro de
+   * costo, esta rendición conserva el coordinador original (no retroactivo).
+   */
+  assignedCoordinatorId?: Types.ObjectId
   motivo?: string
   codigo?: string
   gestion?: string
@@ -270,6 +277,14 @@ export class ExpenseReport {
 
   @Prop({ type: Types.ObjectId, ref: 'Project', required: false })
   projectId?: Types.ObjectId
+
+  /**
+   * Snapshot del coordinador responsable (ver interfaz arriba). Se resuelve desde
+   * `Project.approverId` al crear/editar `projectId`; no se recalcula si luego
+   * cambia el aprobador del centro de costo.
+   */
+  @Prop({ type: Types.ObjectId, ref: 'User', required: false })
+  assignedCoordinatorId?: Types.ObjectId
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Advance' }], default: [] })
   advanceIds?: Types.ObjectId[]

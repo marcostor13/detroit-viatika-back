@@ -4,6 +4,6 @@ services:
     container_name: nestjs_api
     restart: always
     ports:
-      - '3016:3016'
+      - '${PORT:-3040}:${PORT:-3040}'
     env_file:
       - .env

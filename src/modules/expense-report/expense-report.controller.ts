@@ -443,12 +443,41 @@ export class ExpenseReportController {
 
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.COLABORADOR)
+  @Get(':id/deletion-preview')
+  async getDeletionPreview(@Param('id') id: string, @Request() req: any) {
+    return this.expenseReportService.getDeletionPreview(id, {
+      userId: req.user._id || req.user.sub,
+      role: req.user.roles?.[0],
+    })
+  }
+
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.COLABORADOR)
   @Delete(':id')
   async remove(@Param('id') id: string, @Request() req: any) {
     const result = await this.expenseReportService.remove(id, {
       userId: req.user._id || req.user.sub,
       role: req.user.roles?.[0],
     })
+    const summary = (result as any)?.deletionSummary as
+      | {
+          expensesDeleted: number
+          advancesUnlinked: number
+          cajaChicaReportsUpdated: number
+        }
+      | undefined
+    const details: string[] = []
+    if (summary?.expensesDeleted) {
+      details.push(`${summary.expensesDeleted} comprobante(s) eliminado(s)`)
+    }
+    if (summary?.advancesUnlinked) {
+      details.push(`${summary.advancesUnlinked} anticipo(s) desvinculado(s)`)
+    }
+    if (summary?.cajaChicaReportsUpdated) {
+      details.push(
+        `${summary.cajaChicaReportsUpdated} reporte(s) de caja chica actualizado(s)`
+      )
+    }
     await this.auditLogService.log({
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email || 'Usuario',
@@ -456,6 +485,7 @@ export class ExpenseReportController {
       module: 'rendiciones',
       entityId: id,
       clientId: req.user.clientId,
+      details: details.length ? details.join('; ') : undefined,
     })
     return result
   }

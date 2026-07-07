@@ -1864,6 +1864,30 @@ export class AdvanceService implements OnModuleInit {
   }
 
   /**
+   * Invocado desde `ExpenseReportService.remove()` al eliminar una rendición de
+   * viático (no vuelve a llamar a `expenseReportService.remove`, evita
+   * recursión). Los anticipos vinculados NUNCA se borran aquí —representan
+   * dinero solicitado o ya desembolsado, es un registro financiero que debe
+   * conservarse—; solo se les quita la referencia a la rendición eliminada
+   * (`expenseReportId`) para no dejar una FK colgando. Si el anticipo aún no
+   * había sido pagado, vuelve a aparecer como "huérfano" (`findOrphaned`) y
+   * sigue su flujo de aprobación/pago normal; si ya fue pagado/liquidado,
+   * queda visible como historial sin rendición asociada.
+   */
+  async detachFromDeletedReport(
+    advanceIds: (Types.ObjectId | string)[]
+  ): Promise<number> {
+    if (!advanceIds.length) return 0
+    const oids = advanceIds.map(id =>
+      id instanceof Types.ObjectId ? id : new Types.ObjectId(String(id))
+    )
+    const res = await this.advanceModel
+      .updateMany({ _id: { $in: oids } }, { $unset: { expenseReportId: 1 } })
+      .exec()
+    return res.modifiedCount ?? 0
+  }
+
+  /**
    * De una lista de rendiciones, devuelve los IDs de las que tienen al menos un
    * anticipo vinculado ya aprobado/pagado/liquidado. Sirve para que el front
    * sepa que el colaborador ya no puede eliminar esas rendiciones de viáticos.

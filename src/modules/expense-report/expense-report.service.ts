@@ -96,6 +96,94 @@ export class ExpenseReportService implements OnModuleInit {
       this.logger.warn(`Index create skipped: ${(e as Error).message}`)
     }
     await this.migrateViaticoApprovalChains()
+    await this.migrateAssignedCoordinatorIds()
+  }
+
+  /**
+   * Backfill único e idempotente: asigna `assignedCoordinatorId` a las rendiciones
+   * que no lo tengan, resolviendo el aprobador del centro de costo (`Project.approverId`)
+   * de su `projectId`. Si la rendición no tiene centro de costo o este no tiene
+   * aprobador configurado, cae al dato legacy `User.coordinatorId` del dueño como
+   * último recurso, solo para no dejar historicos huérfanos. Tras esta migración,
+   * el resto del código ya no necesita leer el campo legacy.
+   */
+  private async migrateAssignedCoordinatorIds() {
+    const pending = await this.expenseReportModel
+      .find({
+        type: { $ne: 'viatico' },
+        assignedCoordinatorId: { $exists: false },
+      })
+      .select('_id projectId userId clientId')
+      .lean()
+      .exec()
+    if (pending.length === 0) return
+
+    const projectIdsByClient = new Map<string, Set<string>>()
+    for (const r of pending) {
+      if (!r.projectId) continue
+      const clientKey = String(r.clientId)
+      if (!projectIdsByClient.has(clientKey)) {
+        projectIdsByClient.set(clientKey, new Set())
+      }
+      projectIdsByClient.get(clientKey)!.add(String(r.projectId))
+    }
+
+    const approverByProjectId = new Map<string, Types.ObjectId>()
+    for (const [clientKey, projectIdSet] of projectIdsByClient) {
+      const projects = await this.projectService.findManyByIds(
+        [...projectIdSet],
+        clientKey
+      )
+      for (const p of projects) {
+        if (p.approverId) {
+          approverByProjectId.set(String((p as any)._id), p.approverId)
+        }
+      }
+    }
+
+    let migrated = 0
+    for (const r of pending) {
+      let assignedCoordinatorId = r.projectId
+        ? approverByProjectId.get(String(r.projectId))
+        : undefined
+
+      if (!assignedCoordinatorId) {
+        const profile = await this.userService.findTransactionalProfile(
+          String(r.userId)
+        )
+        assignedCoordinatorId = profile?.coordinatorId
+      }
+
+      if (!assignedCoordinatorId) continue
+
+      await this.expenseReportModel.updateOne(
+        { _id: r._id },
+        { $set: { assignedCoordinatorId } }
+      )
+      migrated++
+    }
+
+    if (migrated > 0) {
+      this.logger.log(
+        `Backfill: asignado assignedCoordinatorId a ${migrated} rendición(es) desde centro de costo / legacy`
+      )
+    }
+  }
+
+  /**
+   * Resuelve el coordinador responsable de un centro de costo (`Project.approverId`)
+   * para snapshotearlo en `assignedCoordinatorId` al crear/editar una rendición.
+   */
+  private async resolveAssignedCoordinatorId(
+    projectId: string | undefined,
+    clientId: string
+  ): Promise<Types.ObjectId | undefined> {
+    if (!projectId) return undefined
+    const projects = await this.projectService.findManyByIds(
+      [projectId],
+      clientId
+    )
+    return projects[0]?.approverId
   }
 
   /**
@@ -346,6 +434,11 @@ export class ExpenseReportService implements OnModuleInit {
       )
       : 0
 
+    const assignedCoordinatorId = await this.resolveAssignedCoordinatorId(
+      createExpenseReportDto.projectId,
+      createExpenseReportDto.clientId
+    )
+
     const report = new this.expenseReportModel({
       ...createExpenseReportDto,
       title,
@@ -356,6 +449,7 @@ export class ExpenseReportService implements OnModuleInit {
       projectId: createExpenseReportDto.projectId
         ? new Types.ObjectId(createExpenseReportDto.projectId)
         : undefined,
+      assignedCoordinatorId,
       pendingBalanceFromReportId:
         createExpenseReportDto.pendingBalanceFromReportId
           ? new Types.ObjectId(
@@ -561,12 +655,17 @@ export class ExpenseReportService implements OnModuleInit {
   }): Promise<ExpenseReportDocument> {
     const title =
       advance.description?.trim() || advance.place?.trim() || 'Viático'
+    const assignedCoordinatorId = await this.resolveAssignedCoordinatorId(
+      advance.projectId?.toString(),
+      advance.clientId.toString()
+    )
     const report = new this.expenseReportModel({
       title,
       userId: advance.userId,
       clientId: advance.clientId,
       createdBy: advance.userId,
       projectId: advance.projectId ?? undefined,
+      assignedCoordinatorId,
       location: advance.place ?? undefined,
       budget: advance.amount,
       startDate: advance.startDate ?? undefined,
@@ -593,14 +692,17 @@ export class ExpenseReportService implements OnModuleInit {
       .exec()
   }
 
+  /**
+   * Rendiciones a cargo de un Coordinador: se filtra por `assignedCoordinatorId`,
+   * el snapshot del aprobador del centro de costo tomado al crear/editar cada
+   * rendición (ver `resolveAssignedCoordinatorId`). No usa la relación en vivo
+   * usuario→coordinador, así que si el aprobador de un centro de costo cambia,
+   * las rendiciones ya creadas conservan a su coordinador original.
+   */
   async findAllByCoordinator(coordinatorId: string, clientId: string) {
-    const userIds = await this.userService.findUserIdsByCoordinator(
-      coordinatorId,
-      clientId
-    )
     return await this.expenseReportModel
       .find({
-        userId: { $in: userIds },
+        assignedCoordinatorId: new Types.ObjectId(coordinatorId),
         clientId: new Types.ObjectId(clientId),
         isCajaChica: { $ne: true },
       })
@@ -972,7 +1074,7 @@ export class ExpenseReportService implements OnModuleInit {
     const dto = updateExpenseReportDto
     const existing = await this.expenseReportModel
       .findById(id)
-      .select('status isDirecta type')
+      .select('status isDirecta type clientId')
       .lean()
       .exec()
     if (!existing) {
@@ -1066,6 +1168,14 @@ export class ExpenseReportService implements OnModuleInit {
       $set.clientId = new Types.ObjectId(dto.clientId)
     if (dto.projectId !== undefined) {
       $set.projectId = dto.projectId ? new Types.ObjectId(dto.projectId) : null
+      // El centro de costo cambió: se re-snapshotea su coordinador. Si se limpia
+      // el centro de costo, también se limpia el coordinador asignado.
+      $set.assignedCoordinatorId = dto.projectId
+        ? (await this.resolveAssignedCoordinatorId(
+          dto.projectId,
+          String((existing as any).clientId)
+        )) ?? null
+        : null
     }
     if (dto.expenseIds !== undefined && Array.isArray(dto.expenseIds)) {
       $set.expenseIds = dto.expenseIds.map(eId => new Types.ObjectId(eId))
@@ -1725,32 +1835,28 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * Elimina una solicitud (rendición directa / caja chica) completa, con cascada
-   * de comprobantes y sus archivos. La autorización depende del estado de aprobación:
-   *  - Sin comprobantes o con comprobantes pero ninguno aprobado:
-   *    el colaborador propietario, Contabilidad, Administrador o Superadmin.
-   *  - Con al menos una aprobación (a nivel comprobante o de reporte):
-   *    solo Contabilidad o Superadmin.
+   * Evalúa si `actor` puede eliminar `report` (mismas reglas documentadas en
+   * `remove()`), sin lanzar excepción ni mutar nada. La usan tanto `remove()`
+   * (que sí lanza `ForbiddenException` si `!allowed`) como `getDeletionPreview()`
+   * (solo lectura, para la advertencia previa a confirmar en el front).
    */
-  async remove(id: string, actor: SolicitudDeleteActor) {
-    const report = await this.expenseReportModel.findById(id).lean().exec()
-    if (!report)
-      throw new NotFoundException(`Expense report with ID ${id} not found`)
-
+  private async evaluateDeleteAuthorization(
+    report: any,
+    expenses: {
+      approvalCoord?: { status?: string }
+      approvalCont?: { status?: string }
+    }[],
+    actor: SolicitudDeleteActor
+  ): Promise<{
+    allowed: boolean
+    reason?: string
+    linkedAdvances: { _id: Types.ObjectId; status: string; amount: number }[]
+    hasApprovedAdvance: boolean
+  }> {
     const role = actor?.role ?? ''
     const isSuperAdmin = role === ROLES.SUPER_ADMIN
     const isContabilidad = role === ROLES.CONTABILIDAD
     const isColaborador = role === ROLES.COLABORADOR
-
-    // Carga los comprobantes adjuntos para evaluar el estado de aprobación.
-    const expenseIds = report.expenseIds ?? []
-    const expenses = expenseIds.length
-      ? await this.expenseModel
-        .find({ _id: { $in: expenseIds } })
-        .select('_id file approvalCoord approvalCont')
-        .lean()
-        .exec()
-      : []
 
     // "Aprobado por alguien" = aprobación a nivel comprobante O a nivel reporte.
     const reportLevelApproved =
@@ -1792,7 +1898,7 @@ export class ExpenseReportService implements OnModuleInit {
     // Caja chica ya incluida (jalada) por Contabilidad en un reporte —borrador o
     // finalizado—: solo Contabilidad puede eliminarla.
     if (!restricted && report.isCajaChica) {
-      if (await this.isReferencedByCajaChica(id)) {
+      if (await this.isReferencedByCajaChica(String(report._id))) {
         restricted = true
         restrictedMsg =
           'Esta caja chica ya fue incluida por Contabilidad en un reporte; solo Contabilidad puede eliminarla.'
@@ -1804,34 +1910,132 @@ export class ExpenseReportService implements OnModuleInit {
     // desembolsado y NO puede eliminarse por la app —ni el colaborador ni
     // Contabilidad—. Solo Superadmin (escape técnico). Estas rendiciones se
     // auto-crean al registrar el pago del anticipo.
+    let linkedAdvances: { _id: Types.ObjectId; status: string; amount: number }[] = []
+    let hasApprovedAdvance = false
     if (!report.isDirecta && !report.isCajaChica) {
       const rawAdvanceIds: string[] = (
         Array.isArray(report.advanceIds) ? report.advanceIds : []
       ).map((x: any) => (x && typeof x === 'object' && '_id' in x ? String(x._id) : String(x)))
-      const linked = await this.advanceService.findByExpenseReportId(id, rawAdvanceIds)
-      const hasApprovedAdvance = linked.some((a: any) =>
+      linkedAdvances = (await this.advanceService.findByExpenseReportId(
+        String(report._id),
+        rawAdvanceIds
+      )) as unknown as { _id: Types.ObjectId; status: string; amount: number }[]
+      hasApprovedAdvance = linkedAdvances.some((a: any) =>
         ['approved', 'partially_paid', 'paid', 'settled'].includes(a.status)
       )
       if (hasApprovedAdvance && !isSuperAdmin) {
-        throw new ForbiddenException(
-          'El anticipo de esta rendición ya fue aprobado/pagado; la rendición no puede eliminarse.'
-        )
+        return {
+          allowed: false,
+          reason:
+            'El anticipo de esta rendición ya fue aprobado/pagado; la rendición no puede eliminarse.',
+          linkedAdvances,
+          hasApprovedAdvance,
+        }
       }
     }
 
     if (restricted) {
       if (!isContabilidad && !isSuperAdmin) {
-        throw new ForbiddenException(restrictedMsg)
+        return { allowed: false, reason: restrictedMsg, linkedAdvances, hasApprovedAdvance }
       }
     } else if (isColaborador) {
       // Estados iniciales: el colaborador solo puede eliminar las suyas.
       const ownerId = String(report.createdBy ?? report.userId ?? '')
       if (ownerId !== String(actor.userId)) {
-        throw new ForbiddenException(
-          'Solo puedes eliminar tus propias solicitudes.'
-        )
+        return {
+          allowed: false,
+          reason: 'Solo puedes eliminar tus propias solicitudes.',
+          linkedAdvances,
+          hasApprovedAdvance,
+        }
       }
     }
+
+    return { allowed: true, linkedAdvances, hasApprovedAdvance }
+  }
+
+  /**
+   * Vista previa de lo que se eliminaría (y si el actor puede hacerlo), sin
+   * borrar nada. La usa el front para mostrar la advertencia antes de confirmar.
+   */
+  async getDeletionPreview(id: string, actor: SolicitudDeleteActor) {
+    const report = await this.expenseReportModel.findById(id).lean().exec()
+    if (!report)
+      throw new NotFoundException(`Expense report with ID ${id} not found`)
+
+    const expenseIds = report.expenseIds ?? []
+    const expenses = expenseIds.length
+      ? await this.expenseModel
+        .find({ _id: { $in: expenseIds } })
+        .select('_id total file expenseType approvalCoord approvalCont')
+        .lean()
+        .exec()
+      : []
+
+    const authResult = await this.evaluateDeleteAuthorization(
+      report,
+      expenses,
+      actor
+    )
+    const expensesTotal = expenses.reduce(
+      (sum, e: any) => sum + (Number(e.total) || 0),
+      0
+    )
+    const filesCount = expenses.filter((e: any) => !!e.file).length
+    const cajaChicaReferenced = report.isCajaChica
+      ? await this.isReferencedByCajaChica(id)
+      : false
+
+    return {
+      allowed: authResult.allowed,
+      reason: authResult.reason,
+      type: report.type,
+      isDirecta: !!report.isDirecta,
+      isCajaChica: !!report.isCajaChica,
+      budget: report.budget,
+      expensesCount: expenses.length,
+      expensesTotal,
+      filesCount,
+      linkedAdvances: authResult.linkedAdvances.map((a: any) => ({
+        amount: a.amount,
+        status: a.status,
+      })),
+      cajaChicaReferenced,
+    }
+  }
+
+  /**
+   * Elimina una solicitud (rendición directa / caja chica) completa, con cascada
+   * de comprobantes y sus archivos. La autorización depende del estado de aprobación:
+   *  - Sin comprobantes o con comprobantes pero ninguno aprobado:
+   *    el colaborador propietario, Contabilidad, Administrador o Superadmin.
+   *  - Con al menos una aprobación (a nivel comprobante o de reporte):
+   *    solo Contabilidad o Superadmin.
+   */
+  async remove(id: string, actor: SolicitudDeleteActor) {
+    const report = await this.expenseReportModel.findById(id).lean().exec()
+    if (!report)
+      throw new NotFoundException(`Expense report with ID ${id} not found`)
+
+    // Carga los comprobantes adjuntos para evaluar el estado de aprobación.
+    const expenseIds = report.expenseIds ?? []
+    const expenses = expenseIds.length
+      ? await this.expenseModel
+        .find({ _id: { $in: expenseIds } })
+        .select('_id file approvalCoord approvalCont')
+        .lean()
+        .exec()
+      : []
+
+    const authResult = await this.evaluateDeleteAuthorization(
+      report,
+      expenses,
+      actor
+    )
+    if (!authResult.allowed) {
+      throw new ForbiddenException(authResult.reason)
+    }
+    const linkedAdvances = authResult.linkedAdvances
 
     // Cascada: elimina los comprobantes adjuntos y sus archivos en S3.
     if (expenses.length > 0) {
@@ -1857,8 +2061,59 @@ export class ExpenseReportService implements OnModuleInit {
         `Revertir saldos al eliminar ${id}: ${err instanceof Error ? err.message : String(err)}`
       )
     }
+
+    // Anticipos vinculados: nunca se borran (registro financiero), solo se
+    // desvinculan de la rendición eliminada para no dejar una FK colgando. Si
+    // aún no habían sido pagados, vuelven a aparecer como huérfanos y siguen
+    // su flujo normal de aprobación/pago.
+    let advancesUnlinked = 0
+    if (linkedAdvances.length > 0) {
+      try {
+        advancesUnlinked = await this.advanceService.detachFromDeletedReport(
+          linkedAdvances.map(a => a._id)
+        )
+      } catch (err: unknown) {
+        this.logger.error(
+          `Desvincular anticipos al eliminar ${id}: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    }
+
+    // Caja chica: si esta rendición ya había sido incluida (jalada) por
+    // Contabilidad en algún reporte de caja chica —borrador o finalizado—,
+    // quita la referencia para no dejarla apuntando a un documento eliminado.
+    // `totalAmount` es denormalizado y se recalcula solo en la próxima lectura
+    // (ver CajaChicaReportService.findAllByClient/findOne).
+    let cajaChicaReportsUpdated = 0
+    if (report.isCajaChica) {
+      try {
+        const pulled = await this.cajaChicaReportModel
+          .updateMany(
+            { 'selectedReports.expenseReportId': new Types.ObjectId(id) },
+            {
+              $pull: {
+                selectedReports: { expenseReportId: new Types.ObjectId(id) },
+              },
+            }
+          )
+          .exec()
+        cajaChicaReportsUpdated = pulled.modifiedCount ?? 0
+      } catch (err: unknown) {
+        this.logger.error(
+          `Limpiar referencias de caja chica al eliminar ${id}: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    }
+
     await this.expenseReportModel.findByIdAndDelete(id).exec()
-    return report
+    return {
+      ...report,
+      deletionSummary: {
+        expensesDeleted: expenses.length,
+        advancesUnlinked,
+        cajaChicaReportsUpdated,
+      },
+    }
   }
 
   /**

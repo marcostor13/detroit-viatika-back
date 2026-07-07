@@ -307,20 +307,6 @@ export class UserService {
     }
   }
 
-  async findUserIdsByCoordinator(
-    coordinatorId: string,
-    clientId: string
-  ): Promise<Types.ObjectId[]> {
-    const users = await this.userModel
-      .find({
-        coordinatorId: new Types.ObjectId(coordinatorId),
-        clientId: new Types.ObjectId(clientId),
-      })
-      .select('_id')
-      .exec()
-    return users.map(u => u._id)
-  }
-
   /** Colaboradores que tienen a `approverId` en cualquier posición de su cadena de aprobadores. */
   async findUserIdsByApprover(
     approverId: string,
