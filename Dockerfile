@@ -14,5 +14,5 @@ COPY package*.json ./
 RUN npm install --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/docs ./docs
-EXPOSE 3016
+EXPOSE 3040
 CMD ["node", "--max-old-space-size=1400", "--expose-gc", "dist/main"]

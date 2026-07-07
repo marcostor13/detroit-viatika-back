@@ -1977,7 +1977,7 @@ export class EmailService {
           coordinatorName: data.coordinatorName,
           pendingCount: data.pendingCount,
           reports: data.reports,
-          platformUrl: this.resolvePlatformHref(data.platformUrl ?? '/invoice-approval'),
+          platformUrl: this.resolvePlatformHref(data.platformUrl ?? '/rendiciones'),
         },
       })
     } catch (error) {

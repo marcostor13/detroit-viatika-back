@@ -80,7 +80,7 @@ export class SchedulerService {
         { collaboratorName: 'Juan Pérez', title: 'Viaje a Arequipa - mayo', endDateFormatted: sampleDate },
         { collaboratorName: 'Ana García', title: 'Gastos de representación', endDateFormatted: sampleDateTomorrow },
       ],
-      platformUrl: this.emailService.buildAppUrl('/invoice-approval'),
+      platformUrl: this.emailService.buildAppUrl('/rendiciones'),
     })
     sent.push('coordinador_rendiciones')
 
@@ -285,7 +285,7 @@ export class SchedulerService {
     pendingCount: number,
     frequency: 'semanal' | 'mensual'
   ) {
-    const platformUrl = this.emailService.buildAppUrl('/invoice-approval')
+    const platformUrl = this.emailService.buildAppUrl('/rendiciones')
 
     this.notificationsService
       .create({
@@ -293,7 +293,7 @@ export class SchedulerService {
         title: 'Gastos pendientes de revisión',
         message: `${collaborator.name} tiene ${pendingCount} comprobante(s) pendiente(s) de aprobación en viáticos activos.`,
         type: 'info',
-        actionUrl: '/invoice-approval',
+        actionUrl: '/rendiciones',
         metadata: {
           advanceId: advance._id,
           collaboratorId: advance.userId,
@@ -419,7 +419,7 @@ export class SchedulerService {
       })
     }
 
-    const platformUrl = this.emailService.buildAppUrl('/invoice-approval')
+    const platformUrl = this.emailService.buildAppUrl('/rendiciones')
 
     for (const [coordId, { name, email, reports }] of coordinatorMap) {
       if (reports.length === 0) continue
@@ -430,7 +430,7 @@ export class SchedulerService {
           title: 'Rendiciones pendientes de revisión',
           message: `Tienes ${reports.length} rendicion(es) enviadas por tus colaboradores esperando tu aprobacion.`,
           type: 'warning',
-          actionUrl: '/invoice-approval',
+          actionUrl: '/rendiciones',
           metadata: { event: 'recordatorio_rendicion_coordinador', count: reports.length },
         })
         .catch(err => this.logger.error('Error notif in-app coordinador rendicion', err))
