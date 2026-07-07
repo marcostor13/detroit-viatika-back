@@ -49,7 +49,7 @@ export class OrdenTrabajoController {
       action: 'create_orden_trabajo',
       module: 'configuracion',
       entityId: (result as any)?._id?.toString(),
-      details: `${(result as any).codigo}`,
+      details: `${(result as any).nombre}`,
       clientId,
     })
     return result
@@ -62,13 +62,13 @@ export class OrdenTrabajoController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
-    @Query('departamento') departamento?: string
+    @Query('costCenterId') costCenterId?: string
   ) {
     return this.ordenTrabajoService.findAll(clientId, {
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
       search,
-      departamento,
+      costCenterId,
     })
   }
 
@@ -110,7 +110,7 @@ export class OrdenTrabajoController {
       action: 'delete_orden_trabajo',
       module: 'configuracion',
       entityId: id,
-      details: `${(result as any)?.codigo ?? ''}`,
+      details: `${(result as any)?.nombre ?? ''}`,
       clientId,
     })
     return result
