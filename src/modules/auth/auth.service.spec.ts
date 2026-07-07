@@ -171,6 +171,61 @@ describe('AuthService', () => {
       })
       expect(result).toHaveProperty('access_token')
     })
+
+    it('uses the role from the company-specific record, not the hub identity, when one exists for the chosen company', async () => {
+      // El hub se originó con un registro Administrador (empresa "hub-client"),
+      // pero el mismo email tiene un registro propio ya bajado a Colaborador
+      // en la empresa elegida ("c1"). Debe ganar este último.
+      mockJwtService.verify.mockReturnValue({
+        isHubToken: true,
+        userId: 'hub-user-id',
+        email: 'test@example.com',
+      })
+      const scopedUser = {
+        ...mockUser,
+        role: { name: 'Colaborador' },
+        client: { _id: { toString: () => 'c1' } },
+      }
+      mockUserService.findAllByEmail.mockResolvedValue([scopedUser])
+
+      const result = await service.selectClient({
+        hubToken: 'valid.hub.token',
+        clientId: 'c1',
+      })
+
+      expect(mockUserService.findOne).not.toHaveBeenCalled()
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ roles: ['Colaborador'], clientId: 'c1' })
+      )
+      expect(result).toHaveProperty('access_token')
+    })
+
+    it('falls back to the hub identity role when there is no record for the chosen company', async () => {
+      mockJwtService.verify.mockReturnValue({
+        isHubToken: true,
+        userId: 'hub-user-id',
+        email: 'admin@example.com',
+      })
+      mockUserService.findAllByEmail.mockResolvedValue([])
+      mockUserService.findOne.mockResolvedValue({
+        ...mockUser,
+        role: { name: 'Administrador' },
+      })
+
+      const result = await service.selectClient({
+        hubToken: 'valid.hub.token',
+        clientId: 'other-client',
+      })
+
+      expect(mockUserService.findOne).toHaveBeenCalledWith('hub-user-id')
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({
+          roles: ['Administrador'],
+          clientId: 'other-client',
+        })
+      )
+      expect(result).toHaveProperty('access_token')
+    })
   })
 
   describe('getHubCompanies', () => {

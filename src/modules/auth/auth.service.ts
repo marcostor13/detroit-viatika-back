@@ -162,7 +162,7 @@ export class AuthService {
     const { hubToken, email, password, clientId } = body
 
     if (hubToken) {
-      // Contabilidad flow: validate hub token and issue scoped JWT
+      // Contabilidad/Administrador flow: validar hub token y emitir JWT del alcance elegido
       let payload: any
       try {
         payload = this.jwtService.verify(hubToken)
@@ -170,9 +170,23 @@ export class AuthService {
         throw new BadRequestException('Token inválido o expirado')
       }
       if (!payload.isHubToken) throw new BadRequestException('Token inválido')
-      const user = await this.userService.findOne(payload.userId)
+
+      // El email puede tener un registro propio en la empresa elegida (ej. el
+      // mismo correo con un rol distinto en esa empresa específica, o bajado
+      // de Administrador ahí). Ese registro manda sobre el que originó el hub.
+      // Si no existe un registro propio en esa empresa, se conserva la
+      // identidad del hub (ej. Administrador/Contabilidad "visitando" una
+      // empresa sin fila propia).
+      const usersForEmail = payload.email
+        ? await this.userService.findAllByEmail(payload.email)
+        : []
+      const scopedUser = usersForEmail.find(
+        u => (u.client as any)?._id?.toString() === clientId
+      )
+
+      const user = scopedUser ?? (await this.userService.findOne(payload.userId))
       if (!user?._id) throw new BadRequestException('Usuario no encontrado')
-      return this.issueToken(user, clientId)
+      return this.issueToken(user, scopedUser ? undefined : clientId)
     }
 
     // Regular multi-company: email + password + clientId
