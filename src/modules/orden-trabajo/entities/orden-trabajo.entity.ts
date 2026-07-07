@@ -1,31 +1,27 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Document, Types } from 'mongoose'
-import { OT_DEPARTAMENTO_CODES } from '../constants/orden-trabajo.constants'
 
 export interface OrdenTrabajoDocument extends Document {
-  departamento: string
-  correlativo: number
-  codigo: string
-  descripcion?: string
+  nombre: string
+  costCenterId: Types.ObjectId
   isActive: boolean
   clientId: Types.ObjectId
 }
 
 @Schema({ timestamps: true })
 export class OrdenTrabajo {
-  @Prop({ required: true, uppercase: true, enum: OT_DEPARTAMENTO_CODES })
-  departamento: string
-
-  /** Correlativo secuencial por departamento y empresa. Nunca se reutiliza, ni al eliminar una OT. */
-  @Prop({ required: true })
-  correlativo: number
-
-  /** Código completo pre-calculado: LIM-{departamento}-{correlativo con 6 dígitos}. */
+  /**
+   * Nombre/código de la OT que teclea el usuario (ej. "Lim-Com-1"). Es el
+   * identificador visible de la OT y es único por empresa (ver índice de
+   * abajo): la misma empresa no puede repetirlo, pero otra empresa sí puede
+   * tener una OT con el mismo nombre (plataforma multitenant).
+   */
   @Prop({ required: true, trim: true })
-  codigo: string
+  nombre: string
 
-  @Prop({ trim: true })
-  descripcion?: string
+  /** Centro de costo (Project) al que pertenece la OT. Relación 1 CC → N OT. */
+  @Prop({ required: true, type: Types.ObjectId, ref: 'Project' })
+  costCenterId: Types.ObjectId
 
   @Prop({ default: true })
   isActive: boolean
@@ -36,41 +32,12 @@ export class OrdenTrabajo {
 
 export const OrdenTrabajoSchema = SchemaFactory.createForClass(OrdenTrabajo)
 
-OrdenTrabajoSchema.index({ codigo: 1, clientId: 1 }, { unique: true })
-OrdenTrabajoSchema.index(
-  { departamento: 1, correlativo: 1, clientId: 1 },
-  { unique: true }
-)
-
 /**
- * Documento contador atómico, uno por (clientId, departamento). El correlativo
- * de cada OT se obtiene con un $inc atómico sobre este documento (patrón
- * estándar de secuencia de Mongo), evitando condiciones de carrera cuando dos
- * OT del mismo departamento se crean al mismo tiempo.
+ * Unicidad del nombre POR EMPRESA. Incluir `clientId` en la clave es lo que
+ * permite que dos empresas distintas tengan una OT con el mismo nombre
+ * (ej. ambas pueden tener "Lim-Com-1"), pero una misma empresa no lo repita.
  */
-export interface OrdenTrabajoCounterDocument extends Document {
-  clientId: Types.ObjectId
-  departamento: string
-  seq: number
-}
+OrdenTrabajoSchema.index({ nombre: 1, clientId: 1 }, { unique: true })
 
-@Schema({ collection: 'ordentrabajocounters' })
-export class OrdenTrabajoCounter {
-  @Prop({ required: true, type: Types.ObjectId, ref: 'Client' })
-  clientId: Types.ObjectId
-
-  @Prop({ required: true, uppercase: true, enum: OT_DEPARTAMENTO_CODES })
-  departamento: string
-
-  @Prop({ required: true, default: 0 })
-  seq: number
-}
-
-export const OrdenTrabajoCounterSchema = SchemaFactory.createForClass(
-  OrdenTrabajoCounter
-)
-
-OrdenTrabajoCounterSchema.index(
-  { clientId: 1, departamento: 1 },
-  { unique: true }
-)
+/** Búsquedas frecuentes: OTs de un centro de costo dentro de una empresa. */
+OrdenTrabajoSchema.index({ clientId: 1, costCenterId: 1 })

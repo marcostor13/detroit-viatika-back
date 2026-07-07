@@ -1,15 +1,21 @@
-import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator'
-import { OT_DEPARTAMENTO_CODES } from '../constants/orden-trabajo.constants'
+import {
+  IsBoolean,
+  IsMongoId,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 
 export class CreateOrdenTrabajoDto {
+  /** Nombre/código de la OT (ej. "Lim-Com-1"). Único por empresa. */
   @IsString()
   @IsNotEmpty()
-  @IsIn(OT_DEPARTAMENTO_CODES)
-  departamento: string
+  nombre: string
 
-  @IsString()
-  @IsOptional()
-  descripcion?: string
+  /** Centro de costo (Project) al que pertenece la OT. */
+  @IsMongoId()
+  @IsNotEmpty()
+  costCenterId: string
 
   @IsBoolean()
   @IsOptional()

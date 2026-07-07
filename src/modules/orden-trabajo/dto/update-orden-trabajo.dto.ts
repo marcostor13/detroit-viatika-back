@@ -1,14 +1,18 @@
-import { IsBoolean, IsOptional, IsString } from 'class-validator'
+import { IsBoolean, IsMongoId, IsOptional, IsString } from 'class-validator'
 
 /**
- * A propósito NO extiende CreateOrdenTrabajoDto: el departamento y el
- * correlativo (y por tanto el código) son inmutables una vez generada la OT,
- * para no romper la unicidad ni la estructura LIM-XXX-NNNNNN ya comunicada.
+ * Todos los campos son opcionales: se puede renombrar la OT (se revalida la
+ * unicidad por empresa), reasignarla a otro centro de costo o activarla /
+ * desactivarla. No hay correlativo ni código autogenerado que preservar.
  */
 export class UpdateOrdenTrabajoDto {
   @IsString()
   @IsOptional()
-  descripcion?: string
+  nombre?: string
+
+  @IsMongoId()
+  @IsOptional()
+  costCenterId?: string
 
   @IsBoolean()
   @IsOptional()
