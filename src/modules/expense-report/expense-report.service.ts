@@ -693,18 +693,27 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * Rendiciones a cargo de un Coordinador: se filtra por `assignedCoordinatorId`,
-   * el snapshot del aprobador del centro de costo tomado al crear/editar cada
-   * rendición (ver `resolveAssignedCoordinatorId`). No usa la relación en vivo
-   * usuario→coordinador, así que si el aprobador de un centro de costo cambia,
-   * las rendiciones ya creadas conservan a su coordinador original.
+   * Rendiciones a cargo de un Coordinador. Combina dos mecanismos, ambos
+   * resueltos desde el aprobador del centro de costo (`Project.approverId`)
+   * pero cada uno con su propio snapshot:
+   * - Rendición normal: `assignedCoordinatorId`, tomado al crear/editar la
+   *   rendición (ver `resolveAssignedCoordinatorId`).
+   * - Viático: `viaticoApproverChain`, la cadena de aprobadores tomada al
+   *   solicitar el viático (ver `combineCostCenterChain`/`buildViaticoCostCenterChain`).
+   * Ninguno usa la relación en vivo usuario→coordinador ni el aprobador actual
+   * del centro de costo, así que si este cambia, las solicitudes ya creadas
+   * conservan a su coordinador original.
    */
   async findAllByCoordinator(coordinatorId: string, clientId: string) {
+    const coordinatorObjectId = new Types.ObjectId(coordinatorId)
     return await this.expenseReportModel
       .find({
-        assignedCoordinatorId: new Types.ObjectId(coordinatorId),
         clientId: new Types.ObjectId(clientId),
         isCajaChica: { $ne: true },
+        $or: [
+          { assignedCoordinatorId: coordinatorObjectId },
+          { type: 'viatico', viaticoApproverChain: coordinatorObjectId },
+        ],
       })
       .populate('userId', 'name email signature bankAccount')
       .populate('createdBy', 'name email')
