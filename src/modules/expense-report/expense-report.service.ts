@@ -869,10 +869,7 @@ export class ExpenseReportService implements OnModuleInit {
     const filter: Record<string, unknown> = { _id: { $in: ids } }
     const and: Record<string, unknown>[] = []
     if (opts.type && opts.type !== 'all') {
-      filter['expenseType'] =
-        opts.type === 'comprobante_caja'
-          ? { $in: ['comprobante_caja', 'recibo_caja'] }
-          : opts.type
+      filter['expenseType'] = opts.type
     }
     if (opts.status && opts.status !== 'all') {
       // El filtro se basa en la aprobación dual (approvalCont / approvalCoord),
