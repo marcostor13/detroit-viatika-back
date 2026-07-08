@@ -78,15 +78,6 @@ export interface DepositScanResult {
   titular?: string
 }
 
-/** Datos extraídos de un comprobante de caja (escaneo OCR para autorellenar). */
-export interface CashVoucherScanResult {
-  entregadoA?: string
-  fecha?: string
-  direccion?: string
-  concepto?: string
-  monto: number
-}
-
 @Injectable()
 export class ExpenseService {
   private readonly logger = new Logger(ExpenseService.name)
@@ -451,7 +442,7 @@ export class ExpenseService {
 
   private async generateInternalCode(
     userId: string | undefined,
-    expenseType: 'planilla_movilidad' | 'comprobante_caja',
+    expenseType: 'planilla_movilidad',
     expenseReportId?: string
   ): Promise<string> {
     const ownerUserId = await this.resolveOwnerUserId(userId, expenseReportId)
@@ -912,103 +903,6 @@ export class ExpenseService {
     }
   }
 
-  /**
-   * Escanea un comprobante de caja (imagen o PDF, por URL) y extrae los campos
-   * para autorellenar el formulario: entregado a, fecha, dirección, concepto y
-   * monto. Ligero: no persiste Expense ni valida nada; el usuario revisa y edita
-   * los datos antes de guardar.
-   */
-  async scanCashVoucher(
-    url: string,
-    mimeType?: string
-  ): Promise<CashVoucherScanResult> {
-    const isPdf =
-      (mimeType ? mimeType.toLowerCase().includes('pdf') : false) ||
-      /\.pdf(\?|$)/i.test(url)
-
-    const prompt =
-      'Eres un asistente que extrae datos de un COMPROBANTE DE CAJA (vale de ' +
-      'caja / comprobante de egreso de efectivo). Devuelve EXCLUSIVAMENTE un ' +
-      'JSON con la forma {"entregadoA": "<texto>", "fecha": "<dd/mm/aaaa>", ' +
-      '"direccion": "<texto>", "concepto": "<texto>", "monto": <número>}. ' +
-      'entregadoA es la persona o entidad a quien se entrega el dinero ' +
-      '("entregado a", "recibí de", "señor(es)"); fecha es la fecha del ' +
-      'comprobante; direccion la dirección si aparece; concepto el detalle o ' +
-      'motivo del pago/egreso; monto el importe total como número (sin símbolo ' +
-      'de moneda ni separadores de miles, punto decimal). Si un dato no ' +
-      'aparece, usa cadena vacía (o 0 para monto).'
-
-    try {
-      let content: string
-      if (isPdf) {
-        const buffer = await this.fetchUrlAsBuffer(url)
-        const pdfModule = await import('pdf-parse')
-        const pdfParse: (data: Buffer) => Promise<{ text: string }> =
-          pdfModule.default ?? pdfModule
-        const parsed = await pdfParse(buffer)
-        const text = (parsed.text || '').substring(0, 15000)
-        const completion = await this.openai.chat.completions.create({
-          model: this.visionModel,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: prompt },
-                { type: 'text', text },
-              ],
-            },
-          ],
-          temperature: 0,
-          max_completion_tokens: 512,
-        })
-        content = completion.choices[0]?.message?.content || ''
-      } else {
-        const completion = await this.openai.chat.completions.create({
-          model: this.visionModel,
-          messages: this.buildVisionMessages(prompt, url),
-          temperature: 0,
-          max_completion_tokens: 512,
-        })
-        content = completion.choices[0]?.message?.content || ''
-      }
-      return this.parseCashVoucherScan(content)
-    } catch (error) {
-      this.logger.error('Error al escanear el comprobante de caja:', error)
-      throw new HttpException(
-        'No se pudo escanear el comprobante de caja.',
-        HttpStatus.INTERNAL_SERVER_ERROR
-      )
-    }
-  }
-
-  private parseCashVoucherScan(raw: string): CashVoucherScanResult {
-    const cleaned = (raw || '')
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim()
-    let obj: any = {}
-    try {
-      obj = JSON.parse(cleaned)
-    } catch {
-      obj = {}
-    }
-    const monto =
-      typeof obj.monto === 'string'
-        ? Number(String(obj.monto).replace(/,/g, '')) || 0
-        : Number(obj.monto) || 0
-    const str = (v: unknown) => {
-      const s = v == null ? '' : String(v).trim()
-      return s.length ? s : undefined
-    }
-    return {
-      entregadoA: str(obj.entregadoA),
-      fecha: str(obj.fecha),
-      direccion: str(obj.direccion),
-      concepto: str(obj.concepto),
-      monto: monto > 0 ? monto : 0,
-    }
-  }
-
   async analyzeImageWithUrl(body: CreateExpenseDto): Promise<Expense> {
     // Si la caja chica de la rendición ya fue finalizada por Contabilidad, no se
     // permiten más gastos. Se valida antes del análisis para no gastar la llamada
@@ -1419,75 +1313,6 @@ export class ExpenseService {
       categoryLimitWarning: categoryMeta.warning,
       data: JSON.stringify({
         type: 'recibo_caja',
-        payload: body.data || '',
-      }),
-    })
-
-    if (body.expenseReportId) {
-      await this.expenseReportService.addExpenseToReport(
-        body.expenseReportId,
-        (expense as any)._id.toString()
-      )
-    }
-
-    return expense
-  }
-
-  async createCashVoucherExpense(body: CreateExpenseDto): Promise<Expense> {
-    if (!body.clientId) {
-      throw new HttpException('clientId es requerido', HttpStatus.BAD_REQUEST)
-    }
-    // Caja chica finalizada: no se permiten más gastos.
-    await this.expenseReportService.assertReportNotLockedByCajaChica(
-      body.expenseReportId
-    )
-    if (!body.total || body.total <= 0) {
-      throw new HttpException(
-        'Se requiere un monto válido',
-        HttpStatus.BAD_REQUEST
-      )
-    }
-    const description = (body.data || '').trim()
-    if (!description) {
-      throw new HttpException(
-        'El concepto del comprobante es obligatorio',
-        HttpStatus.BAD_REQUEST
-      )
-    }
-
-    const normalizedFecha = this.normalizeFechaEmisionValue(body.fechaEmision)
-    const deadlineMeta = this.evaluateDeadline(
-      normalizedFecha ?? body.fechaEmision
-    )
-    const categoryMeta = await this.evaluateCategoryLimit(body, body.total)
-    const internalCode = await this.generateInternalCode(
-      body.userId,
-      'comprobante_caja',
-      body.expenseReportId
-    )
-
-    const expense = await this.expenseRepository.create({
-      categoryId: new Types.ObjectId(body.categoryId),
-      proyectId: new Types.ObjectId(body.proyectId),
-      clientId: body.clientId,
-      expenseReportId: body.expenseReportId
-        ? new Types.ObjectId(body.expenseReportId)
-        : undefined,
-      total: body.total,
-      description,
-      expenseType: 'comprobante_caja',
-      file: body.imageUrl,
-      status: 'pending',
-      createdBy: body.userId || 'system',
-      fechaEmision: normalizedFecha ?? body.fechaEmision,
-      observado: deadlineMeta.observado,
-      observacionPlazo: deadlineMeta.observacionPlazo,
-      diasRetraso: deadlineMeta.diasRetraso,
-      categoryLimitPercent: categoryMeta.percent,
-      categoryLimitWarning: categoryMeta.warning,
-      internalCode,
-      data: JSON.stringify({
-        type: 'comprobante_caja',
         payload: body.data || '',
       }),
     })

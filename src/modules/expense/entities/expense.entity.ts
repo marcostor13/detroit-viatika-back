@@ -23,7 +23,6 @@ export type ExpenseType =
   | 'planilla_movilidad'
   | 'otros_gastos'
   | 'recibo_caja'
-  | 'comprobante_caja'
 
 export interface MobilityRowCoords {
   lat: number
@@ -250,7 +249,6 @@ export class Expense {
       'planilla_movilidad',
       'otros_gastos',
       'recibo_caja',
-      'comprobante_caja',
     ],
   })
   expenseType?: ExpenseType
