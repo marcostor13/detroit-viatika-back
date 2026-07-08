@@ -5,7 +5,6 @@ import {
   IsBoolean,
   IsNumber,
   Min,
-  IsArray,
 } from 'class-validator'
 
 export class CreateCategoryDto {
@@ -45,9 +44,4 @@ export class CreateCategoryDto {
   @IsString()
   @IsNotEmpty()
   clientId: string
-
-  /** Perfiles de categoría a los que pertenece (M:N). */
-  @IsArray()
-  @IsOptional()
-  perfilIds?: string[]
 }

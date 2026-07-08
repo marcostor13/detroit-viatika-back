@@ -12,12 +12,8 @@ export interface UserPermissions {
   modules: string[]
   canApproveL1: boolean
   canApproveL2: boolean
-  /** Categorías sueltas asignadas directamente (independientes de los perfiles). */
+  /** Categorías sueltas asignadas directamente al usuario. */
   categoryIds: string[]
-  /** @deprecated usar categoryProfileIds. Se conserva para migración. */
-  categoryProfileId?: string
-  /** Perfiles de categoría asignados (deriva centros de costo y categorías visibles). */
-  categoryProfileIds?: string[]
   /**
    * Centros de costo (Project) asignados al colaborador, ORDENADOS: el primer
    * elemento es su centro de costo principal — el que se usa como primer
@@ -115,8 +111,6 @@ export class User {
       canApproveL1: { type: Boolean, default: false },
       canApproveL2: { type: Boolean, default: false },
       categoryIds: { type: [String], default: [] },
-      categoryProfileId: { type: String, default: null },
-      categoryProfileIds: { type: [String], default: [] },
       projectIds: { type: [String], default: [] },
       _id: false,
     },

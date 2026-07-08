@@ -71,17 +71,6 @@ export class ProjectService {
       ln && typeof ln === 'object' && ln.name
         ? { _id: String(ln._id), name: ln.name, code: ln.code }
         : undefined
-    const pc: any = project.categoryGroupId
-    const categoryGroupId =
-      pc && typeof pc === 'object' && pc._id
-        ? String(pc._id)
-        : pc
-          ? String(pc)
-          : undefined
-    const categoryGroup =
-      pc && typeof pc === 'object' && pc.name
-        ? { _id: String(pc._id), name: pc.name }
-        : undefined
     const av: any = project.approverId
     const approverId =
       av && typeof av === 'object' && av._id
@@ -102,8 +91,6 @@ export class ProjectService {
       clientName: project.clientName,
       lineaNegocioId,
       lineaNegocio,
-      categoryGroupId,
-      categoryGroup,
       committedAdvanceTotal: project.committedAdvanceTotal ?? 0,
       approverId,
       approver,
@@ -147,9 +134,6 @@ export class ProjectService {
     const lineaNegocioId = createProjectDto.lineaNegocioId?.trim()
       ? new Types.ObjectId(createProjectDto.lineaNegocioId.trim())
       : undefined
-    const categoryGroupId = createProjectDto.categoryGroupId?.trim()
-      ? new Types.ObjectId(createProjectDto.categoryGroupId.trim())
-      : undefined
     const approverId = createProjectDto.approverId?.trim()
       ? new Types.ObjectId(createProjectDto.approverId.trim())
       : undefined
@@ -161,7 +145,6 @@ export class ProjectService {
         code,
         clientId,
         lineaNegocioId,
-        categoryGroupId,
         approverId,
       })
     } catch (error) {
@@ -178,7 +161,6 @@ export class ProjectService {
       limit?: number
       search?: string
       isActive?: boolean
-      categoryGroupIds?: string[]
     }
   ) {
     const clientIdObject = new Types.ObjectId(clientId)
@@ -186,12 +168,6 @@ export class ProjectService {
 
     if (opts?.isActive !== undefined) {
       filter.isActive = opts.isActive
-    }
-    // Filtro por perfiles de categoría (para colaboradores: solo sus centros de costo).
-    if (opts?.categoryGroupIds && opts.categoryGroupIds.length > 0) {
-      filter.categoryGroupId = {
-        $in: opts.categoryGroupIds.map(id => new Types.ObjectId(id)),
-      }
     }
     if (opts?.search) {
       const re = new RegExp(opts.search, 'i')
@@ -210,7 +186,6 @@ export class ProjectService {
         .limit(limit)
         .populate('clientId')
         .populate('lineaNegocioId', 'name code')
-        .populate('categoryGroupId', 'name')
         .populate('approverId', 'name email')
         .exec(),
       this.projectModel.countDocuments(filter).exec(),
@@ -230,7 +205,6 @@ export class ProjectService {
       .findOne({ _id: new Types.ObjectId(id), clientId: clientIdObject })
       .populate('clientId')
       .populate('lineaNegocioId', 'name code')
-      .populate('categoryGroupId', 'name')
       .populate('approverId', 'name email')
       .exec()
     if (!project) {
@@ -273,14 +247,6 @@ export class ProjectService {
         : null
     }
 
-    // Perfil de categoría: cadena vacía/null limpia la asignación; valor válido la actualiza.
-    if ('categoryGroupId' in updatePayload) {
-      const raw = (updatePayload.categoryGroupId ?? '').toString().trim()
-      ;(updatePayload as Record<string, unknown>).categoryGroupId = raw
-        ? new Types.ObjectId(raw)
-        : null
-    }
-
     // Aprobador del centro de costo: cadena vacía/null limpia la asignación.
     if ('approverId' in updatePayload) {
       const raw = (updatePayload.approverId ?? '').toString().trim()
@@ -319,7 +285,6 @@ export class ProjectService {
         )
         .populate('clientId')
         .populate('lineaNegocioId', 'name code')
-        .populate('categoryGroupId', 'name')
         .populate('approverId', 'name email')
         .exec()
     } catch (error) {

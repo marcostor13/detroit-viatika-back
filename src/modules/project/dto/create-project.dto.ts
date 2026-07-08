@@ -31,10 +31,6 @@ export class CreateProjectDto {
   @IsOptional()
   lineaNegocioId?: string
 
-  @IsString()
-  @IsOptional()
-  categoryGroupId?: string
-
   // --- Mapeo contable (asientos Contanet) ---
   @IsString()
   @IsOptional()

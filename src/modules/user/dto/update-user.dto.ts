@@ -45,14 +45,6 @@ export class UpdatePermissionsDto {
   @IsOptional()
   categoryIds?: string[]
 
-  @IsString()
-  @IsOptional()
-  categoryProfileId?: string
-
-  @IsArray()
-  @IsOptional()
-  categoryProfileIds?: string[]
-
   /** Centros de costo asignados, ORDENADOS: el primero es el principal del colaborador. */
   @IsArray()
   @IsMongoId({ each: true })

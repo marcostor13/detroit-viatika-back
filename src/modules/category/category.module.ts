@@ -4,7 +4,6 @@ import { Category, CategorySchema } from './entities/category.entity'
 import { CategoryService } from './category.service'
 import { CategoryController } from './category.controller'
 import { AuditLogModule } from '../audit-log/audit-log.module'
-import { CategoryGroupModule } from '../category-group/category-group.module'
 
 @Module({
   imports: [
@@ -12,7 +11,6 @@ import { CategoryGroupModule } from '../category-group/category-group.module'
       { name: Category.name, schema: CategorySchema },
     ]),
     AuditLogModule,
-    CategoryGroupModule,
   ],
   controllers: [CategoryController],
   providers: [CategoryService],

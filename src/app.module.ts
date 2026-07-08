@@ -20,7 +20,6 @@ import { AuditLogModule } from './modules/audit-log/audit-log.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { AiModule } from './modules/ai/ai.module'
 import { PettyCashModule } from './modules/petty-cash/petty-cash.module'
-import { CategoryGroupModule } from './modules/category-group/category-group.module'
 import { ScheduleModule } from '@nestjs/schedule'
 import { SchedulerModule } from './modules/scheduler/scheduler.module'
 import { DashboardModule } from './modules/dashboard/dashboard.module'
@@ -57,7 +56,6 @@ import { ExchangeRateModule } from './modules/exchange-rate/exchange-rate.module
     NotificationsModule,
     AiModule,
     PettyCashModule,
-    CategoryGroupModule,
     ScheduleModule.forRoot(),
     SchedulerModule,
     DashboardModule,

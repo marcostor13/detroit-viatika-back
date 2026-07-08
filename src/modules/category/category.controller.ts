@@ -25,7 +25,6 @@ import { ROLES } from '../auth/enums/roles.enum'
 import { Roles } from '../auth/decorators/roles.decorador'
 import { AuthGuard } from '@nestjs/passport'
 import { AuditLogService } from '../audit-log/audit-log.service'
-import { CategoryGroupService } from '../category-group/category-group.service'
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN)
@@ -33,13 +32,11 @@ import { CategoryGroupService } from '../category-group/category-group.service'
 export class CategoryController {
   constructor(
     private readonly categoryService: CategoryService,
-    private readonly auditLogService: AuditLogService,
-    private readonly categoryGroupService: CategoryGroupService
+    private readonly auditLogService: AuditLogService
   ) {}
 
   /**
    * Categorías permitidas: las categorías asignadas directamente al usuario.
-   * El perfil de categoría es solo una referencia (agrupa/deriva proyectos), no se asigna.
    * Sin categorías asignadas => no se filtra (compatibilidad).
    */
   private async resolveAllowedCategoryIds(
@@ -58,13 +55,6 @@ export class CategoryController {
     @Request() req: any
   ) {
     const result = await this.categoryService.create(createCategoryDto)
-    if (createCategoryDto.perfilIds !== undefined) {
-      await this.categoryGroupService.setCategoryMembership(
-        (result as any)?._id?.toString(),
-        createCategoryDto.perfilIds,
-        createCategoryDto.clientId
-      )
-    }
     this.auditLogService.log({
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email,
@@ -221,13 +211,6 @@ export class CategoryController {
       updateCategoryDto,
       clientId
     )
-    if (updateCategoryDto.perfilIds !== undefined) {
-      await this.categoryGroupService.setCategoryMembership(
-        id,
-        updateCategoryDto.perfilIds,
-        clientId
-      )
-    }
     this.auditLogService.log({
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email,

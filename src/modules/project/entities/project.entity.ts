@@ -10,8 +10,6 @@ export interface ProjectDocument extends Document {
   clientName?: string
   /** Línea de negocio asignada al centro de costo (opcional). */
   lineaNegocioId?: Types.ObjectId
-  /** Perfil de categoría asignado al centro de costo (opcional). */
-  categoryGroupId?: Types.ObjectId
   /** Suma de montos de solicitudes aprobadas pendientes de pago (Fase 3 — compromiso). */
   committedAdvanceTotal?: number
   // --- Mapeo contable (asientos Contanet) ---
@@ -58,9 +56,6 @@ export class Project {
 
   @Prop({ type: Types.ObjectId, ref: 'LineaNegocio', required: false })
   lineaNegocioId?: Types.ObjectId
-
-  @Prop({ type: Types.ObjectId, ref: 'CategoryGroup', required: false })
-  categoryGroupId?: Types.ObjectId
 
   @Prop({ type: Number, default: 0 })
   committedAdvanceTotal: number
