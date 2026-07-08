@@ -611,6 +611,38 @@ export class UserService {
   }
 
   /**
+   * Destinatarios de los correos "pendiente de pago" (rendición/viático
+   * aprobado). Reemplaza la antigua lista libre `Client.tesoreriaEmails`:
+   * ahora se notifica a los usuarios del cliente con rol Tesoreria.
+   */
+  async findTesoreriaNotifyRecipients(
+    clientId: string
+  ): Promise<{ email: string; name: string }[]> {
+    const tesoreriaRole = await this.roleService.getByName('Tesoreria')
+    if (!tesoreriaRole) return []
+
+    const scopedUsers = await this.userModel
+      .find({
+        clientId: new Types.ObjectId(clientId),
+        isActive: true,
+        emailNotificationsEnabled: true,
+        roleId: (tesoreriaRole as any)._id,
+      })
+      .select('email name')
+      .exec()
+
+    const seen = new Set<string>()
+    const out: { email: string; name: string }[] = []
+    for (const u of scopedUsers) {
+      const em = u.email?.trim().toLowerCase()
+      if (!em || seen.has(em)) continue
+      seen.add(em)
+      out.push({ email: u.email, name: u.name })
+    }
+    return out
+  }
+
+  /**
    * Usuarios con rol Contabilidad (sin filtrar por emailNotificationsEnabled,
    * porque hay flujos que separan notificación in-app del correo).
    * NO incluye usuarios cuyo único vínculo con contabilidad sean permisos de módulo.

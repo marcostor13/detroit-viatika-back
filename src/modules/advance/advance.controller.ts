@@ -48,7 +48,7 @@ export class AdvanceController {
 
   /** Todos los anticipos del cliente (Admin/Tesorero) */
   @Get('client/:clientId')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   findAll(@Param('clientId') clientId: string) {
     return this.advanceService.findAllByClient(clientId)
   }
@@ -100,7 +100,7 @@ export class AdvanceController {
 
   /** Estadísticas para dashboard Tesorería */
   @Get('stats/client/:clientId')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   getStats(@Param('clientId') clientId: string) {
     return this.advanceService.getStats(clientId)
   }
@@ -117,7 +117,7 @@ export class AdvanceController {
 
   /** Detalle de un anticipo */
   @Get(':id')
-  @Roles(ROLES.COLABORADOR, ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
+  @Roles(ROLES.COLABORADOR, ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   findOne(@Param('id') id: string) {
     return this.advanceService.findOne(id)
   }
@@ -228,9 +228,9 @@ export class AdvanceController {
     return result
   }
 
-  /** Registro de pago / transferencia (SuperAdmin o usuario con canApproveL2) */
+  /** Registro de pago / transferencia (SuperAdmin, Tesorería o usuario con canApproveL2) */
   @Patch(':id/register-payment')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   async registerPayment(
     @Param('id') id: string,
     @Body() dto: PayAdvanceDto,
@@ -256,7 +256,7 @@ export class AdvanceController {
 
   /** Registrar devolución de saldo */
   @Patch(':id/return')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   registerReturn(
     @Param('id') id: string,
     @Body() body: { returnedAmount: number }
@@ -268,7 +268,7 @@ export class AdvanceController {
 
   /** Inicia el sub-flujo de devolución (llamado después de settle con type=devolucion). */
   @Patch(':id/return/initiate')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   initiateReturn(@Param('id') id: string) {
     return this.advanceService.initiateReturnTracking(id)
   }
@@ -301,7 +301,7 @@ export class AdvanceController {
 
   /** Contabilidad valida o rechaza el comprobante. */
   @Patch(':id/return/validate')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   validateReturn(
     @Param('id') id: string,
     @Body() body: { approved: boolean; rejectionReason?: string },
@@ -317,7 +317,7 @@ export class AdvanceController {
 
   /** Lista anticipos con devoluciones pendientes (contabilidad). */
   @Get('pending-returns/client/:clientId')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   findPendingReturns(@Param('clientId') clientId: string) {
     return this.advanceService.findPendingReturns(clientId)
   }

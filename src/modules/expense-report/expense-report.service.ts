@@ -46,7 +46,6 @@ import { PayViaticoDto } from './dto/pay-viatico.dto'
 import { ResubmitViaticoDto } from './dto/resubmit-viatico.dto'
 import { CreateAdvanceLineDto } from '../advance/dto/create-advance.dto'
 import { SaldoService } from '../saldo/saldo.service'
-import { ClientService } from '../client/client.service'
 import { Logger } from '@nestjs/common'
 
 /** Contexto del usuario que solicita eliminar una solicitud. */
@@ -74,8 +73,7 @@ export class ExpenseReportService implements OnModuleInit {
     private readonly uploadService: UploadService,
     private readonly projectService: ProjectService,
     private readonly categoryService: CategoryService,
-    private readonly saldoService: SaldoService,
-    private readonly clientService: ClientService
+    private readonly saldoService: SaldoService
   ) { }
 
   async onModuleInit() {
@@ -1446,9 +1444,10 @@ export class ExpenseReportService implements OnModuleInit {
       // Enviar correo a tesorería con datos de pago al colaborador.
       try {
         const clientIdStr = String(fullyUpdatedReport.clientId)
-        console.log(`[TESORESRÍA RENDICIÓN] Buscando emails para clientId=${clientIdStr}`)
-        const tesoreriaEmails = await this.clientService.getTesoreriaEmails(clientIdStr)
-        console.log(`[TESORERÍA RENDICIÓN] Emails configurados: ${JSON.stringify(tesoreriaEmails)}`)
+        console.log(`[TESORESRÍA RENDICIÓN] Buscando usuarios de tesorería para clientId=${clientIdStr}`)
+        const tesoreriaRecipients = await this.userService.findTesoreriaNotifyRecipients(clientIdStr)
+        const tesoreriaEmails = tesoreriaRecipients.map(r => r.email)
+        console.log(`[TESORERÍA RENDICIÓN] Emails de tesorería: ${JSON.stringify(tesoreriaEmails)}`)
         if (tesoreriaEmails.length > 0) {
           const bank = (typeof owner === 'object' && owner?.bankAccount) || null
           const hasBankAccount = !!(bank?.accountNumber)
@@ -2908,7 +2907,9 @@ export class ExpenseReportService implements OnModuleInit {
     // RolesGuard lo aliase a Administrador: por rol no participa en el pago.
     const canPay =
       userRole !== ROLES.COORDINADOR &&
-      (userRole === ROLES.SUPER_ADMIN || userPermissions?.canApproveL2 === true)
+      (userRole === ROLES.SUPER_ADMIN ||
+        userRole === ROLES.TESORERIA ||
+        userPermissions?.canApproveL2 === true)
     if (!canPay) {
       throw new ForbiddenException(
         'No tienes permiso para registrar pagos de reembolso.'
@@ -4309,9 +4310,10 @@ export class ExpenseReportService implements OnModuleInit {
     try {
       const reportId = String((report as any)._id)
       const clientIdStr = report.clientId.toString()
-      console.log(`[TESORERÍA VIÁTICO] Buscando emails para clientId=${clientIdStr}, reportId=${reportId}`)
-      const tesoreriaEmails = await this.clientService.getTesoreriaEmails(clientIdStr)
-      console.log(`[TESORERÍA VIÁTICO] Emails configurados: ${JSON.stringify(tesoreriaEmails)}`)
+      console.log(`[TESORERÍA VIÁTICO] Buscando usuarios de tesorería para clientId=${clientIdStr}, reportId=${reportId}`)
+      const tesoreriaRecipients = await this.userService.findTesoreriaNotifyRecipients(clientIdStr)
+      const tesoreriaEmails = tesoreriaRecipients.map(r => r.email)
+      console.log(`[TESORERÍA VIÁTICO] Emails de tesorería: ${JSON.stringify(tesoreriaEmails)}`)
       if (tesoreriaEmails.length > 0) {
         const collab = await this.userService.findOne(report.userId.toString())
         // Prefer bank data from the solicitud itself; fall back to user profile.
@@ -4506,7 +4508,7 @@ export class ExpenseReportService implements OnModuleInit {
       throw new BadRequestException(`Solo se puede registrar pago de viáticos aprobados (estado actual: ${report.status})`)
     }
 
-    const canPay = [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(userRole as ROLES) || userPermissions?.canApproveL2 === true
+    const canPay = [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA].includes(userRole as ROLES) || userPermissions?.canApproveL2 === true
     if (!canPay) throw new ForbiddenException('No tienes permiso para registrar pagos')
 
     if (dto.method !== 'efectivo' && !dto.paymentReceiptUrl) throw new BadRequestException('El comprobante es obligatorio para pagos por transferencia o cheque.')
