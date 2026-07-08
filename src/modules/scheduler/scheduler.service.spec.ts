@@ -10,6 +10,10 @@ const mockExpenseModel = {
   countDocuments: jest.fn(),
 }
 
+const mockExpenseReportModel = {
+  find: jest.fn(),
+}
+
 const mockClientModel = {
   find: jest.fn(),
 }
@@ -34,6 +38,7 @@ const makeService = () =>
   new SchedulerService(
     mockAdvanceModel as any,
     mockExpenseModel as any,
+    mockExpenseReportModel as any,
     mockClientModel as any,
     mockUserService as any,
     mockEmailService as any,

@@ -4,6 +4,10 @@
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
-  }
+    "^.+\\.ts$": "ts-jest"
+  },
+  "globalSetup": "<rootDir>/setup/mongo-memory-env.js",
+  "globalTeardown": "<rootDir>/setup/mongo-memory-teardown.js",
+  "testTimeout": 30000,
+  "maxWorkers": 1
 }

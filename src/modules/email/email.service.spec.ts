@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { MailerService } from '@nestjs-modules/mailer'
+import { getModelToken } from '@nestjs/mongoose'
 import { EmailService } from './email.service'
+import { Client } from '../client/entities/client.entity'
 
 describe('EmailService', () => {
   let service: EmailService
@@ -15,6 +17,7 @@ describe('EmailService', () => {
       providers: [
         EmailService,
         { provide: MailerService, useValue: mailerService },
+        { provide: getModelToken(Client.name), useValue: { findById: jest.fn() } },
       ],
     }).compile()
     service = module.get<EmailService>(EmailService)
