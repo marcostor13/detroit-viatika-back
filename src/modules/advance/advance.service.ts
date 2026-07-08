@@ -1709,8 +1709,9 @@ export class AdvanceService implements OnModuleInit {
     }
 
     const canPay =
-      [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(userRole as ROLES) ||
-      userPermissions?.canApproveL2 === true
+      [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA].includes(
+        userRole as ROLES
+      ) || userPermissions?.canApproveL2 === true
     if (!canPay)
       throw new ForbiddenException('No tienes permiso para registrar pagos')
 

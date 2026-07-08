@@ -23,7 +23,6 @@ export interface ClientDocument extends Document {
   logo: string
   limits?: ClientLimits
   notificationSettings?: ClientNotificationSettings
-  tesoreriaEmails?: string[]
 }
 
 export interface GetClientDocument extends ClientDocument {
@@ -63,9 +62,6 @@ export class Client {
     default: {},
   })
   limits: ClientLimits
-
-  @Prop({ type: [String], default: [] })
-  tesoreriaEmails: string[]
 
   @Prop({
     type: {

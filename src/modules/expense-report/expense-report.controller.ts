@@ -224,7 +224,7 @@ export class ExpenseReportController {
 
   /** Fase 6 — Tesorería: rendiciones aprobadas con reembolso pendiente de comprobante */
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   @Get('pending-reimbursements/client/:clientId')
   findPendingReimbursements(
     @Param('clientId') clientId: string,
@@ -232,7 +232,7 @@ export class ExpenseReportController {
   ) {
     const role = req.user?.roles?.[0] || req.user?.role
     const canPay =
-      [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(role) ||
+      [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA].includes(role) ||
       req.user?.permissions?.canApproveL2 === true
     if (!canPay) {
       throw new ForbiddenException(
@@ -386,7 +386,7 @@ export class ExpenseReportController {
 
   /** Fase 6 — Registro de pago de reembolso (contabilidad / tesorería con canApproveL2) */
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   @Patch(':id/register-reimbursement-payment')
   async registerReimbursementPayment(
     @Param('id') id: string,
@@ -789,7 +789,7 @@ export class ExpenseReportController {
 
   /** Registrar pago del viático (tesorería / canApproveL2). */
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD, ROLES.TESORERIA)
   @Patch(':id/viatico/register-payment')
   async registerViaticoPayment(
     @Param('id') id: string,
