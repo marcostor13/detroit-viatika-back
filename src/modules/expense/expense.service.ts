@@ -553,6 +553,9 @@ export class ExpenseService {
     if (!body.clientId) {
       throw new HttpException('clientId es requerido', HttpStatus.BAD_REQUEST)
     }
+    if (!body.categoryId) {
+      throw new HttpException('La categoría es requerida', HttpStatus.BAD_REQUEST)
+    }
 
     const categoryObject = Types.ObjectId.createFromHexString(body.categoryId)
     const projectObject = Types.ObjectId.createFromHexString(body.proyectId)
@@ -1066,6 +1069,20 @@ export class ExpenseService {
       )
     }
 
+    // VD-28: la planilla de movilidad ya no pide categoría al usuario; se asigna
+    // automáticamente la categoría "Movilidad" del cliente.
+    const movilidadCategory = await this.categoryService.findByNameForClient(
+      'Movilidad',
+      body.clientId
+    )
+    if (!movilidadCategory) {
+      throw new HttpException(
+        'No existe una categoría "Movilidad" configurada para este cliente. Un administrador debe crearla antes de registrar planillas de movilidad.',
+        HttpStatus.BAD_REQUEST
+      )
+    }
+    body.categoryId = (movilidadCategory as any)._id.toString()
+
     const client = await this.clientModel.findById(body.clientId).lean().exec()
     const dailyLimit = client?.limits?.movilidadDiario ?? null
     if (dailyLimit !== null) {
@@ -1140,6 +1157,9 @@ export class ExpenseService {
   async createOtherExpense(body: CreateExpenseDto): Promise<Expense> {
     if (!body.clientId) {
       throw new HttpException('clientId es requerido', HttpStatus.BAD_REQUEST)
+    }
+    if (!body.categoryId) {
+      throw new HttpException('La categoría es requerida', HttpStatus.BAD_REQUEST)
     }
     // Caja chica finalizada: no se permiten más gastos.
     await this.expenseReportService.assertReportNotLockedByCajaChica(
@@ -1245,6 +1265,9 @@ export class ExpenseService {
   async createCashReceiptExpense(body: CreateExpenseDto): Promise<Expense> {
     if (!body.clientId) {
       throw new HttpException('clientId es requerido', HttpStatus.BAD_REQUEST)
+    }
+    if (!body.categoryId) {
+      throw new HttpException('La categoría es requerida', HttpStatus.BAD_REQUEST)
     }
     // Caja chica finalizada: no se permiten más gastos.
     await this.expenseReportService.assertReportNotLockedByCajaChica(
