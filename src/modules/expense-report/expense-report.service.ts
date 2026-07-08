@@ -1547,42 +1547,18 @@ export class ExpenseReportService implements OnModuleInit {
         const ownerEmailKey = ownerEmail?.trim().toLowerCase() || ''
 
         if (isDirecta) {
-          // Rendición directa: salta coordinador. Va directo a Contabilidad.
+          // Rendición directa: pasa primero por la cadena de aprobadores de
+          // centro de costo (pending_l1) — igual que el viático — y solo llega
+          // a Contabilidad cuando esa cadena se completa (ver approveDirecta).
           await this.notificationsService.create({
             userId: ownerId2,
-            title: 'Rendición enviada a Contabilidad',
-            message: `Tu rendición "${fullyUpdatedReport.title}" fue enviada directamente a contabilidad para su revisión.`,
+            title: 'Rendición enviada para aprobación',
+            message: `Tu rendición "${fullyUpdatedReport.title}" fue enviada y está pendiente de la aprobación del centro de costo.`,
             type: 'info',
             actionUrl: `/mis-rendiciones/${id}/detalle`,
           })
 
-          const sentEmails = new Set<string>()
-          if (ownerEmailKey) sentEmails.add(ownerEmailKey)
-
-          const accountingRecipients =
-            await this.userService.findContabilidadRecipients(clientId)
-          for (const r of accountingRecipients) {
-            const key = r.email.trim().toLowerCase()
-            if (sentEmails.has(key)) continue
-            sentEmails.add(key)
-            await this.emailService.sendRendicionSubmitted(r.email, {
-              recipientName: r.name,
-              ...emailData,
-            })
-          }
-
-          const accountingUsers =
-            await this.userService.findAccountingRecipientsWithIds(clientId)
-          for (const u of accountingUsers) {
-            if (u._id === ownerId2) continue
-            await this.notificationsService.create({
-              userId: u._id,
-              title: 'Nueva Rendición para Revisar',
-              message: `${creatorName} ha enviado la rendición directa "${fullyUpdatedReport.title}" para tu revisión.`,
-              type: 'warning',
-              actionUrl: `/mis-rendiciones/${id}/detalle`,
-            })
-          }
+          await this.notifyDirectaCoordinator(fullyUpdatedReport as ExpenseReportDocument)
         } else {
           // Flujo normal: admins in-app + coordinador (in-app + correo) + contabilidad.
           const admins = await this.userService.findAdminsByClient(clientId)
