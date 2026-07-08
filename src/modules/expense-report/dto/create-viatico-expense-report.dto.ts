@@ -59,20 +59,6 @@ export class CreateViaticoExpenseReportDto {
   @IsOptional()
   observations?: string
 
-  @IsMongoId()
-  @IsOptional()
-  pendingBalanceFromReportId?: string
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  pendingBalanceAmount?: number
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  additionalAmount?: number
-
   /** Saldos de la bolsa (mismo centro de costo) que prefinancian el viático. */
   @IsArray()
   @IsMongoId({ each: true })

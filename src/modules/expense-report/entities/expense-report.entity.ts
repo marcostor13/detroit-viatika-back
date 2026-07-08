@@ -147,14 +147,6 @@ export interface ExpenseReportDocument extends Document {
   gestion?: string
   isDirecta?: boolean
   isCajaChica?: boolean
-  /** ID del anticipo que consumió el saldo pendiente de esta rendición. */
-  pendingBalanceUsedInAdvanceId?: Types.ObjectId
-  /** ID de la rendición directa que consumió el saldo pendiente de esta rendición directa. */
-  pendingBalanceUsedInRendicionId?: Types.ObjectId
-  /** ID de la rendición directa de origen (cuando esta fue creada usando el saldo de otra). */
-  pendingBalanceFromReportId?: Types.ObjectId
-  /** Monto heredado desde la rendición de origen. */
-  pendingBalanceAmount?: number
   /** Saldos de la bolsa consumidos para financiar esta rendición directa. */
   saldoIds?: Types.ObjectId[]
   accountNumber?: string
@@ -466,18 +458,6 @@ export class ExpenseReport {
     default: [],
   })
   reopenHistory?: ReopenRecord[]
-
-  @Prop({ type: Types.ObjectId, ref: 'Advance', required: false })
-  pendingBalanceUsedInAdvanceId?: Types.ObjectId
-
-  @Prop({ type: Types.ObjectId, ref: 'ExpenseReport', required: false })
-  pendingBalanceUsedInRendicionId?: Types.ObjectId
-
-  @Prop({ type: Types.ObjectId, ref: 'ExpenseReport', required: false })
-  pendingBalanceFromReportId?: Types.ObjectId
-
-  @Prop({ required: false })
-  pendingBalanceAmount?: number
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Saldo' }], default: undefined })
   saldoIds?: Types.ObjectId[]

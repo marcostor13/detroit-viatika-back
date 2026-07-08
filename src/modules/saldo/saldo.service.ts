@@ -256,41 +256,6 @@ export class SaldoService {
     return total
   }
 
-  /** Rendiciones que originaron estos saldos (solo los remanentes tienen `sourceReportId`). */
-  async getSourceReportIds(saldoIds: string[]): Promise<string[]> {
-    const ids = (saldoIds || [])
-      .filter(id => Types.ObjectId.isValid(id))
-      .map(id => new Types.ObjectId(id))
-    if (ids.length === 0) return []
-    const saldos = await this.saldoModel
-      .find({ _id: { $in: ids }, sourceReportId: { $exists: true, $ne: null } })
-      .select('sourceReportId')
-      .lean()
-      .exec()
-    return saldos
-      .map(s => (s as any).sourceReportId && String((s as any).sourceReportId))
-      .filter(Boolean) as string[]
-  }
-
-  /**
-   * Si el remanente que originó una rendición ya fue consumido por otra, devuelve
-   * el id de la rendición que lo consumió (para marcar la fuente como "trasladada").
-   */
-  async findRemnantConsumer(
-    sourceReportId: string | Types.ObjectId
-  ): Promise<string | null> {
-    const remnant = await this.saldoModel
-      .findOne({
-        sourceReportId: new Types.ObjectId(String(sourceReportId)),
-        status: 'consumed',
-      })
-      .select('consumedByReportId')
-      .lean()
-      .exec()
-    const consumer = remnant && (remnant as any).consumedByReportId
-    return consumer ? String(consumer) : null
-  }
-
   /** Todos los saldos disponibles del colaborador (página Saldo). */
   async findAvailableByUser(userId: string, clientId: string) {
     return this.saldoModel

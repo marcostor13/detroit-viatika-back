@@ -94,21 +94,6 @@ export class CreateAdvanceDto {
   @IsOptional()
   observations?: string
 
-  /** Saldo trasladado desde una rendición anterior (nueva solicitud con saldo pendiente). */
-  @IsMongoId()
-  @IsOptional()
-  pendingBalanceFromReportId?: string
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  pendingBalanceAmount?: number
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  additionalAmount?: number
-
   /** Saldos de la bolsa seleccionados para financiar esta solicitud (consumo completo, mismo centro de costo). */
   @IsArray()
   @IsMongoId({ each: true })

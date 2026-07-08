@@ -448,19 +448,8 @@ export class ExpenseReportService implements OnModuleInit {
         ? new Types.ObjectId(createExpenseReportDto.projectId)
         : undefined,
       assignedCoordinatorId,
-      pendingBalanceFromReportId:
-        createExpenseReportDto.pendingBalanceFromReportId
-          ? new Types.ObjectId(
-            createExpenseReportDto.pendingBalanceFromReportId
-          )
-          : undefined,
-      // Presupuesto: si se financia con saldos de la bolsa = suma de saldos;
-      // si hereda saldo pendiente = monto heredado; caso normal = budget recibido.
-      budget: hasSaldos
-        ? saldoBudget
-        : createExpenseReportDto.pendingBalanceFromReportId
-          ? (createExpenseReportDto.pendingBalanceAmount ?? 0)
-          : (createExpenseReportDto.budget ?? 0),
+      // Presupuesto: si se financia con saldos de la bolsa = suma de saldos; caso normal = budget recibido.
+      budget: hasSaldos ? saldoBudget : (createExpenseReportDto.budget ?? 0),
       saldoIds: hasSaldos
         ? saldoIds.map(id => new Types.ObjectId(id))
         : undefined,
@@ -483,42 +472,6 @@ export class ExpenseReportService implements OnModuleInit {
         context: 'rendicion_directa',
         reportId: String(savedReport._id),
       })
-
-      // Las rendiciones que originaron los remanentes consumidos quedan resueltas
-      // ("saldo trasladado a esta nueva rendición") → se muestran como cerradas.
-      const sourceReportIds =
-        await this.saldoService.getSourceReportIds(saldoIds)
-      for (const srcId of sourceReportIds) {
-        await this.expenseReportModel
-          .findByIdAndUpdate(srcId, {
-            pendingBalanceUsedInRendicionId: savedReport._id,
-          })
-          .exec()
-      }
-    }
-
-    // Si se creó desde saldo de otra rendición directa, marcar la rendición fuente
-    if (createExpenseReportDto.pendingBalanceFromReportId) {
-      await this.expenseReportModel
-        .findByIdAndUpdate(createExpenseReportDto.pendingBalanceFromReportId, {
-          pendingBalanceUsedInRendicionId: savedReport._id,
-        })
-        .exec()
-
-      // Si la rendición fuente había dejado su sobrante en la bolsa, consumirlo: el
-      // dinero se trasladó al presupuesto de esta nueva rendición. Evita el doble
-      // conteo (el saldo seguía mostrándose como disponible).
-      try {
-        await this.saldoService.removeRemnantBySourceReport(
-          createExpenseReportDto.pendingBalanceFromReportId,
-          String(savedReport._id)
-        )
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        this.logger.error(
-          `Consumir remanente de bolsa al heredar saldo de ${createExpenseReportDto.pendingBalanceFromReportId}: ${msg}`
-        )
-      }
     }
 
     console.log(
@@ -816,10 +769,7 @@ export class ExpenseReportService implements OnModuleInit {
     const createdById = String(report.createdBy?._id ?? report.createdBy ?? '')
     const ownerId = String(report.userId?._id ?? report.userId ?? '')
     const createdByOther = !!createdById && !!ownerId && createdById !== ownerId
-    // `inheritedBalance`: la rendición directa se creó con saldo heredado de otra.
-    // El dueño no puede eliminarla (rompería la cadena del saldo); solo Contabilidad.
-    const inheritedBalance = !!report.pendingBalanceFromReportId
-    return { ...report, hasApprovedExpense, createdByOther, inheritedBalance }
+    return { ...report, hasApprovedExpense, createdByOther }
   }
 
   async findAllCajaChicaAvailable(clientId: string) {
@@ -1033,9 +983,6 @@ export class ExpenseReportService implements OnModuleInit {
     // sobrante aún no se reflejó en la bolsa (aprobadas antes de esta funcionalidad).
     // Se corrige sola al abrir el detalle, una rendición a la vez, sin barrido global.
     await this.ensureDirectaBolsaRemnant(id, report).catch(() => undefined)
-    // Auto-sanado (lazy): si el remanente de esta rendición ya fue consumido por otra
-    // pero la fuente no quedó marcada como "trasladada", se corrige al abrirla.
-    await this.ensureSourceMarkedIfRemnantConsumed(id, report).catch(() => undefined)
     const normalized = this.normalizeReportExpenseDates(report)
       // Flag derivado para el front: si la caja chica fue finalizada, el
       // colaborador ya no puede subir gastos (botón "Añadir Gasto" oculto).
@@ -1045,20 +992,6 @@ export class ExpenseReportService implements OnModuleInit {
         (normalized as unknown as { isCajaChica?: boolean }).isCajaChica === true
           ? await this.isLockedByFinalizedCajaChica(id)
           : false
-    // Código de la rendición de origen del saldo heredado, para mostrar en el detalle
-    // y el reporte "de qué rendición proviene el saldo" (en vez de un genérico).
-    const fromId = (report as unknown as { pendingBalanceFromReportId?: unknown })
-      .pendingBalanceFromReportId
-    if (fromId) {
-      const src = await this.expenseReportModel
-        .findById(String(fromId))
-        .select('codigo')
-        .lean()
-        .exec()
-        ; (
-          normalized as unknown as { pendingBalanceFromCodigo?: string }
-        ).pendingBalanceFromCodigo = (src as { codigo?: string } | null)?.codigo
-    }
     return normalized
   }
 
@@ -1921,8 +1854,7 @@ export class ExpenseReportService implements OnModuleInit {
       'Esta solicitud ya tiene una aprobación; solo Contabilidad puede eliminarla.'
 
     // Rendición directa creada por Contabilidad para el colaborador/coordinador
-    // (createdBy distinto del dueño), o creada con saldo heredado de otra
-    // rendición (borrarla rompería la cadena del saldo): solo Contabilidad.
+    // (createdBy distinto del dueño): solo Contabilidad puede eliminarla.
     if (!restricted && report.isDirecta) {
       const createdById = String(report.createdBy ?? '')
       const ownerId = String(report.userId ?? '')
@@ -1930,15 +1862,6 @@ export class ExpenseReportService implements OnModuleInit {
         restricted = true
         restrictedMsg =
           'Esta rendición directa fue creada por Contabilidad; solo Contabilidad puede eliminarla.'
-      } else if (report.pendingBalanceFromReportId && expenses.length > 0) {
-        // Saldo heredado CON gastos ya cargados: borrarla rompería la cadena del
-        // saldo, solo Contabilidad. Si aún NO se subió ningún gasto, el dueño
-        // puede eliminarla: el borrado restaura el saldo a la bolsa
-        // (restoreByConsumer) y libera la rendición de origen
-        // (unmarkPendingBalanceUsed), volviendo todo al estado anterior.
-        restricted = true
-        restrictedMsg =
-          'Esta rendición directa se creó con saldo heredado de otra rendición; solo Contabilidad puede eliminarla.'
       }
     }
 
@@ -2098,11 +2021,6 @@ export class ExpenseReportService implements OnModuleInit {
     try {
       await this.saldoService.removeViaticoChangeByReport(id)
       await this.saldoService.restoreByConsumer({ reportId: id })
-      // Saldo heredado: libera la rendición de origen para que su saldo vuelva a estar
-      // disponible (en el caso típico no dejó remanente en la bolsa que restaurar).
-      if (report.pendingBalanceFromReportId) {
-        await this.unmarkPendingBalanceUsed(String(report.pendingBalanceFromReportId), id)
-      }
     } catch (err: unknown) {
       this.logger.error(
         `Revertir saldos al eliminar ${id}: ${err instanceof Error ? err.message : String(err)}`
@@ -2425,7 +2343,7 @@ export class ExpenseReportService implements OnModuleInit {
     const reports = await this.expenseReportModel
       .find(query)
       .select(
-        '_id codigo userId title motivo gestion budget status createdAt createdBy directaDeposit expenseIds pendingBalanceFromReportId pendingBalanceAmount saldoIds pendingBalanceUsedInRendicionId pendingBalanceUsedInAdvanceId returnVoucher'
+        '_id codigo userId title motivo gestion budget status createdAt createdBy directaDeposit expenseIds saldoIds returnVoucher'
       )
       .populate('userId', 'name email')
       .populate({
@@ -2454,20 +2372,12 @@ export class ExpenseReportService implements OnModuleInit {
         (s, e) => s + (Number(e?.total) || 0),
         0
       )
-      // Rendición directa creada desde el saldo de otra (saldo heredado): no tiene
-      // `directaDeposit`, pero su presupuesto disponible es el saldo trasladado.
-      const hasInheritedBalance =
-        !!r.pendingBalanceFromReportId &&
-        Number(r.pendingBalanceAmount ?? 0) > 0
       // Rendición directa financiada con saldos de la bolsa: su presupuesto disponible
       // es el `budget` (suma de los saldos consumidos).
       const hasSaldoFinancing =
         Array.isArray(r.saldoIds) && r.saldoIds.length > 0
-      const deposited = Number(
-        r.directaDeposit?.amount ?? r.pendingBalanceAmount ?? r.budget ?? 0
-      )
-      const hasFunds =
-        !!r.directaDeposit || hasInheritedBalance || hasSaldoFinancing
+      const deposited = Number(r.directaDeposit?.amount ?? r.budget ?? 0)
+      const hasFunds = !!r.directaDeposit || hasSaldoFinancing
       return {
         _id: String(r._id),
         codigo: r.codigo ?? null,
@@ -2475,12 +2385,8 @@ export class ExpenseReportService implements OnModuleInit {
         title: r.title ?? null,
         motivo: r.motivo ?? null,
         status: r.status ?? null,
-        // Cerrada (a efectos de label): saldo trasladado a otra rendición/anticipo o devuelto.
-        effectivelyClosed:
-          r.status === 'closed' ||
-          !!r.pendingBalanceUsedInRendicionId ||
-          !!r.pendingBalanceUsedInAdvanceId ||
-          !!r.returnVoucher,
+        // Cerrada (a efectos de label): devuelta con comprobante.
+        effectivelyClosed: r.status === 'closed' || !!r.returnVoucher,
         createdAt: r.createdAt,
         hasDeposit: hasFunds,
         deposited,
@@ -2551,48 +2457,6 @@ export class ExpenseReportService implements OnModuleInit {
       .exec()
   }
 
-  async markPendingBalanceUsed(reportId: string, advanceId: string) {
-    return await this.expenseReportModel
-      .findByIdAndUpdate(
-        reportId,
-        {
-          $set: {
-            pendingBalanceUsedInAdvanceId: new Types.ObjectId(advanceId),
-          },
-        },
-        { new: true }
-      )
-      .exec()
-  }
-
-  /**
-   * Revierte la marca de "saldo trasladado" en la rendición de origen cuando el
-   * documento que heredó su saldo (viático/anticipo) se rechaza, cancela o elimina, de
-   * modo que ese saldo vuelva a estar disponible para reutilizarse. Solo actúa si la
-   * marca apunta a ese mismo documento consumidor (no pisa un traslado posterior).
-   */
-  async unmarkPendingBalanceUsed(sourceReportId: string, consumerId: string) {
-    const consumer = new Types.ObjectId(consumerId)
-    return await this.expenseReportModel
-      .findOneAndUpdate(
-        {
-          _id: new Types.ObjectId(sourceReportId),
-          $or: [
-            { pendingBalanceUsedInAdvanceId: consumer },
-            { pendingBalanceUsedInRendicionId: consumer },
-          ],
-        },
-        {
-          $unset: {
-            pendingBalanceUsedInAdvanceId: '',
-            pendingBalanceUsedInRendicionId: '',
-          },
-        },
-        { new: true }
-      )
-      .exec()
-  }
-
   async updateSettlement(reportId: string, settlement: any) {
     return await this.expenseReportModel
       .findByIdAndUpdate(reportId, { $set: { settlement } }, { new: true })
@@ -2601,14 +2465,12 @@ export class ExpenseReportService implements OnModuleInit {
 
   /**
    * Fondos entregados al colaborador en una rendición directa: depósito de
-   * contabilidad, saldo heredado de otra rendición, o financiamiento con la bolsa
-   * de saldos (`saldoIds` → presupuesto). Base para calcular devolución vs reembolso.
+   * contabilidad, o financiamiento con la bolsa de saldos (`saldoIds` →
+   * presupuesto). Base para calcular devolución vs reembolso.
    */
   private directaFundsGiven(report: any): number {
     const deposit = Number(report?.directaDeposit?.amount ?? 0)
     if (deposit > 0) return deposit
-    const inherited = Number(report?.pendingBalanceAmount ?? 0)
-    if (report?.pendingBalanceFromReportId && inherited > 0) return inherited
     if (Array.isArray(report?.saldoIds) && report.saldoIds.length > 0) {
       return Number(report?.budget ?? 0)
     }
@@ -2626,28 +2488,17 @@ export class ExpenseReportService implements OnModuleInit {
     report: any,
     ownerId: string
   ): Promise<void> {
-    // El sobrante regresa a la bolsa cuando los fondos venían del propio colaborador:
-    // saldos de la bolsa (saldoIds) o saldo heredado de otra rendición
-    // (pendingBalanceFromReportId). Las directas con depósito de contabilidad
-    // mantienen su flujo de devolución y no entran aquí.
+    // El sobrante regresa a la bolsa cuando los fondos venían de la bolsa de
+    // saldos (saldoIds). Las directas con depósito de contabilidad mantienen su
+    // flujo de devolución y no entran aquí.
     const hasBolsa = Array.isArray(report?.saldoIds) && report.saldoIds.length > 0
-    const hasInherited =
-      !!report?.pendingBalanceFromReportId &&
-      Number(report?.pendingBalanceAmount ?? 0) > 0
-    if (!report?.isDirecta || (!hasBolsa && !hasInherited)) {
+    if (!report?.isDirecta || !hasBolsa) {
       return
     }
-    // El sobrante no debe (re)publicarse en la bolsa si ya tuvo otro destino:
-    // - trasladado a otra rendición/anticipo (pendingBalanceUsedIn*): ya está
-    //   representado como presupuesto de la rendición destino.
-    // - devuelto a contabilidad (returnVoucher): el dinero regresó a la empresa,
-    //   no puede seguir en la bolsa del colaborador.
-    // En ambos casos, evita el doble conteo.
-    if (
-      report?.pendingBalanceUsedInRendicionId ||
-      report?.pendingBalanceUsedInAdvanceId ||
-      report?.returnVoucher
-    ) {
+    // El sobrante no debe (re)publicarse en la bolsa si ya fue devuelto a
+    // contabilidad (returnVoucher): el dinero regresó a la empresa, no puede
+    // seguir en la bolsa del colaborador. Evita el doble conteo.
+    if (report?.returnVoucher) {
       return
     }
     const budget = Number(report?.budget ?? 0)
@@ -2700,12 +2551,9 @@ export class ExpenseReportService implements OnModuleInit {
   ): Promise<void> {
     const status = report?.status
     const hasBolsa = Array.isArray(report?.saldoIds) && report.saldoIds.length > 0
-    const hasInherited =
-      !!report?.pendingBalanceFromReportId &&
-      Number(report?.pendingBalanceAmount ?? 0) > 0
     if (
       !report?.isDirecta ||
-      (!hasBolsa && !hasInherited) ||
+      !hasBolsa ||
       (status !== 'approved' && status !== 'closed') ||
       report?.settlement
     ) {
@@ -2720,26 +2568,6 @@ export class ExpenseReportService implements OnModuleInit {
     const owner = report.userId
     const ownerId = owner?._id ? String(owner._id) : String(owner)
     await this.settleDirectaFinanciadaConBolsa(reportId, report, ownerId)
-  }
-
-  /**
-   * Si el remanente que originó esta rendición directa ya fue consumido por otra
-   * (financiándola con la bolsa) pero la fuente no quedó marcada como "trasladada",
-   * la marca al abrir el detalle. Idempotente y no bloqueante.
-   */
-  private async ensureSourceMarkedIfRemnantConsumed(
-    reportId: string,
-    report: any
-  ): Promise<void> {
-    if (!report?.isDirecta || report?.pendingBalanceUsedInRendicionId) return
-    const consumer = await this.saldoService.findRemnantConsumer(reportId)
-    if (!consumer) return
-    await this.expenseReportModel
-      .findByIdAndUpdate(reportId, {
-        pendingBalanceUsedInRendicionId: new Types.ObjectId(consumer),
-      })
-      .exec()
-    report.pendingBalanceUsedInRendicionId = new Types.ObjectId(consumer)
   }
 
   async setApprovedBy(reportId: string, userId: string) {
@@ -3990,7 +3818,6 @@ export class ExpenseReportService implements OnModuleInit {
       throw new ForbiddenException('Debe registrar su firma digital en el perfil antes de solicitar viáticos.')
     }
 
-    const pendingAmt = Number(dto.pendingBalanceAmount ?? 0)
     const chain = await this.buildCostCenterChain(profile, dto.projectId, clientId)
 
     // `dto.amount` es el costo del viático (suma de líneas). El saldo heredado NO se
@@ -4028,23 +3855,7 @@ export class ExpenseReportService implements OnModuleInit {
       ...(dto.accountNumber?.trim() && { viaticoAccountNumber: dto.accountNumber.trim() }),
       ...(dto.cci?.trim() && { viaticoCci: dto.cci.trim() }),
       ...(dto.ordenTrabajoId && { viaticoOrdenTrabajoId: new Types.ObjectId(dto.ordenTrabajoId) }),
-      ...(pendingAmt > 0 && dto.pendingBalanceFromReportId && {
-        pendingBalanceFromReportId: new Types.ObjectId(dto.pendingBalanceFromReportId),
-        pendingBalanceAmount: pendingAmt,
-      }),
     })
-
-    // Financiamiento con saldo heredado de otra rendición (mismo centro de costo).
-    if (pendingAmt > 0 && dto.pendingBalanceFromReportId) {
-      await this.applyViaticoPendingFinancing(report, {
-        userId,
-        clientId,
-        projectId: dto.projectId,
-        pendingAmt,
-        fromReportId: dto.pendingBalanceFromReportId,
-      })
-      await report.save()
-    }
 
     // Financiamiento con saldos de la bolsa (mismo centro de costo).
     const saldoIds = Array.isArray(dto.saldoIds) ? dto.saldoIds : []
@@ -4105,57 +3916,6 @@ export class ExpenseReportService implements OnModuleInit {
     }
   }
 
-  /**
-   * Financia un viático con el saldo heredado (`pendingBalance`) de otra rendición del
-   * mismo centro de costo. Funciona igual que el financiamiento con saldos de la bolsa:
-   * el saldo prefinancia el costo (`viaticoPaidAmount`), de modo que contabilidad solo
-   * deposite la diferencia (viaticoAmount − saldo aplicado). Si el saldo heredado SUPERA
-   * el costo del viático, solo se usa lo necesario y el sobrante vuelve de inmediato a la
-   * bolsa como saldo disponible del mismo centro de costo (contabilidad no deposita nada).
-   * Marca la rendición de origen como trasladada y consume su remanente en la bolsa (si
-   * lo dejó) para evitar el doble conteo del mismo dinero. No persiste el documento.
-   */
-  private async applyViaticoPendingFinancing(
-    report: ExpenseReportDocument,
-    opts: {
-      userId: string
-      clientId: string
-      projectId: string
-      pendingAmt: number
-      fromReportId: string
-    }
-  ): Promise<void> {
-    const reportId = String((report as any)._id)
-    const viaticoAmount = Number(report.viaticoAmount ?? 0)
-
-    // El saldo heredado nunca cubre más que el costo del viático.
-    report.viaticoPaidAmount =
-      Math.round(Math.min(opts.pendingAmt, viaticoAmount) * 100) / 100
-
-    // Marca la rendición de origen como "saldo trasladado" y consume el remanente que
-    // hubiera dejado en la bolsa, para que ese dinero no se cuente dos veces.
-    await this.markPendingBalanceUsed(opts.fromReportId, reportId)
-    try {
-      await this.saldoService.removeRemnantBySourceReport(opts.fromReportId, reportId)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      this.logger.error(
-        `Consumir remanente de bolsa al heredar saldo de ${opts.fromReportId}: ${msg}`
-      )
-    }
-
-    // Sobrante: el saldo heredado superó el costo → vuelve ya mismo a la bolsa.
-    const excess = Math.round((opts.pendingAmt - viaticoAmount) * 100) / 100
-    if (excess > 0.01) {
-      await this.saldoService.createViaticoChange({
-        userId: opts.userId,
-        clientId: opts.clientId,
-        projectId: opts.projectId,
-        changeFromReportId: reportId,
-        amount: excess,
-      })
-    }
-  }
 
   /**
    * Notifica al aprobador que le corresponde actuar ahora
@@ -4584,25 +4344,6 @@ export class ExpenseReportService implements OnModuleInit {
         projectId: dto.projectId,
       })
     }
-    // Re-financia el saldo heredado: el costo pudo cambiar en la corrección, así que se
-    // recalcula cuánto prefinancia (viaticoPaidAmount) y el sobrante que vuelve a la
-    // bolsa. Se neutraliza primero el vuelto anterior para no contarlo dos veces.
-    const pendingAmt = Number(report.pendingBalanceAmount ?? 0)
-    if (pendingAmt > 0 && report.pendingBalanceFromReportId) {
-      await this.saldoService.removeViaticoChangeByReport(id)
-      report.viaticoPaidAmount =
-        Math.round(Math.min(pendingAmt, roundedSum) * 100) / 100
-      const excess = Math.round((pendingAmt - roundedSum) * 100) / 100
-      if (excess > 0.01) {
-        await this.saldoService.createViaticoChange({
-          userId: actingUserId,
-          clientId,
-          projectId: dto.projectId,
-          changeFromReportId: id,
-          amount: excess,
-        })
-      }
-    }
     report.description = description
     report.status = 'pending_l1'
     report.viaticoApprovalLevel = 0
@@ -4784,16 +4525,6 @@ export class ExpenseReportService implements OnModuleInit {
       if (restored > 0) {
         report.viaticoPaidAmount = 0
         report.saldoIds = undefined
-      }
-      // Saldo heredado de otra rendición: libera la fuente (su saldo vuelve a estar
-      // disponible) y resetea el prefinanciamiento. En el caso típico la fuente no dejó
-      // remanente en la bolsa, así que `restored` es 0 y hay que limpiarlo explícitamente.
-      if (report.pendingBalanceFromReportId) {
-        await this.unmarkPendingBalanceUsed(
-          String(report.pendingBalanceFromReportId),
-          reportId
-        )
-        report.viaticoPaidAmount = 0
       }
     } catch (err: unknown) {
       this.logger.error(

@@ -278,14 +278,6 @@ export class AdvanceService implements OnModuleInit {
   }
 
   private async createSimpleAdvance(dto: CreateAdvanceDto): Promise<Advance> {
-    const hasPendingBalance =
-      dto.pendingBalanceAmount !== undefined &&
-      dto.additionalAmount !== undefined
-
-    const amount = hasPendingBalance
-      ? Number(dto.pendingBalanceAmount) + Number(dto.additionalAmount)
-      : dto.amount
-
     const profile = await this.userService.findTransactionalProfile(
       dto.userId!
     )
@@ -298,31 +290,17 @@ export class AdvanceService implements OnModuleInit {
       expenseReportId: dto.expenseReportId
         ? new Types.ObjectId(dto.expenseReportId)
         : undefined,
-      amount,
+      amount: dto.amount,
       description: dto.description,
       status: 'pending_l1',
       approvalLevel: 0,
       requiredLevels: chain.length,
       approvalHistory: [],
-      ...(hasPendingBalance && {
-        pendingBalanceFromReportId: dto.pendingBalanceFromReportId
-          ? new Types.ObjectId(dto.pendingBalanceFromReportId)
-          : undefined,
-        pendingBalanceAmount: Number(dto.pendingBalanceAmount),
-        additionalAmount: Number(dto.additionalAmount),
-      }),
     })
 
     if (dto.expenseReportId) {
       await this.expenseReportService.addAdvanceToReport(
         dto.expenseReportId,
-        (advance as any)._id.toString()
-      )
-    }
-
-    if (hasPendingBalance && dto.pendingBalanceFromReportId) {
-      await this.expenseReportService.markPendingBalanceUsed(
-        dto.pendingBalanceFromReportId,
         (advance as any)._id.toString()
       )
     }
@@ -447,9 +425,6 @@ export class AdvanceService implements OnModuleInit {
       )
     }
 
-    const pendingAmt = Number(dto.pendingBalanceAmount ?? 0)
-    const linesOnlyAmount = Math.round((dto.amount - pendingAmt) * 100) / 100
-
     const { lineDocs, roundedSum, description } =
       await this.validateViaticoBusinessRulesAndLines(
         {
@@ -459,12 +434,11 @@ export class AdvanceService implements OnModuleInit {
           projectId: dto.projectId!,
           lines: dto.lines,
           observations: dto.observations,
-          amount: linesOnlyAmount,
+          amount: dto.amount,
         },
         dto.clientId!
       )
 
-    const totalAmount = Math.round((roundedSum + pendingAmt) * 100) / 100
     const chain = buildApproverChain(profile.approverIds)
 
     const advance = await this.advanceModel.create({
@@ -482,7 +456,7 @@ export class AdvanceService implements OnModuleInit {
       endDate: new Date(dto.endDate!),
       lines: lineDocs,
       observations: dto.observations?.trim(),
-      amount: totalAmount,
+      amount: roundedSum,
       description,
       status: 'pending_l1',
       approvalLevel: 0,
@@ -490,14 +464,6 @@ export class AdvanceService implements OnModuleInit {
       approvalHistory: [],
       solicitudVersion: 1,
       budgetCommitmentRecorded: false,
-      ...(pendingAmt > 0 &&
-        dto.pendingBalanceFromReportId && {
-          pendingBalanceFromReportId: new Types.ObjectId(
-            dto.pendingBalanceFromReportId
-          ),
-          pendingBalanceAmount: pendingAmt,
-          additionalAmount: roundedSum,
-        }),
       ...(dto.bankName?.trim() && { requestBankName: dto.bankName.trim() }),
       ...(dto.accountNumber?.trim() && { requestAccountNumber: dto.accountNumber.trim() }),
       ...(dto.cci?.trim() && { requestCci: dto.cci.trim() }),
@@ -506,13 +472,6 @@ export class AdvanceService implements OnModuleInit {
     if (dto.expenseReportId) {
       await this.expenseReportService.addAdvanceToReport(
         dto.expenseReportId,
-        (advance as any)._id.toString()
-      )
-    }
-
-    if (pendingAmt > 0 && dto.pendingBalanceFromReportId) {
-      await this.expenseReportService.markPendingBalanceUsed(
-        dto.pendingBalanceFromReportId,
         (advance as any)._id.toString()
       )
     }

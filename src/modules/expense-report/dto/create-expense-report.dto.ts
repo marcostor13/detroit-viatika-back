@@ -108,14 +108,6 @@ export class CreateExpenseReportDto {
   @Type(() => BudgetItemDto)
   items?: BudgetItemDto[]
 
-  @IsMongoId()
-  @IsOptional()
-  pendingBalanceFromReportId?: string
-
-  @IsNumber()
-  @IsOptional()
-  pendingBalanceAmount?: number
-
   /** Saldos de la bolsa seleccionados para financiar esta rendición directa (consumo completo). */
   @IsArray()
   @IsMongoId({ each: true })
