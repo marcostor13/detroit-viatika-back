@@ -40,6 +40,7 @@ import {
   canActOnChain,
   advanceChain,
   combineCostCenterChain,
+  buildApproverChain,
 } from '../advance/approval-chain.util'
 import { CreateViaticoExpenseReportDto } from './dto/create-viatico-expense-report.dto'
 import { PayViaticoDto } from './dto/pay-viatico.dto'
@@ -637,8 +638,8 @@ export class ExpenseReportService implements OnModuleInit {
    *   rendición (ver `resolveAssignedCoordinatorId`).
    * - Viático: `viaticoApproverChain`, la cadena de aprobadores tomada al
    *   solicitar el viático (ver `combineCostCenterChain`/`buildCostCenterChain`).
-   * - Rendición directa: `directaApproverChain`, la cadena tomada al enviarla
-   *   (mismo mecanismo que el viático, ver `buildCostCenterChain`).
+   * - Rendición directa: `directaApproverChain`, la cadena del jefe inmediato
+   *   (aprobadores asignados) tomada al enviarla (ver `buildApproverChain`).
    * Ninguno usa la relación en vivo usuario→coordinador ni el aprobador actual
    * del centro de costo, así que si este cambia, las solicitudes ya creadas
    * conservan a su coordinador original.
@@ -663,6 +664,9 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('projectId', 'code name')
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
       .populate('directaOrdenTrabajoId', 'nombre costCenterId')
+      // Comprobantes: total (monto de la rendición directa) y datos/archivo para
+      // mostrar las facturas en el modal de aprobación del jefe inmediato. VD-25.
+      .populate('expenseIds', 'total data file expenseType')
       .sort({ createdAt: -1 })
       .exec()
   }
@@ -952,6 +956,9 @@ export class ExpenseReportService implements OnModuleInit {
       })
       .populate('createdBy', 'name email')
       .populate('approvedBy', 'name email')
+      // Coordinador que aprobó: se incluye su firma/DNI para el PDF de la planilla
+      // de movilidad (firma del colaborador y del coordinador, VD-33).
+      .populate('coordinatorApprovedBy', 'name email signature dni')
       .populate('projectId', 'name')
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
       .populate('directaOrdenTrabajoId', 'nombre costCenterId')
@@ -997,8 +1004,8 @@ export class ExpenseReportService implements OnModuleInit {
    * Notifica a Contabilidad que una rendición quedó lista para su aprobación
    * final (coordinador/cadena de centro de costo ya completada), y al
    * colaborador que ya pasó ese paso. Compartido entre la rendición normal
-   * (coordinador único, desde `update()`) y la rendición directa (cadena de
-   * centro de costo, desde `approveDirecta`).
+   * (coordinador único, desde `update()`) y la rendición directa (cadena del
+   * jefe inmediato, desde `approveDirecta`).
    */
   private async notifyAccountingReportPendingApproval(
     id: string,
@@ -1172,26 +1179,18 @@ export class ExpenseReportService implements OnModuleInit {
     if (dto.description !== undefined) $set.description = dto.description
     if (dto.budget !== undefined) $set.budget = dto.budget
 
-    // Rendición directa: al enviar (o reenviar tras rechazo), arma la cadena de
-    // aprobadores por centro de costo (igual que el viático) en vez de saltar
-    // directo a Contabilidad. Se recalcula en cada envío por si el centro de
-    // costo o sus aprobadores cambiaron desde el último intento.
+    // Rendición directa: al enviar (o reenviar tras rechazo), arma la cadena con
+    // el JEFE INMEDIATO del colaborador (sus aprobadores asignados) en vez de la
+    // cadena por centro de costo. El flujo es jefe inmediato → Contabilidad
+    // (VD-25): al completar esta cadena, `approveDirecta` la pasa a
+    // `pending_accounting`. Se recalcula en cada envío por si los aprobadores
+    // asignados cambiaron desde el último intento.
     if (dto.status !== undefined) {
       if (dto.status === 'submitted' && isDirecta) {
-        const projectId = (existing as any).projectId
-        if (!projectId) {
-          throw new BadRequestException(
-            'La rendición directa no tiene centro de costo asignado. No se puede enviar.'
-          )
-        }
         const profile = await this.userService.findTransactionalProfile(
           (existing as any).userId.toString()
         )
-        const chain = await this.buildCostCenterChain(
-          profile ?? {},
-          projectId.toString(),
-          (existing as any).clientId.toString()
-        )
+        const chain = buildApproverChain(profile?.approverIds)
         $set.status = 'pending_l1'
         $set.directaApproverChain = chain
         $set.directaRequiredLevels = chain.length
@@ -3951,7 +3950,7 @@ export class ExpenseReportService implements OnModuleInit {
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
-  /** Notifica al aprobador de centro de costo al que le toca el turno de una rendición directa. */
+  /** Notifica al jefe inmediato al que le toca el turno de aprobar una rendición directa. */
   private async notifyDirectaCoordinator(report: ExpenseReportDocument): Promise<void> {
     const reportId = String((report as any)._id)
     const coordId = report.directaApproverChain?.[report.directaApprovalLevel ?? 0]
@@ -3962,7 +3961,7 @@ export class ExpenseReportService implements OnModuleInit {
       await this.notificationsService.create({
         userId: coordId.toString(),
         title: 'Nueva rendición directa pendiente',
-        message: `Una rendición directa (${report.title}) requiere tu aprobación de centro de costo.`,
+        message: `Una rendición directa (${report.title}) requiere tu aprobación como jefe inmediato.`,
         type: 'info',
         actionUrl: `/mis-rendiciones/${reportId}/detalle`,
         metadata: { reportId, event: 'directa_submitted' },
@@ -3973,11 +3972,11 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * Aprueba el nivel actual de la cadena de aprobadores de centro de costo de
-   * una rendición directa. Solo puede actuar el aprobador al que le toca el
-   * turno (directaApproverChain[directaApprovalLevel]) o Superadministrador.
+   * Aprueba el nivel actual de la cadena del jefe inmediato de una rendición
+   * directa. Solo puede actuar el aprobador al que le toca el turno
+   * (directaApproverChain[directaApprovalLevel]) o Superadministrador.
    * Al completar la cadena pasa a `pending_accounting` (gate final de
-   * Contabilidad), igual que el viático.
+   * Contabilidad): flujo jefe inmediato → Contabilidad (VD-25).
    */
   async approveDirecta(id: string, opts: { approvedBy: string; notes?: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
     const report = await this.expenseReportModel.findById(id)
@@ -4002,7 +4001,7 @@ export class ExpenseReportService implements OnModuleInit {
       report.coordinatorApprovedAt = new Date()
       report.coordinatorApprovedBy = new Types.ObjectId(actorId)
       await report.save()
-      this.notificationsService.create({ userId: report.userId.toString(), title: 'Rendición en aprobación final', message: `Tu rendición "${report.title}" fue aprobada por los centros de costo y está pendiente de la aprobación final de Contabilidad.`, type: 'info', actionUrl: `/mis-rendiciones/${id}/detalle` }).catch(() => {})
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Rendición en aprobación final', message: `Tu rendición "${report.title}" fue aprobada por tu jefe inmediato y está pendiente de la aprobación final de Contabilidad.`, type: 'info', actionUrl: `/mis-rendiciones/${id}/detalle` }).catch(() => {})
       const fullyUpdatedReport = await this.findOne(id)
       await this.notifyAccountingReportPendingApproval(id, fullyUpdatedReport)
     } else {
