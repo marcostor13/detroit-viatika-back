@@ -686,6 +686,8 @@ export class ExpenseReportService implements OnModuleInit {
       // Nombre de la categoría de cada línea de viático, para mostrar el detalle
       // por categoría al aprobar (la list no traía categoryId poblado).
       .populate('viaticoLines.categoryId', 'name')
+      // Orden de Trabajo imputada, para mostrarla en el detalle de la solicitud.
+      .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
       .sort({ createdAt: -1 })
       .exec()
   }
@@ -720,6 +722,9 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('createdBy', 'name email')
       // Nombre de categoría por línea de viático (para el detalle al aprobar).
       .populate('viaticoLines.categoryId', 'name')
+      // Centro de costo (código/nombre) y Orden de Trabajo, para el detalle de la solicitud.
+      .populate('projectId', 'code name')
+      .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
       .sort({ createdAt: -1 })
       .exec()
   }
@@ -867,10 +872,7 @@ export class ExpenseReportService implements OnModuleInit {
     const filter: Record<string, unknown> = { _id: { $in: ids } }
     const and: Record<string, unknown>[] = []
     if (opts.type && opts.type !== 'all') {
-      filter['expenseType'] =
-        opts.type === 'comprobante_caja'
-          ? { $in: ['comprobante_caja', 'recibo_caja'] }
-          : opts.type
+      filter['expenseType'] = opts.type
     }
     if (opts.status && opts.status !== 'all') {
       // El filtro se basa en la aprobación dual (approvalCont / approvalCoord),

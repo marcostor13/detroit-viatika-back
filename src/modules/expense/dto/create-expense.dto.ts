@@ -69,7 +69,6 @@ export class CreateExpenseDto {
     'planilla_movilidad',
     'otros_gastos',
     'recibo_caja',
-    'comprobante_caja',
   ])
   @IsOptional()
   expenseType?: ExpenseType
