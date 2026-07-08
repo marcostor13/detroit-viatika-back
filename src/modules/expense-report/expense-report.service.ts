@@ -956,6 +956,9 @@ export class ExpenseReportService implements OnModuleInit {
       })
       .populate('createdBy', 'name email')
       .populate('approvedBy', 'name email')
+      // Coordinador que aprobó: se incluye su firma/DNI para el PDF de la planilla
+      // de movilidad (firma del colaborador y del coordinador, VD-33).
+      .populate('coordinatorApprovedBy', 'name email signature dni')
       .populate('projectId', 'name')
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
       .populate('directaOrdenTrabajoId', 'nombre costCenterId')
