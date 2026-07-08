@@ -77,6 +77,11 @@ export class CreateExpenseReportDto {
   @IsOptional()
   projectId?: string
 
+  /** Orden de Trabajo elegida al crear la rendición directa (filtrada por el centro de costo). */
+  @IsMongoId()
+  @IsOptional()
+  ordenTrabajoId?: string
+
   @IsString()
   @IsOptional()
   accountNumber?: string
@@ -107,10 +112,4 @@ export class CreateExpenseReportDto {
   @ValidateNested({ each: true })
   @Type(() => BudgetItemDto)
   items?: BudgetItemDto[]
-
-  /** Saldos de la bolsa seleccionados para financiar esta rendición directa (consumo completo). */
-  @IsArray()
-  @IsMongoId({ each: true })
-  @IsOptional()
-  saldoIds?: string[]
 }

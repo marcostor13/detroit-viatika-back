@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, IsMongoId, Min } from 'class-validator'
+import { IsString, IsNumber, IsOptional, IsMongoId, IsIn, Min } from 'class-validator'
 
 /**
  * Creación de una rendición directa con depósito inicial, iniciada por Contabilidad.
@@ -12,16 +12,27 @@ export class CreateDirectaDepositDto {
   @IsOptional()
   gestion?: string
 
+  @IsMongoId()
+  projectId: string // centro de costo: arma la cadena de aprobadores al enviar
+
+  @IsMongoId()
+  ordenTrabajoId: string // heredada por los comprobantes de planilla de movilidad
+
   @IsNumber()
   @Min(0.01)
   amount: number // monto confirmado del depósito
+
+  @IsIn(['deposito', 'efectivo'])
+  @IsOptional()
+  metodoPago?: 'deposito' | 'efectivo'
 
   @IsNumber()
   @IsOptional()
   scannedAmount?: number // monto crudo del OCR (auditoría)
 
   @IsString()
-  receiptUrl: string
+  @IsOptional()
+  receiptUrl?: string // requerido salvo metodoPago='efectivo'
 
   @IsString()
   @IsOptional()

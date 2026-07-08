@@ -34,7 +34,6 @@ import { UserService } from '../user/user.service'
 import { UserPermissions } from '../user/schemas/user.schema'
 import { EmailService } from '../email/email.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { SaldoService } from '../saldo/saldo.service'
 
 @Injectable()
 export class AdvanceService implements OnModuleInit {
@@ -49,8 +48,7 @@ export class AdvanceService implements OnModuleInit {
     private readonly categoryService: CategoryService,
     private readonly userService: UserService,
     private readonly emailService: EmailService,
-    private readonly notificationsService: NotificationsService,
-    private readonly saldoService: SaldoService
+    private readonly notificationsService: NotificationsService
   ) {}
 
   async onModuleInit() {
@@ -130,29 +128,9 @@ export class AdvanceService implements OnModuleInit {
       )
     }
 
-    const advance = this.isViaticoSolicitud(dto)
+    return this.isViaticoSolicitud(dto)
       ? await this.createViaticoSolicitud(dto)
       : await this.createSimpleAdvance(dto)
-
-    // Solicitud financiada con saldos de la bolsa (mismo centro de costo, consumo completo).
-    const saldoIds = Array.isArray(dto.saldoIds) ? dto.saldoIds : []
-    if (saldoIds.length > 0) {
-      const advId = (advance as any)._id.toString()
-      await this.saldoService.consume(saldoIds, {
-        userId: dto.userId!,
-        clientId: dto.clientId!,
-        context: 'viatico',
-        projectId: dto.projectId,
-        advanceId: advId,
-      })
-      await this.advanceModel
-        .findByIdAndUpdate(advId, {
-          saldoIds: saldoIds.map(id => new Types.ObjectId(id)),
-        })
-        .exec()
-    }
-
-    return advance
   }
 
   /**
@@ -1594,15 +1572,6 @@ export class AdvanceService implements OnModuleInit {
     advance.rejectedBy = dto.rejectedBy
     advance.rejectionReason = dto.rejectionReason
 
-    // Devolver a la bolsa los saldos que financiaban este viático rechazado.
-    try {
-      await this.saldoService.restoreByConsumer({ advanceId: id })
-    } catch (err: unknown) {
-      this.logger.error(
-        `Revertir saldos al rechazar advance ${id}: ${err instanceof Error ? err.message : String(err)}`
-      )
-    }
-
     const saved = await advance.save()
     this.notifyCollaboratorViaticoRejected(
       saved as AdvanceDocument,
@@ -2002,25 +1971,6 @@ export class AdvanceService implements OnModuleInit {
     }
 
     await this.expenseReportService.updateSettlement(reportId, reportSettlement)
-
-    // Remanente positivo (devolución): el saldo no gastado queda disponible para
-    // el colaborador en su bolsa de "Saldo" (idempotente por sourceReportId).
-    if (type === 'devolucion' && difference > 0.01) {
-      try {
-        const ownerId = (report.userId as any)?._id ?? report.userId
-        await this.saldoService.createFromRemnant({
-          userId: ownerId,
-          clientId: report.clientId,
-          projectId: (report as any).projectId ?? null,
-          sourceReportId: reportId,
-          amount: difference,
-          type: (report as any).isDirecta ? 'rendicion_directa' : 'rendicion',
-        })
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        this.logger.error(`Crear saldo remanente ${reportId}: ${msg}`)
-      }
-    }
 
     const doc = report as any
     const alreadyNotified = !!doc.reimbursementAccountingNotifiedAt
@@ -2474,14 +2424,6 @@ export class AdvanceService implements OnModuleInit {
       }
     }
 
-    // Devolver a la bolsa los saldos que este viático había consumido (si los hubo).
-    try {
-      await this.saldoService.restoreByConsumer({ advanceId: id })
-    } catch (err: unknown) {
-      this.logger.error(
-        `Revertir saldos al eliminar advance ${id}: ${err instanceof Error ? err.message : String(err)}`
-      )
-    }
     await this.advanceModel.findByIdAndDelete(id).exec()
     return advance
   }

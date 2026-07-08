@@ -84,8 +84,9 @@ export interface ExpenseReportAffidavit {
  */
 export interface DirectaDepositInfo {
   amount: number
+  metodoPago?: 'deposito' | 'efectivo'
   scannedAmount?: number
-  receiptUrl: string
+  receiptUrl?: string
   receiptFileName?: string
   receiptMimeType?: string
   receiptSizeBytes?: number
@@ -147,8 +148,6 @@ export interface ExpenseReportDocument extends Document {
   gestion?: string
   isDirecta?: boolean
   isCajaChica?: boolean
-  /** Saldos de la bolsa consumidos para financiar esta rendición directa. */
-  saldoIds?: Types.ObjectId[]
   accountNumber?: string
   idDocument?: string
   peopleNames?: string[]
@@ -203,6 +202,8 @@ export interface ExpenseReportDocument extends Document {
   /** Cadena ordenada de aprobadores de centro de costo (snapshot al enviar la rendición). */
   directaApproverChain?: Types.ObjectId[]
   directaApprovalHistory?: ApprovalEntry[]
+  /** Orden de Trabajo (LIM-XXX-NNNNNN) elegida al crear la rendición directa; heredada por todos sus comprobantes. */
+  directaOrdenTrabajoId?: Types.ObjectId
 }
 
 @Schema({ timestamps: true })
@@ -350,8 +351,9 @@ export class ExpenseReport {
   @Prop({
     type: {
       amount: { type: Number, required: true },
+      metodoPago: { type: String, enum: ['deposito', 'efectivo'] },
       scannedAmount: { type: Number },
-      receiptUrl: { type: String, required: true },
+      receiptUrl: { type: String },
       receiptFileName: { type: String },
       receiptMimeType: { type: String },
       receiptSizeBytes: { type: Number },
@@ -458,9 +460,6 @@ export class ExpenseReport {
     default: [],
   })
   reopenHistory?: ReopenRecord[]
-
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Saldo' }], default: undefined })
-  saldoIds?: Types.ObjectId[]
 
   // ─── Campos exclusivos de viático ────────────────────────────────────────────
 
@@ -621,6 +620,10 @@ export class ExpenseReport {
     default: [],
   })
   directaApprovalHistory?: ApprovalEntry[]
+
+  /** Orden de Trabajo (LIM-XXX-NNNNNN) elegida al crear la rendición directa; heredada por todos sus comprobantes. */
+  @Prop({ type: Types.ObjectId, ref: 'OrdenTrabajo', required: false })
+  directaOrdenTrabajoId?: Types.ObjectId
 }
 
 export const ExpenseReportSchema = SchemaFactory.createForClass(ExpenseReport)

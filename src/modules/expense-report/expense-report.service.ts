@@ -45,7 +45,6 @@ import { CreateViaticoExpenseReportDto } from './dto/create-viatico-expense-repo
 import { PayViaticoDto } from './dto/pay-viatico.dto'
 import { ResubmitViaticoDto } from './dto/resubmit-viatico.dto'
 import { CreateAdvanceLineDto } from '../advance/dto/create-advance.dto'
-import { SaldoService } from '../saldo/saldo.service'
 import { Logger } from '@nestjs/common'
 
 /** Contexto del usuario que solicita eliminar una solicitud. */
@@ -72,8 +71,7 @@ export class ExpenseReportService implements OnModuleInit {
     private readonly advanceService: AdvanceService,
     private readonly uploadService: UploadService,
     private readonly projectService: ProjectService,
-    private readonly categoryService: CategoryService,
-    private readonly saldoService: SaldoService
+    private readonly categoryService: CategoryService
   ) { }
 
   async onModuleInit() {
@@ -419,19 +417,6 @@ export class ExpenseReportService implements OnModuleInit {
       ? await this.generateDirectaCodigo(createExpenseReportDto.clientId)
       : undefined
 
-    // Saldos de la bolsa seleccionados (rendición directa financiada con saldo).
-    const saldoIds = Array.isArray(createExpenseReportDto.saldoIds)
-      ? createExpenseReportDto.saldoIds
-      : []
-    const hasSaldos = saldoIds.length > 0
-    const saldoBudget = hasSaldos
-      ? await this.saldoService.sumAmounts(
-        saldoIds,
-        createExpenseReportDto.userId,
-        createExpenseReportDto.clientId
-      )
-      : 0
-
     const assignedCoordinatorId = await this.resolveAssignedCoordinatorId(
       createExpenseReportDto.projectId,
       createExpenseReportDto.clientId
@@ -447,12 +432,11 @@ export class ExpenseReportService implements OnModuleInit {
       projectId: createExpenseReportDto.projectId
         ? new Types.ObjectId(createExpenseReportDto.projectId)
         : undefined,
-      assignedCoordinatorId,
-      // Presupuesto: si se financia con saldos de la bolsa = suma de saldos; caso normal = budget recibido.
-      budget: hasSaldos ? saldoBudget : (createExpenseReportDto.budget ?? 0),
-      saldoIds: hasSaldos
-        ? saldoIds.map(id => new Types.ObjectId(id))
+      directaOrdenTrabajoId: createExpenseReportDto.ordenTrabajoId
+        ? new Types.ObjectId(createExpenseReportDto.ordenTrabajoId)
         : undefined,
+      assignedCoordinatorId,
+      budget: createExpenseReportDto.budget ?? 0,
       // Caja chica y rendición directa: siempre open desde el inicio
       status:
         isDirecta || isCajaChica
@@ -463,16 +447,6 @@ export class ExpenseReportService implements OnModuleInit {
       expenseIds: [],
     })
     const savedReport = await report.save()
-
-    // Consumir (completo) los saldos de la bolsa que financian esta rendición directa.
-    if (hasSaldos) {
-      await this.saldoService.consume(saldoIds, {
-        userId: createExpenseReportDto.userId,
-        clientId: createExpenseReportDto.clientId,
-        context: 'rendicion_directa',
-        reportId: String(savedReport._id),
-      })
-    }
 
     console.log(
       `[ExpenseReportService] Created report: ${savedReport._id}. isCollaborator: ${isCollaborator}, isDirecta: ${isDirecta}`
@@ -517,6 +491,12 @@ export class ExpenseReportService implements OnModuleInit {
     createdBy: string,
     clientId: string
   ) {
+    if (dto.metodoPago !== 'efectivo' && !dto.receiptUrl) {
+      throw new BadRequestException(
+        'Debe adjuntar el comprobante de depósito (o marcar el método de pago como efectivo).'
+      )
+    }
+
     const report = await this.create(
       {
         isDirecta: true,
@@ -524,6 +504,8 @@ export class ExpenseReportService implements OnModuleInit {
         clientId,
         gestion: dto.gestion,
         budget: dto.amount,
+        projectId: dto.projectId,
+        ordenTrabajoId: dto.ordenTrabajoId,
       } as CreateExpenseReportDto,
       createdBy,
       false // no es flujo de colaborador → no notifica admins
@@ -531,6 +513,7 @@ export class ExpenseReportService implements OnModuleInit {
 
     report.directaDeposit = {
       amount: dto.amount,
+      metodoPago: dto.metodoPago ?? 'deposito',
       scannedAmount: dto.scannedAmount,
       receiptUrl: dto.receiptUrl,
       receiptFileName: dto.receiptFileName,
@@ -641,6 +624,7 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('viaticoLines.categoryId', 'name')
       // Orden de Trabajo imputada, para mostrarla en el detalle de la solicitud.
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
+      .populate('directaOrdenTrabajoId', 'nombre costCenterId')
       .sort({ createdAt: -1 })
       .exec()
   }
@@ -678,6 +662,7 @@ export class ExpenseReportService implements OnModuleInit {
       // Centro de costo (código/nombre) y Orden de Trabajo, para el detalle de la solicitud.
       .populate('projectId', 'code name')
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
+      .populate('directaOrdenTrabajoId', 'nombre costCenterId')
       .sort({ createdAt: -1 })
       .exec()
   }
@@ -694,6 +679,7 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('viaticoLines.categoryId', 'name')
       .populate('projectId', 'code name')
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
+      .populate('directaOrdenTrabajoId', 'nombre costCenterId')
       .sort({ createdAt: -1 })
       .lean()
       .exec()
@@ -968,21 +954,13 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('approvedBy', 'name email')
       .populate('projectId', 'name')
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
+      .populate('directaOrdenTrabajoId', 'nombre costCenterId')
       .populate('viaticoApproverChain', 'name email')
-      .populate({
-        path: 'saldoIds',
-        select: 'type amount concepto deposit sourceReportId createdAt',
-        populate: { path: 'sourceReportId', select: 'codigo title gestion' },
-      })
       .exec()
 
     if (!report) {
       throw new NotFoundException(`Expense report with ID ${id} not found`)
     }
-    // Auto-sanado (lazy, idempotente): directa financiada con bolsa ya aprobada cuyo
-    // sobrante aún no se reflejó en la bolsa (aprobadas antes de esta funcionalidad).
-    // Se corrige sola al abrir el detalle, una rendición a la vez, sin barrido global.
-    await this.ensureDirectaBolsaRemnant(id, report).catch(() => undefined)
     const normalized = this.normalizeReportExpenseDates(report)
       // Flag derivado para el front: si la caja chica fue finalizada, el
       // colaborador ya no puede subir gastos (botón "Añadir Gasto" oculto).
@@ -1324,9 +1302,6 @@ export class ExpenseReportService implements OnModuleInit {
       console.log(`[APROBACIÓN RENDICIÓN] Entrando al bloque approved para rendición ${id}`)
       const owner = fullyUpdatedReport.userId as any
       const ownerId = owner?._id ? String(owner._id) : String(owner)
-
-      // Directa financiada con la bolsa: el sobrante regresa a la bolsa del colaborador.
-      await this.settleDirectaFinanciadaConBolsa(id, fullyUpdatedReport, ownerId)
 
       const reportTitle = fullyUpdatedReport.title
       const budgetDisplay =
@@ -2015,18 +1990,6 @@ export class ExpenseReportService implements OnModuleInit {
       await this.expenseModel.deleteMany({ _id: { $in: expenseIds } }).exec()
     }
 
-    // Devolver a la bolsa los saldos que esta rendición había consumido (si los
-    // hubo), para que el colaborador no los pierda al eliminarla. Si devolvió un
-    // "vuelto" (saldo > total), se neutraliza primero para no contarlo dos veces.
-    try {
-      await this.saldoService.removeViaticoChangeByReport(id)
-      await this.saldoService.restoreByConsumer({ reportId: id })
-    } catch (err: unknown) {
-      this.logger.error(
-        `Revertir saldos al eliminar ${id}: ${err instanceof Error ? err.message : String(err)}`
-      )
-    }
-
     // Anticipos vinculados: nunca se borran (registro financiero), solo se
     // desvinculan de la rendición eliminada para no dejar una FK colgando. Si
     // aún no habían sido pagados, vuelven a aparecer como huérfanos y siguen
@@ -2343,7 +2306,7 @@ export class ExpenseReportService implements OnModuleInit {
     const reports = await this.expenseReportModel
       .find(query)
       .select(
-        '_id codigo userId title motivo gestion budget status createdAt createdBy directaDeposit expenseIds saldoIds returnVoucher'
+        '_id codigo userId title motivo gestion budget status createdAt createdBy directaDeposit expenseIds returnVoucher'
       )
       .populate('userId', 'name email')
       .populate({
@@ -2372,12 +2335,8 @@ export class ExpenseReportService implements OnModuleInit {
         (s, e) => s + (Number(e?.total) || 0),
         0
       )
-      // Rendición directa financiada con saldos de la bolsa: su presupuesto disponible
-      // es el `budget` (suma de los saldos consumidos).
-      const hasSaldoFinancing =
-        Array.isArray(r.saldoIds) && r.saldoIds.length > 0
       const deposited = Number(r.directaDeposit?.amount ?? r.budget ?? 0)
-      const hasFunds = !!r.directaDeposit || hasSaldoFinancing
+      const hasFunds = !!r.directaDeposit
       return {
         _id: String(r._id),
         codigo: r.codigo ?? null,
@@ -2465,109 +2424,10 @@ export class ExpenseReportService implements OnModuleInit {
 
   /**
    * Fondos entregados al colaborador en una rendición directa: depósito de
-   * contabilidad, o financiamiento con la bolsa de saldos (`saldoIds` →
-   * presupuesto). Base para calcular devolución vs reembolso.
+   * contabilidad. Base para calcular devolución vs reembolso.
    */
   private directaFundsGiven(report: any): number {
-    const deposit = Number(report?.directaDeposit?.amount ?? 0)
-    if (deposit > 0) return deposit
-    if (Array.isArray(report?.saldoIds) && report.saldoIds.length > 0) {
-      return Number(report?.budget ?? 0)
-    }
-    return 0
-  }
-
-  /**
-   * Al aprobar una rendición directa financiada con la bolsa de saldos, el
-   * sobrante (presupuesto − gastado) regresa automáticamente a la bolsa del
-   * colaborador como saldo remanente (`rendicion_directa`). Si luego decide
-   * devolverlo a contabilidad, ese remanente se descuenta. Idempotente por rendición.
-   */
-  private async settleDirectaFinanciadaConBolsa(
-    reportId: string,
-    report: any,
-    ownerId: string
-  ): Promise<void> {
-    // El sobrante regresa a la bolsa cuando los fondos venían de la bolsa de
-    // saldos (saldoIds). Las directas con depósito de contabilidad mantienen su
-    // flujo de devolución y no entran aquí.
-    const hasBolsa = Array.isArray(report?.saldoIds) && report.saldoIds.length > 0
-    if (!report?.isDirecta || !hasBolsa) {
-      return
-    }
-    // El sobrante no debe (re)publicarse en la bolsa si ya fue devuelto a
-    // contabilidad (returnVoucher): el dinero regresó a la empresa, no puede
-    // seguir en la bolsa del colaborador. Evita el doble conteo.
-    if (report?.returnVoucher) {
-      return
-    }
-    const budget = Number(report?.budget ?? 0)
-    const populated = await this.expenseReportModel
-      .findById(reportId)
-      .populate('expenseIds', 'total')
-      .lean()
-      .exec()
-    const gastado = (((populated as any)?.expenseIds as any[]) ?? []).reduce(
-      (s, e) => s + (Number(e?.total) || 0),
-      0
-    )
-    const difference = budget - gastado
-    if (Math.abs(difference) >= 0.01) {
-      await this.updateSettlement(reportId, {
-        advanceTotal: budget,
-        expenseTotal: gastado,
-        difference,
-        type: difference > 0 ? 'devolucion' : 'reembolso',
-        settledAt: new Date(),
-        // El sobrante quedó disponible en la bolsa (no exige comprobante para cerrar).
-        toBolsa: difference > 0,
-      })
-    }
-    if (difference > 0.01) {
-      try {
-        await this.saldoService.createFromRemnant({
-          userId: ownerId,
-          clientId: report.clientId,
-          projectId: report?.projectId ?? null,
-          sourceReportId: reportId,
-          amount: difference,
-          type: 'rendicion_directa',
-        })
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        this.logger.error(`Remanente directa-bolsa ${reportId}: ${msg}`)
-      }
-    }
-  }
-
-  /**
-   * Garantiza (perezosamente, al abrir el detalle) que una directa financiada con
-   * bolsa ya aprobada con sobrante tenga su remanente en la bolsa. Solo actúa si aún
-   * no fue liquidada (`!settlement`) y hay sobrante; idempotente y no bloqueante.
-   */
-  private async ensureDirectaBolsaRemnant(
-    reportId: string,
-    report: any
-  ): Promise<void> {
-    const status = report?.status
-    const hasBolsa = Array.isArray(report?.saldoIds) && report.saldoIds.length > 0
-    if (
-      !report?.isDirecta ||
-      !hasBolsa ||
-      (status !== 'approved' && status !== 'closed') ||
-      report?.settlement
-    ) {
-      return
-    }
-    const budget = Number(report?.budget ?? 0)
-    const gastado = ((report?.expenseIds as any[]) ?? []).reduce(
-      (s, e) => s + (Number(e?.total) || 0),
-      0
-    )
-    if (budget - gastado <= 0.01) return
-    const owner = report.userId
-    const ownerId = owner?._id ? String(owner._id) : String(owner)
-    await this.settleDirectaFinanciadaConBolsa(reportId, report, ownerId)
+    return Number(report?.directaDeposit?.amount ?? 0)
   }
 
   async setApprovedBy(reportId: string, userId: string) {
@@ -3320,15 +3180,6 @@ export class ExpenseReportService implements OnModuleInit {
       .findByIdAndUpdate(id, { $set: { returnVoucher: voucher } })
       .exec()
 
-    // Si el sobrante había quedado en la bolsa (directa financiada con saldo) y el
-    // colaborador decide devolverlo a contabilidad, se descuenta de la bolsa.
-    try {
-      await this.saldoService.removeRemnantBySourceReport(id)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      this.logger.error(`Descontar remanente al devolver ${id}: ${msg}`)
-    }
-
     const amountFormatted = Math.abs(
       Number(notifySettlement.difference ?? 0)
     ).toFixed(2)
@@ -3857,65 +3708,10 @@ export class ExpenseReportService implements OnModuleInit {
       ...(dto.ordenTrabajoId && { viaticoOrdenTrabajoId: new Types.ObjectId(dto.ordenTrabajoId) }),
     })
 
-    // Financiamiento con saldos de la bolsa (mismo centro de costo).
-    const saldoIds = Array.isArray(dto.saldoIds) ? dto.saldoIds : []
-    if (saldoIds.length > 0) {
-      await this.applyViaticoSaldoFinancing(report, saldoIds, {
-        userId,
-        clientId,
-        projectId: dto.projectId,
-      })
-      await report.save()
-    }
-
     void this.notifyViaticoCoordinator(report as ExpenseReportDocument, userId, clientId)
 
     return this.findOne(String((report as any)._id)) as Promise<ExpenseReportDocument>
   }
-
-  /**
-   * Financia un viático con saldos de la bolsa (mismo centro de costo). El saldo
-   * prefinancia el anticipo: se registra como ya pagado (`viaticoPaidAmount`), de modo
-   * que contabilidad solo deposite la diferencia (viaticoAmount − saldo aplicado).
-   *
-   * El saldo nunca paga más que el total del viático: si el saldo seleccionado SUPERA
-   * el total, solo se usa lo necesario y el sobrante ("vuelto") vuelve de inmediato a
-   * la bolsa como saldo disponible del mismo centro de costo. En ese caso contabilidad
-   * no deposita nada. `consume` valida dueño, disponibilidad y centro de costo. No
-   * persiste el documento (lo hace quien llama).
-   */
-  private async applyViaticoSaldoFinancing(
-    report: ExpenseReportDocument,
-    saldoIds: string[],
-    opts: { userId: string; clientId: string; projectId: string }
-  ): Promise<void> {
-    const reportId = String((report as any)._id)
-    const saldoTotal = await this.saldoService.consume(saldoIds, {
-      userId: opts.userId,
-      clientId: opts.clientId,
-      context: 'viatico',
-      projectId: opts.projectId,
-      reportId,
-    })
-    report.saldoIds = saldoIds.map(sid => new Types.ObjectId(sid))
-
-    const viaticoAmount = Number(report.viaticoAmount ?? 0)
-    // El saldo nunca cubre más que el total del viático.
-    report.viaticoPaidAmount = Math.round(Math.min(saldoTotal, viaticoAmount) * 100) / 100
-
-    // Sobrante: el saldo seleccionado superó el total → vuelve ya mismo a la bolsa.
-    const excess = Math.round((saldoTotal - viaticoAmount) * 100) / 100
-    if (excess > 0.01) {
-      await this.saldoService.createViaticoChange({
-        userId: opts.userId,
-        clientId: opts.clientId,
-        projectId: opts.projectId,
-        changeFromReportId: reportId,
-        amount: excess,
-      })
-    }
-  }
-
 
   /**
    * Notifica al aprobador que le corresponde actuar ahora
@@ -4059,29 +3855,6 @@ export class ExpenseReportService implements OnModuleInit {
 
   /** Devuelve `true` si el viático quedó cubierto 100% con saldo y se abrió sin pago. */
   private async onViaticoFullyApproved(report: ExpenseReportDocument): Promise<boolean> {
-    // Viático cubierto 100% con saldo de la bolsa: no hay desembolso de contabilidad
-    // (la diferencia es 0). No pasa por tesorería: se abre directamente para que el
-    // colaborador registre sus gastos, igual que tras un pago totalmente liquidado.
-    const fullyFundedBySaldo =
-      Array.isArray(report.saldoIds) &&
-      report.saldoIds.length > 0 &&
-      Number(report.viaticoPaidAmount ?? 0) >= Number(report.viaticoAmount ?? 0) - 0.01
-    if (fullyFundedBySaldo) {
-      await this.expenseReportModel.updateOne(
-        { _id: (report as any)._id },
-        { $set: { status: 'open' } }
-      )
-      report.status = 'open'
-      this.notificationsService.create({
-        userId: report.userId.toString(),
-        title: 'Viático aprobado y cubierto con tu saldo',
-        message: `Tu viático por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobado y quedó cubierto con tu saldo. Contabilidad no realiza ningún depósito. Ya puedes registrar tus gastos.`,
-        type: 'success',
-        actionUrl: `/mis-rendiciones/${String((report as any)._id)}/detalle`,
-      }).catch(() => {})
-      return true
-    }
-
     if (report.projectId && !report.viaticoBudgetCommitmentRecorded) {
       try {
         await this.projectService.adjustCommittedAdvanceTotal(report.projectId.toString(), report.clientId.toString(), report.viaticoAmount ?? 0)
@@ -4185,7 +3958,6 @@ export class ExpenseReportService implements OnModuleInit {
     report.viaticoRejectedBy = opts.rejectedBy
     report.viaticoRejectionReason = opts.rejectionReason
     report.viaticoRejectedByRole = rejectedByRole
-    await this.revertViaticoSaldoFinancing(report)
     await report.save()
 
     this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos rechazada', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue rechazada. Motivo: ${opts.rejectionReason}`, type: 'error', actionUrl: '/mis-rendiciones' }).catch(() => {})
@@ -4331,19 +4103,6 @@ export class ExpenseReportService implements OnModuleInit {
       : undefined
     report.viaticoAmount = roundedSum
     report.budget = roundedSum
-    // Re-aplicar saldo de la bolsa si la corrección lo selecciona y el viático no
-    // tiene ya uno aplicado (caso típico: fue rechazado y su saldo se devolvió a la
-    // bolsa). Si ya tenía saldo (edición antes de aprobación), se conserva intacto.
-    const alreadyHasSaldo =
-      Array.isArray(report.saldoIds) && report.saldoIds.length > 0
-    const reselectedSaldos = Array.isArray(dto.saldoIds) ? dto.saldoIds : []
-    if (!alreadyHasSaldo && reselectedSaldos.length > 0) {
-      await this.applyViaticoSaldoFinancing(report, reselectedSaldos, {
-        userId: actingUserId,
-        clientId,
-        projectId: dto.projectId,
-      })
-    }
     report.description = description
     report.status = 'pending_l1'
     report.viaticoApprovalLevel = 0
@@ -4500,38 +4259,10 @@ export class ExpenseReportService implements OnModuleInit {
     if (report.userId.toString() !== userId) throw new ForbiddenException('Solo el colaborador solicitante puede cancelar esta solicitud.')
     if (report.status !== 'pending_l1') throw new BadRequestException('Solo se puede cancelar una solicitud en estado pendiente de aprobación.')
     report.status = 'cancelled'
-    await this.revertViaticoSaldoFinancing(report)
     await report.save()
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
-  /**
-   * Devuelve a la bolsa los saldos que prefinanciaban un viático que ya no
-   * continuará (rechazado/cancelado) y limpia su financiamiento, evitando que el
-   * colaborador pierda ese saldo. Reject/cancel ocurren antes del pago de
-   * contabilidad, por lo que tras restaurar viaticoPaidAmount queda en 0.
-   *
-   * Si al crear se devolvió un "vuelto" a la bolsa (saldo seleccionado > total), se
-   * neutraliza primero para no contarlo dos veces al restaurar los saldos originales.
-   */
-  private async revertViaticoSaldoFinancing(
-    report: ExpenseReportDocument
-  ): Promise<void> {
-    try {
-      const reportId = String((report as any)._id)
-      // Neutraliza el vuelto antes de restaurar los saldos completos (evita doble conteo).
-      await this.saldoService.removeViaticoChangeByReport(reportId)
-      const restored = await this.saldoService.restoreByConsumer({ reportId })
-      if (restored > 0) {
-        report.viaticoPaidAmount = 0
-        report.saldoIds = undefined
-      }
-    } catch (err: unknown) {
-      this.logger.error(
-        `Revertir saldo viático ${(report as any)._id}: ${err instanceof Error ? err.message : String(err)}`
-      )
-    }
-  }
 
   async findViaticos(opts: { requesterId: string; requesterRole: string; requesterPermissions?: any; clientId: string; status?: string; dateFrom?: string; dateTo?: string }) {
     const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(opts.requesterRole as ROLES)
@@ -4655,24 +4386,6 @@ export class ExpenseReportService implements OnModuleInit {
       Math.abs(difference) < 0.01 ? 'equilibrado' : difference > 0 ? 'devolucion' : 'reembolso'
 
     await this.updateSettlement(reportId, { advanceTotal, expenseTotal, difference, type, settledAt: new Date() })
-
-    // Remanente positivo (devolución): el saldo no gastado queda disponible para
-    // el colaborador en su bolsa de "Saldo" (tipo `rendicion`, con su centro de costo).
-    if (type === 'devolucion' && difference > 0.01) {
-      try {
-        await this.saldoService.createFromRemnant({
-          userId: report.userId,
-          clientId: report.clientId,
-          projectId: report.projectId ?? null,
-          sourceReportId: reportId,
-          amount: difference,
-          type: 'rendicion',
-        })
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        this.logger.error(`Crear saldo remanente viático ${reportId}: ${msg}`)
-      }
-    }
 
     // Auto-cierre inmediato cuando el viático queda equilibrado.
     // fromClose=true indica que esta llamada viene desde close() — evita recursión.

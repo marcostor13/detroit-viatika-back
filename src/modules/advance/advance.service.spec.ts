@@ -14,7 +14,6 @@ import { CategoryService } from '../category/category.service'
 import { UserService } from '../user/user.service'
 import { EmailService } from '../email/email.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { SaldoService } from '../saldo/saldo.service'
 import { ROLES } from '../auth/enums/roles.enum'
 
 const advanceId = new Types.ObjectId().toString()
@@ -96,12 +95,6 @@ const mockNotificationsService = {
   create: jest.fn().mockResolvedValue(undefined),
 }
 
-const mockSaldoService = {
-  createFromRemnant: jest.fn().mockResolvedValue(null),
-  consume: jest.fn().mockResolvedValue(0),
-  sumAmounts: jest.fn().mockResolvedValue(0),
-}
-
 const mockEmailService = {
   buildAppUrl: jest.fn().mockReturnValue('http://localhost:4200/app'),
   formatDateDDMMYYYY: jest.fn().mockReturnValue('01/01/2026'),
@@ -129,7 +122,6 @@ describe('AdvanceService', () => {
         { provide: UserService, useValue: mockUserService },
         { provide: EmailService, useValue: mockEmailService },
         { provide: NotificationsService, useValue: mockNotificationsService },
-        { provide: SaldoService, useValue: mockSaldoService },
       ],
     }).compile()
     service = module.get<AdvanceService>(AdvanceService)

@@ -164,8 +164,6 @@ export interface AdvanceDocument extends Document {
   solicitudVersion?: number
   /** Monto contabilizado en compromiso presupuestal del centro de costo hasta el pago. */
   budgetCommitmentRecorded?: boolean
-  /** Saldos de la bolsa consumidos para financiar esta solicitud de viáticos. */
-  saldoIds?: Types.ObjectId[]
   /** Datos bancarios alternativos ingresados en la solicitud (opcionales). */
   requestBankName?: string
   requestAccountNumber?: string
@@ -391,9 +389,6 @@ export class Advance {
 
   @Prop({ type: Boolean, default: false })
   budgetCommitmentRecorded?: boolean
-
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Saldo' }], default: undefined })
-  saldoIds?: Types.ObjectId[]
 
   @Prop({ type: String, required: false })
   requestBankName?: string

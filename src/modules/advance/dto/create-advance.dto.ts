@@ -94,12 +94,6 @@ export class CreateAdvanceDto {
   @IsOptional()
   observations?: string
 
-  /** Saldos de la bolsa seleccionados para financiar esta solicitud (consumo completo, mismo centro de costo). */
-  @IsArray()
-  @IsMongoId({ each: true })
-  @IsOptional()
-  saldoIds?: string[]
-
   /** Cuenta bancaria alternativa para el depósito (opcional). */
   @IsString()
   @IsOptional()

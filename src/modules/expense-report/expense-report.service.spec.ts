@@ -13,15 +13,7 @@ import { AdvanceService } from '../advance/advance.service'
 import { UploadService } from '../upload/upload.service'
 import { ProjectService } from '../project/project.service'
 import { CategoryService } from '../category/category.service'
-import { SaldoService } from '../saldo/saldo.service'
 import { ROLES } from '../auth/enums/roles.enum'
-
-const mockSaldoService = {
-  createFromRemnant: jest.fn().mockResolvedValue(null),
-  createFromPago: jest.fn().mockResolvedValue({}),
-  consume: jest.fn().mockResolvedValue(0),
-  sumAmounts: jest.fn().mockResolvedValue(0),
-}
 
 const mockAdvanceService = {
   liquidateExpenseReport: jest.fn().mockResolvedValue(undefined),
@@ -109,7 +101,6 @@ describe('ExpenseReportService — Fase 5 (envío y aprobación final)', () => {
         { provide: UploadService, useValue: {} },
         { provide: ProjectService, useValue: {} },
         { provide: CategoryService, useValue: {} },
-        { provide: SaldoService, useValue: mockSaldoService },
       ],
     }).compile()
 
@@ -398,7 +389,6 @@ describe('ExpenseReportService — Fase 8 (cierre definitivo)', () => {
         { provide: UploadService, useValue: {} },
         { provide: ProjectService, useValue: {} },
         { provide: CategoryService, useValue: {} },
-        { provide: SaldoService, useValue: mockSaldoService },
       ],
     }).compile()
 
@@ -757,7 +747,6 @@ describe('ExpenseReportService — Fase 6 (reembolso: tenant y registro)', () =>
         { provide: UploadService, useValue: {} },
         { provide: ProjectService, useValue: {} },
         { provide: CategoryService, useValue: {} },
-        { provide: SaldoService, useValue: mockSaldoService },
       ],
     }).compile()
 

@@ -10,7 +10,6 @@ import { CategoryModule } from '../category/category.module'
 import { UserModule } from '../user/user.module'
 import { EmailModule } from '../email/email.module'
 import { NotificationsModule } from '../notifications/notifications.module'
-import { SaldoModule } from '../saldo/saldo.module'
 
 @Module({
   imports: [
@@ -22,7 +21,6 @@ import { SaldoModule } from '../saldo/saldo.module'
     UserModule,
     EmailModule,
     NotificationsModule,
-    SaldoModule,
   ],
   controllers: [AdvanceController],
   providers: [AdvanceService],

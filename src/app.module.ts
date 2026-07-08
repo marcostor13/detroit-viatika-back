@@ -30,7 +30,6 @@ import { CajaChicaReportModule } from './modules/caja-chica-report/caja-chica-re
 import { AccountingConfigModule } from './modules/accounting-config/accounting-config.module'
 import { AccountingEntriesModule } from './modules/accounting-entries/accounting-entries.module'
 import { ExchangeRateModule } from './modules/exchange-rate/exchange-rate.module'
-import { SaldoModule } from './modules/saldo/saldo.module'
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -68,7 +67,6 @@ import { SaldoModule } from './modules/saldo/saldo.module'
     AccountingConfigModule,
     AccountingEntriesModule,
     ExchangeRateModule,
-    SaldoModule,
   ],
   controllers: [AppController],
   providers: [AppService],
