@@ -691,13 +691,15 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * Rendiciones a cargo de un Coordinador. Combina dos mecanismos, ambos
+   * Rendiciones a cargo de un Coordinador. Combina tres mecanismos, todos
    * resueltos desde el aprobador del centro de costo (`Project.approverId`)
    * pero cada uno con su propio snapshot:
    * - Rendición normal: `assignedCoordinatorId`, tomado al crear/editar la
    *   rendición (ver `resolveAssignedCoordinatorId`).
    * - Viático: `viaticoApproverChain`, la cadena de aprobadores tomada al
-   *   solicitar el viático (ver `combineCostCenterChain`/`buildViaticoCostCenterChain`).
+   *   solicitar el viático (ver `combineCostCenterChain`/`buildCostCenterChain`).
+   * - Rendición directa: `directaApproverChain`, la cadena tomada al enviarla
+   *   (mismo mecanismo que el viático, ver `buildCostCenterChain`).
    * Ninguno usa la relación en vivo usuario→coordinador ni el aprobador actual
    * del centro de costo, así que si este cambia, las solicitudes ya creadas
    * conservan a su coordinador original.
@@ -711,6 +713,7 @@ export class ExpenseReportService implements OnModuleInit {
         $or: [
           { assignedCoordinatorId: coordinatorObjectId },
           { type: 'viatico', viaticoApproverChain: coordinatorObjectId },
+          { isDirecta: true, directaApproverChain: coordinatorObjectId },
         ],
       })
       .populate('userId', 'name email signature bankAccount')
@@ -1077,11 +1080,105 @@ export class ExpenseReportService implements OnModuleInit {
     return pojo as unknown as ExpenseReportDocument
   }
 
+  /**
+   * Notifica a Contabilidad que una rendición quedó lista para su aprobación
+   * final (coordinador/cadena de centro de costo ya completada), y al
+   * colaborador que ya pasó ese paso. Compartido entre la rendición normal
+   * (coordinador único, desde `update()`) y la rendición directa (cadena de
+   * centro de costo, desde `approveDirecta`).
+   */
+  private async notifyAccountingReportPendingApproval(
+    id: string,
+    fullyUpdatedReport: any
+  ): Promise<void> {
+    try {
+      const clientId = String(fullyUpdatedReport.clientId)
+      const ownerRef = fullyUpdatedReport.userId as any
+      const ownerId = ownerRef?._id ? String(ownerRef._id) : String(ownerRef)
+      const collaboratorName =
+        (typeof ownerRef === 'object' && ownerRef?.name) || 'Colaborador'
+      const reportTitle = fullyUpdatedReport.title
+      const budgetFormatted = (
+        await this.computeReportBudgetDisplay(fullyUpdatedReport)
+      ).toFixed(2)
+      const expenseCount = fullyUpdatedReport.expenseIds?.length ?? 0
+      const platformUrl = this.emailService.buildAppUrl(
+        `/mis-rendiciones/${id}/detalle`
+      )
+
+      const ownerProfile =
+        await this.userService.findTransactionalProfile(ownerId)
+      const ownerCoordinatorId =
+        ownerProfile?.coordinatorId?.toString?.() || ''
+      const ownerEmailLower =
+        typeof ownerRef === 'object' && ownerRef?.email
+          ? String(ownerRef.email).trim().toLowerCase()
+          : ''
+
+      const accountingUsersRaw =
+        await this.userService.findAccountingRecipientsWithIds(clientId)
+      const accountingUsers = accountingUsersRaw.filter(
+        u =>
+          u._id !== ownerId &&
+          u._id !== ownerCoordinatorId &&
+          (ownerEmailLower
+            ? u.email?.trim().toLowerCase() !== ownerEmailLower
+            : true)
+      )
+      for (const u of accountingUsers) {
+        await this.notificationsService.create({
+          userId: u._id,
+          title: 'Rendición aprobada por Coordinador',
+          message: `La rendición "${reportTitle}" fue aprobada por el coordinador y está lista para tu aprobación final.`,
+          type: 'info',
+          actionUrl: `/mis-rendiciones/${id}/detalle`,
+        })
+
+        try {
+          const accountingEmailEnabled =
+            await this.userService.isEmailEnabled(u._id)
+          if (accountingEmailEnabled) {
+            await this.emailService.sendRendicionPendienteContabilidad(
+              u.email,
+              {
+                clientId,
+                recipientName: u.name,
+                collaboratorName,
+                reportTitle,
+                budgetFormatted,
+                expenseCount,
+                platformUrl,
+              }
+            )
+          }
+        } catch (mailErr) {
+          console.error(
+            `[pending_accounting] Error correo contabilidad ${u.email}:`,
+            mailErr
+          )
+        }
+      }
+
+      await this.notificationsService.create({
+        userId: ownerId,
+        title: 'Tu rendición fue aprobada por el Coordinador',
+        message: `Tu rendición "${reportTitle}" fue aprobada por el coordinador. Contabilidad realizará la revisión final.`,
+        type: 'success',
+        actionUrl: `/mis-rendiciones/${id}/detalle`,
+      })
+    } catch (error) {
+      console.error(
+        'Error enviando notificaciones a contabilidad (pending_accounting)',
+        error
+      )
+    }
+  }
+
   async update(id: string, updateExpenseReportDto: UpdateExpenseReportDto) {
     const dto = updateExpenseReportDto
     const existing = await this.expenseReportModel
       .findById(id)
-      .select('status isDirecta type clientId')
+      .select('status isDirecta type clientId projectId userId')
       .lean()
       .exec()
     if (!existing) {
@@ -1162,10 +1259,30 @@ export class ExpenseReportService implements OnModuleInit {
     if (dto.description !== undefined) $set.description = dto.description
     if (dto.budget !== undefined) $set.budget = dto.budget
 
-    // Rendición directa: al enviar (submitted), auto-transicionar a pending_accounting
+    // Rendición directa: al enviar (o reenviar tras rechazo), arma la cadena de
+    // aprobadores por centro de costo (igual que el viático) en vez de saltar
+    // directo a Contabilidad. Se recalcula en cada envío por si el centro de
+    // costo o sus aprobadores cambiaron desde el último intento.
     if (dto.status !== undefined) {
       if (dto.status === 'submitted' && isDirecta) {
-        $set.status = 'pending_accounting'
+        const projectId = (existing as any).projectId
+        if (!projectId) {
+          throw new BadRequestException(
+            'La rendición directa no tiene centro de costo asignado. No se puede enviar.'
+          )
+        }
+        const profile = await this.userService.findTransactionalProfile(
+          (existing as any).userId.toString()
+        )
+        const chain = await this.buildCostCenterChain(
+          profile ?? {},
+          projectId.toString(),
+          (existing as any).clientId.toString()
+        )
+        $set.status = 'pending_l1'
+        $set.directaApproverChain = chain
+        $set.directaRequiredLevels = chain.length
+        $set.directaApprovalLevel = 0
       } else {
         $set.status = dto.status
       }
@@ -1261,89 +1378,9 @@ export class ExpenseReportService implements OnModuleInit {
     }
 
     // Coordinador aprueba la rendición normal (→ pending_accounting): notificar a contabilidad + colaborador
-    // No aplica a rendiciones directas (ellas llegan aquí desde submitted automáticamente)
+    // No aplica a rendiciones directas (para directa se llama desde approveDirecta al completar su cadena)
     if (dto.status === 'pending_accounting' && !isDirecta) {
-      try {
-        const clientId = String(fullyUpdatedReport.clientId)
-        const ownerRef = fullyUpdatedReport.userId as any
-        const ownerId = ownerRef?._id ? String(ownerRef._id) : String(ownerRef)
-        const collaboratorName =
-          (typeof ownerRef === 'object' && ownerRef?.name) || 'Colaborador'
-        const reportTitle = fullyUpdatedReport.title
-        const budgetFormatted = (
-          await this.computeReportBudgetDisplay(fullyUpdatedReport)
-        ).toFixed(2)
-        const expenseCount = fullyUpdatedReport.expenseIds?.length ?? 0
-        const platformUrl = this.emailService.buildAppUrl(
-          `/mis-rendiciones/${id}/detalle`
-        )
-
-        const ownerProfile =
-          await this.userService.findTransactionalProfile(ownerId)
-        const ownerCoordinatorId =
-          ownerProfile?.coordinatorId?.toString?.() || ''
-        const ownerEmailLower =
-          typeof ownerRef === 'object' && ownerRef?.email
-            ? String(ownerRef.email).trim().toLowerCase()
-            : ''
-
-        const accountingUsersRaw =
-          await this.userService.findAccountingRecipientsWithIds(clientId)
-        const accountingUsers = accountingUsersRaw.filter(
-          u =>
-            u._id !== ownerId &&
-            u._id !== ownerCoordinatorId &&
-            (ownerEmailLower
-              ? u.email?.trim().toLowerCase() !== ownerEmailLower
-              : true)
-        )
-        for (const u of accountingUsers) {
-          await this.notificationsService.create({
-            userId: u._id,
-            title: 'Rendición aprobada por Coordinador',
-            message: `La rendición "${reportTitle}" fue aprobada por el coordinador y está lista para tu aprobación final.`,
-            type: 'info',
-            actionUrl: `/mis-rendiciones/${id}/detalle`,
-          })
-
-          try {
-            const accountingEmailEnabled =
-              await this.userService.isEmailEnabled(u._id)
-            if (accountingEmailEnabled) {
-              await this.emailService.sendRendicionPendienteContabilidad(
-                u.email,
-                {
-                  clientId,
-                  recipientName: u.name,
-                  collaboratorName,
-                  reportTitle,
-                  budgetFormatted,
-                  expenseCount,
-                  platformUrl,
-                }
-              )
-            }
-          } catch (mailErr) {
-            console.error(
-              `[pending_accounting] Error correo contabilidad ${u.email}:`,
-              mailErr
-            )
-          }
-        }
-
-        await this.notificationsService.create({
-          userId: ownerId,
-          title: 'Tu rendición fue aprobada por el Coordinador',
-          message: `Tu rendición "${reportTitle}" fue aprobada por el coordinador. Contabilidad realizará la revisión final.`,
-          type: 'success',
-          actionUrl: `/mis-rendiciones/${id}/detalle`,
-        })
-      } catch (error) {
-        console.error(
-          'Error enviando notificaciones a contabilidad (pending_accounting)',
-          error
-        )
-      }
+      await this.notifyAccountingReportPendingApproval(id, fullyUpdatedReport)
     }
 
     // Contabilidad aprueba la rendición (→ approved): notificar colaborador
@@ -3923,11 +3960,11 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * Arma la cadena de aprobadores por centro de costo para una solicitud de
-   * viático: 1 nivel si el centro de costo elegido está entre los asignados
-   * al colaborador, 2 niveles (principal → elegido) si no lo está.
+   * Arma la cadena de aprobadores por centro de costo (usada por viático y por
+   * rendición directa): 1 nivel si el centro de costo elegido está entre los
+   * asignados al colaborador, 2 niveles (principal → elegido) si no lo está.
    */
-  private async buildViaticoCostCenterChain(
+  private async buildCostCenterChain(
     profile: { projectIds?: string[] },
     selectedProjectId: string,
     clientId: string
@@ -3952,7 +3989,7 @@ export class ExpenseReportService implements OnModuleInit {
     }
 
     const pendingAmt = Number(dto.pendingBalanceAmount ?? 0)
-    const chain = await this.buildViaticoCostCenterChain(profile, dto.projectId, clientId)
+    const chain = await this.buildCostCenterChain(profile, dto.projectId, clientId)
 
     // `dto.amount` es el costo del viático (suma de líneas). El saldo heredado NO se
     // suma al anticipo: prefinancia ese costo igual que un saldo de la bolsa.
@@ -4404,6 +4441,96 @@ export class ExpenseReportService implements OnModuleInit {
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
+  /** Notifica al aprobador de centro de costo al que le toca el turno de una rendición directa. */
+  private async notifyDirectaCoordinator(report: ExpenseReportDocument): Promise<void> {
+    const reportId = String((report as any)._id)
+    const coordId = report.directaApproverChain?.[report.directaApprovalLevel ?? 0]
+    if (!coordId) return
+    const coordinator = await this.userService.findEmailNameClient(coordId.toString())
+    if (!coordinator) return
+    try {
+      await this.notificationsService.create({
+        userId: coordId.toString(),
+        title: 'Nueva rendición directa pendiente',
+        message: `Una rendición directa (${report.title}) requiere tu aprobación de centro de costo.`,
+        type: 'info',
+        actionUrl: `/mis-rendiciones/${reportId}/detalle`,
+        metadata: { reportId, event: 'directa_submitted' },
+      })
+    } catch (err: unknown) {
+      this.logger.error(`In-app notif directa ${reportId}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /**
+   * Aprueba el nivel actual de la cadena de aprobadores de centro de costo de
+   * una rendición directa. Solo puede actuar el aprobador al que le toca el
+   * turno (directaApproverChain[directaApprovalLevel]) o Superadministrador.
+   * Al completar la cadena pasa a `pending_accounting` (gate final de
+   * Contabilidad), igual que el viático.
+   */
+  async approveDirecta(id: string, opts: { approvedBy: string; notes?: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
+    const report = await this.expenseReportModel.findById(id)
+    if (!report) throw new NotFoundException(`Rendición ${id} no encontrada`)
+    if (!report.isDirecta) throw new BadRequestException('Esta rendición no es directa')
+    if (report.status !== 'pending_l1') throw new BadRequestException(`La rendición no está pendiente de aprobación (estado actual: ${report.status})`)
+
+    const chain = report.directaApproverChain ?? []
+    const approvalLevel = report.directaApprovalLevel ?? 0
+    if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
+      throw new ForbiddenException('No te corresponde aprobar esta rendición en este momento')
+    }
+
+    ;(report.directaApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
+
+    const { approvalLevel: nextLevel, isComplete } = advanceChain({ approvalLevel, requiredLevels: report.directaRequiredLevels ?? chain.length })
+    report.directaApprovalLevel = nextLevel
+
+    if (isComplete) {
+      await this.validateBeforeFinalApproval(id)
+      report.status = 'pending_accounting'
+      report.coordinatorApprovedAt = new Date()
+      report.coordinatorApprovedBy = new Types.ObjectId(actorId)
+      await report.save()
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Rendición en aprobación final', message: `Tu rendición "${report.title}" fue aprobada por los centros de costo y está pendiente de la aprobación final de Contabilidad.`, type: 'info', actionUrl: `/mis-rendiciones/${id}/detalle` }).catch(() => {})
+      const fullyUpdatedReport = await this.findOne(id)
+      await this.notifyAccountingReportPendingApproval(id, fullyUpdatedReport)
+    } else {
+      await report.save()
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Rendición en revisión', message: `Tu rendición "${report.title}" fue aprobada en el nivel ${nextLevel} de ${report.directaRequiredLevels ?? chain.length} y está pendiente del siguiente aprobador.`, type: 'info', actionUrl: `/mis-rendiciones/${id}/detalle` }).catch(() => {})
+      this.notifyDirectaCoordinator(report as ExpenseReportDocument).catch(() => {})
+    }
+
+    return this.findOne(id) as Promise<ExpenseReportDocument>
+  }
+
+  /** Rechaza una rendición directa en su paso de cadena (aprobador de centro de costo al que le toca el turno, o Superadmin). */
+  async rejectDirecta(id: string, opts: { rejectedBy: string; rejectionReason: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
+    const report = await this.expenseReportModel.findById(id)
+    if (!report) throw new NotFoundException(`Rendición ${id} no encontrada`)
+    if (!report.isDirecta) throw new BadRequestException('Esta rendición no es directa')
+    if (report.status !== 'pending_l1') throw new BadRequestException(`No se puede rechazar en estado "${report.status}"`)
+
+    const chain = report.directaApproverChain ?? []
+    const approvalLevel = report.directaApprovalLevel ?? 0
+    if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
+      throw new ForbiddenException('No tienes permiso para rechazar esta rendición')
+    }
+    if ((opts.rejectionReason?.trim() ?? '').length < 10) {
+      throw new BadRequestException('El motivo de rechazo debe tener al menos 10 caracteres.')
+    }
+
+    ;(report.directaApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.rejectedBy, action: 'rejected', notes: opts.rejectionReason, date: new Date() })
+    report.status = 'rejected'
+    report.rejectionReason = opts.rejectionReason
+    report.rejectedByRole = 'coordinador'
+    await report.save()
+
+    this.notificationsService.create({ userId: report.userId.toString(), title: 'Rendición directa rechazada', message: `Tu rendición "${report.title}" fue rechazada. Motivo: ${opts.rejectionReason}`, type: 'error', actionUrl: `/mis-rendiciones/${id}/detalle` }).catch(() => {})
+
+    return this.findOne(id) as Promise<ExpenseReportDocument>
+  }
+
   async resubmitViatico(id: string, dto: ResubmitViaticoDto, actingUserId: string, clientId: string): Promise<ExpenseReportDocument> {
     const report = await this.expenseReportModel.findById(id)
     if (!report) throw new NotFoundException(`Viático ${id} no encontrado`)
@@ -4423,7 +4550,7 @@ export class ExpenseReportService implements OnModuleInit {
     // La cadena de aprobadores se recalcula desde el centro de costo elegido y
     // los centros de costo asignados actuales del colaborador (pueden haber
     // cambiado desde la solicitud original).
-    const chain = await this.buildViaticoCostCenterChain(profile, dto.projectId, clientId)
+    const chain = await this.buildCostCenterChain(profile, dto.projectId, clientId)
 
     const wasEditing = report.status === 'pending_l1'
     report.viaticoPlace = dto.place.trim()

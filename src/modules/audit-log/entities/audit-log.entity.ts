@@ -75,6 +75,8 @@ export type AuditAction =
   | 'resubmit_viatico'
   | 'register_viatico_payment'
   | 'cancel_viatico'
+  | 'approve_directa'
+  | 'reject_directa'
 
 @Schema({ timestamps: true })
 export class AuditLog {

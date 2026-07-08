@@ -54,6 +54,7 @@ const mockUserService = {
   findTransactionalProfile: jest.fn().mockResolvedValue(null),
   findEmailNameClient: jest.fn().mockResolvedValue(null),
   findContabilidadRecipients: jest.fn().mockResolvedValue([]),
+  findTesoreriaNotifyRecipients: jest.fn().mockResolvedValue([]),
   isEmailEnabled: jest.fn().mockResolvedValue(true),
 }
 

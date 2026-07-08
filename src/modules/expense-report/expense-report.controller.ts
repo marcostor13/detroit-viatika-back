@@ -772,6 +772,52 @@ export class ExpenseReportController {
     return result
   }
 
+  /**
+   * Aprueba el nivel actual de la cadena de aprobadores de centro de costo de
+   * una rendición directa. Solo el aprobador (Coordinador) al que le toca el
+   * turno, o Superadmin.
+   */
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
+  @Patch(':id/directa/approve')
+  async approveDirecta(
+    @Param('id') id: string,
+    @Body() body: { notes?: string },
+    @Request() req: any
+  ) {
+    const actorId = String(req.user._id || req.user.sub)
+    const actorRole = req.user?.roles?.[0] ?? ''
+    const result = await this.expenseReportService.approveDirecta(
+      id,
+      { approvedBy: actorId, notes: body.notes },
+      actorId,
+      actorRole
+    )
+    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'approve_directa', module: 'rendiciones', entityId: id, clientId: req.user.clientId })
+    return result
+  }
+
+  /** Rechazar rendición directa (aprobador de centro de costo al que le toca el turno, o Superadmin). */
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
+  @Patch(':id/directa/reject')
+  async rejectDirecta(
+    @Param('id') id: string,
+    @Body() body: { rejectionReason: string },
+    @Request() req: any
+  ) {
+    const actorId = String(req.user._id || req.user.sub)
+    const actorRole = req.user?.roles?.[0] ?? ''
+    const result = await this.expenseReportService.rejectDirecta(
+      id,
+      { rejectedBy: actorId, rejectionReason: body.rejectionReason },
+      actorId,
+      actorRole
+    )
+    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'reject_directa', module: 'rendiciones', entityId: id, details: body.rejectionReason, clientId: req.user.clientId })
+    return result
+  }
+
   /** Reenviar viático tras rechazo. */
   @UseGuards(AuthGuard('jwt'))
   @Patch(':id/viatico/resubmit')

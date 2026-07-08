@@ -205,6 +205,12 @@ export interface ExpenseReportDocument extends Document {
   viaticoCci?: string
   /** Orden de Trabajo (LIM-XXX-NNNNNN) a la que se imputa el gasto del viático. */
   viaticoOrdenTrabajoId?: Types.ObjectId
+  // Campos exclusivos de rendición directa (cadena de aprobación por centro de costo)
+  directaRequiredLevels?: number
+  directaApprovalLevel?: number
+  /** Cadena ordenada de aprobadores de centro de costo (snapshot al enviar la rendición). */
+  directaApproverChain?: Types.ObjectId[]
+  directaApprovalHistory?: ApprovalEntry[]
 }
 
 @Schema({ timestamps: true })
@@ -608,6 +614,33 @@ export class ExpenseReport {
 
   @Prop({ type: Types.ObjectId, ref: 'OrdenTrabajo', required: false })
   viaticoOrdenTrabajoId?: Types.ObjectId
+
+  // ─── Campos exclusivos de rendición directa (cadena por centro de costo) ────
+
+  @Prop({ type: Number, default: 1 })
+  directaRequiredLevels?: number
+
+  @Prop({ type: Number, default: 0 })
+  directaApprovalLevel?: number
+
+  /** Cadena ordenada de aprobadores de centro de costo (snapshot al enviar la rendición). */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: undefined })
+  directaApproverChain?: Types.ObjectId[]
+
+  @Prop({
+    type: [
+      {
+        level: { type: Number },
+        approvedBy: { type: String },
+        action: { type: String, enum: ['approved', 'rejected', 'resubmitted'] },
+        notes: { type: String },
+        date: { type: Date },
+        _id: false,
+      },
+    ],
+    default: [],
+  })
+  directaApprovalHistory?: ApprovalEntry[]
 }
 
 export const ExpenseReportSchema = SchemaFactory.createForClass(ExpenseReport)
