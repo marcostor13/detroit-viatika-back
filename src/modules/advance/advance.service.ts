@@ -1883,13 +1883,15 @@ export class AdvanceService implements OnModuleInit {
     // (el saldo no gastado lo devuelve el colaborador/coordinador).
     const depositTotal = Number((report as any).directaDeposit?.amount ?? 0)
     const hasDeposit = depositTotal > 0
+    const isDirecta = !!(report as any).isDirecta
 
     const expenses = (report.expenseIds as any[]) || []
     const expenseTotal = expenses.reduce((sum, e) => {
-      // En una rendición directa con depósito todo gasto registrado (no rechazado)
-      // cuenta como gastado; en viáticos solo cuentan los gastos aprobados.
+      // En una rendición directa todo gasto registrado (no rechazado) cuenta como
+      // gastado —lo pagó el colaborador o el depósito de Contabilidad—; en viáticos
+      // solo cuentan los gastos aprobados.
       const status = String(e?.status || '').toLowerCase()
-      if (hasDeposit) {
+      if (hasDeposit || isDirecta) {
         if (status === 'rejected') return sum
       } else if (status !== 'approved') {
         return sum
@@ -1904,12 +1906,19 @@ export class AdvanceService implements OnModuleInit {
     const settledAdvances = advances.filter(a => a.status === 'settled')
     const approvedAdvances = advances.filter(a => a.status === 'approved')
 
+    // Rendición directa iniciada por el colaborador: no tiene depósito ni anticipo
+    // (paga de su bolsillo), por lo que el total gastado es un reembolso a su favor.
+    // Sin este caso la liquidación retornaría sin settlement y Tesorería nunca vería
+    // el reembolso pendiente (VD-26).
+    const directaWithoutFunding = isDirecta && !hasDeposit && expenseTotal > 0
+
     if (
       paidAdvances.length === 0 &&
       partiallyPaidAdvances.length === 0 &&
       settledAdvances.length === 0 &&
       approvedAdvances.length === 0 &&
-      depositTotal <= 0
+      depositTotal <= 0 &&
+      !directaWithoutFunding
     ) {
       return
     }

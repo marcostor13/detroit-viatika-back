@@ -40,7 +40,6 @@ import {
   canActOnChain,
   advanceChain,
   combineCostCenterChain,
-  buildApproverChain,
 } from '../advance/approval-chain.util'
 import { CreateViaticoExpenseReportDto } from './dto/create-viatico-expense-report.dto'
 import { PayViaticoDto } from './dto/pay-viatico.dto'
@@ -638,8 +637,8 @@ export class ExpenseReportService implements OnModuleInit {
    *   rendición (ver `resolveAssignedCoordinatorId`).
    * - Viático: `viaticoApproverChain`, la cadena de aprobadores tomada al
    *   solicitar el viático (ver `combineCostCenterChain`/`buildCostCenterChain`).
-   * - Rendición directa: `directaApproverChain`, la cadena del jefe inmediato
-   *   (aprobadores asignados) tomada al enviarla (ver `buildApproverChain`).
+   * - Rendición directa: `directaApproverChain`, la cadena de aprobadores del
+   *   centro de costo tomada al enviarla (ver `buildCostCenterChain`).
    * Ninguno usa la relación en vivo usuario→coordinador ni el aprobador actual
    * del centro de costo, así que si este cambia, las solicitudes ya creadas
    * conservan a su coordinador original.
@@ -1194,7 +1193,24 @@ export class ExpenseReportService implements OnModuleInit {
         const profile = await this.userService.findTransactionalProfile(
           (existing as any).userId.toString()
         )
-        const chain = buildApproverChain(profile?.approverIds)
+        // El aprobador de una directa es el del CENTRO DE COSTO (Project.approverId),
+        // igual que en viáticos: al colaborador ya no se le asigna un coordinador
+        // personal, sino centros de costo en sus permisos (profile.projectIds), cada
+        // uno con su aprobador. Se usa el centro de costo del reporte si lo tiene; si
+        // no, el principal del colaborador (projectIds[0]). VD-36 (corrige VD-25, que
+        // enrutaba por approverIds).
+        const reportProjectId = (existing as any).projectId?.toString()
+        const selectedProjectId = reportProjectId || profile?.projectIds?.[0]
+        if (!selectedProjectId) {
+          throw new BadRequestException(
+            'El colaborador no tiene centros de costo asignados. Un administrador debe asignarle al menos uno en sus permisos antes de enviar la rendición directa.'
+          )
+        }
+        const chain = await this.buildCostCenterChain(
+          { projectIds: profile?.projectIds },
+          selectedProjectId,
+          (existing as any).clientId.toString()
+        )
         $set.status = 'pending_l1'
         $set.directaApproverChain = chain
         $set.directaRequiredLevels = chain.length
@@ -2495,20 +2511,74 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   async findPendingReimbursementsByClient(clientId: string) {
-    return this.expenseReportModel
+    const cid = new Types.ObjectId(clientId)
+    const noPayment = [
+      { reimbursementPaymentInfo: { $exists: false } },
+      { reimbursementPaymentInfo: null },
+    ]
+
+    // 1. Reportes con reembolso ya liquidado (settlement persistido).
+    const settled = await this.expenseReportModel
       .find({
-        clientId: new Types.ObjectId(clientId),
+        clientId: cid,
         status: 'approved',
         'settlement.type': 'reembolso',
-        $or: [
-          { reimbursementPaymentInfo: { $exists: false } },
-          { reimbursementPaymentInfo: null },
-        ],
+        $or: noPayment,
       })
       .populate('userId', 'name email bankAccount')
       .sort({ updatedAt: -1 })
       .lean()
       .exec()
+
+    // 2. Rendiciones directas aprobadas SIN settlement de reembolso persistido
+    //    (p. ej. aprobadas antes de VD-26). Se calcula el saldo a favor del
+    //    colaborador desde los gastos (todo gasto no rechazado, menos el depósito
+    //    si lo hubiera) y, si es positivo, se adjunta un settlement calculado para
+    //    que Tesorería pueda registrar el pago. Al confirmar, el backend recomputa
+    //    y persiste el settlement real (registerReimbursementPayment). VD-37.
+    const directas = await this.expenseReportModel
+      .find({
+        clientId: cid,
+        isDirecta: true,
+        status: 'approved',
+        'settlement.type': { $ne: 'reembolso' },
+        $or: noPayment,
+      })
+      .populate('userId', 'name email bankAccount')
+      .populate('expenseIds', 'total status')
+      .sort({ updatedAt: -1 })
+      .lean()
+      .exec()
+
+    const computedDirectas = directas
+      .map(r => {
+        const deposit = Number((r as any).directaDeposit?.amount ?? 0)
+        const gastado = (((r as any).expenseIds as any[]) || []).reduce(
+          (s: number, e: any) => {
+            const st = String(e?.status || '').toLowerCase()
+            return st === 'rejected' ? s : s + (Number(e?.total) || 0)
+          },
+          0
+        )
+        return { r, deposit, gastado, difference: deposit - gastado }
+      })
+      // difference < 0 ⇒ el colaborador gastó más de lo depositado ⇒ reembolso.
+      .filter(x => x.difference < -0.01)
+      .map(({ r, deposit, gastado, difference }) => ({
+        ...r,
+        settlement: {
+          advanceTotal: deposit,
+          expenseTotal: gastado,
+          difference,
+          type: 'reembolso' as const,
+        },
+      }))
+
+    return [...settled, ...computedDirectas].sort((a, b) =>
+      String((b as any).updatedAt ?? '').localeCompare(
+        String((a as any).updatedAt ?? '')
+      )
+    )
   }
 
   async findMyDocuments(userId: string, clientId: string) {
