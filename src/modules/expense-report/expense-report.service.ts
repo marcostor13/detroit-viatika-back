@@ -2511,20 +2511,74 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   async findPendingReimbursementsByClient(clientId: string) {
-    return this.expenseReportModel
+    const cid = new Types.ObjectId(clientId)
+    const noPayment = [
+      { reimbursementPaymentInfo: { $exists: false } },
+      { reimbursementPaymentInfo: null },
+    ]
+
+    // 1. Reportes con reembolso ya liquidado (settlement persistido).
+    const settled = await this.expenseReportModel
       .find({
-        clientId: new Types.ObjectId(clientId),
+        clientId: cid,
         status: 'approved',
         'settlement.type': 'reembolso',
-        $or: [
-          { reimbursementPaymentInfo: { $exists: false } },
-          { reimbursementPaymentInfo: null },
-        ],
+        $or: noPayment,
       })
       .populate('userId', 'name email bankAccount')
       .sort({ updatedAt: -1 })
       .lean()
       .exec()
+
+    // 2. Rendiciones directas aprobadas SIN settlement de reembolso persistido
+    //    (p. ej. aprobadas antes de VD-26). Se calcula el saldo a favor del
+    //    colaborador desde los gastos (todo gasto no rechazado, menos el depósito
+    //    si lo hubiera) y, si es positivo, se adjunta un settlement calculado para
+    //    que Tesorería pueda registrar el pago. Al confirmar, el backend recomputa
+    //    y persiste el settlement real (registerReimbursementPayment). VD-37.
+    const directas = await this.expenseReportModel
+      .find({
+        clientId: cid,
+        isDirecta: true,
+        status: 'approved',
+        'settlement.type': { $ne: 'reembolso' },
+        $or: noPayment,
+      })
+      .populate('userId', 'name email bankAccount')
+      .populate('expenseIds', 'total status')
+      .sort({ updatedAt: -1 })
+      .lean()
+      .exec()
+
+    const computedDirectas = directas
+      .map(r => {
+        const deposit = Number((r as any).directaDeposit?.amount ?? 0)
+        const gastado = (((r as any).expenseIds as any[]) || []).reduce(
+          (s: number, e: any) => {
+            const st = String(e?.status || '').toLowerCase()
+            return st === 'rejected' ? s : s + (Number(e?.total) || 0)
+          },
+          0
+        )
+        return { r, deposit, gastado, difference: deposit - gastado }
+      })
+      // difference < 0 ⇒ el colaborador gastó más de lo depositado ⇒ reembolso.
+      .filter(x => x.difference < -0.01)
+      .map(({ r, deposit, gastado, difference }) => ({
+        ...r,
+        settlement: {
+          advanceTotal: deposit,
+          expenseTotal: gastado,
+          difference,
+          type: 'reembolso' as const,
+        },
+      }))
+
+    return [...settled, ...computedDirectas].sort((a, b) =>
+      String((b as any).updatedAt ?? '').localeCompare(
+        String((a as any).updatedAt ?? '')
+      )
+    )
   }
 
   async findMyDocuments(userId: string, clientId: string) {
