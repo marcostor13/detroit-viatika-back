@@ -945,24 +945,42 @@ export class ExpenseReportService implements OnModuleInit {
   async findOne(id: string) {
     const report = await this.expenseReportModel
       .findById(id)
-      .populate('userId', 'name email signature bankAccount dni')
+      .populate('userId', 'name email signature bankAccount dni area')
       .populate({
         path: 'expenseIds',
         populate: [
-          { path: 'categoryId', select: 'name' },
+          { path: 'categoryId', select: 'name cuenta' },
           { path: 'proyectId', select: 'name' },
+          // OT y su centro de costo por gasto (columnas OT / C.COSTO del formato
+          // ADF-FOR-004). costCenterId se popula anidado para obtener el nombre.
+          {
+            path: 'ordenTrabajoId',
+            select: 'nombre costCenterId',
+            populate: { path: 'costCenterId', select: 'code name' },
+          },
         ],
       })
       .populate('createdBy', 'name email')
-      .populate('approvedBy', 'name email')
+      // Firma incluida para el recuadro V°B° JEFE INMEDIATO del formato ADF-FOR-004
+      // (fallback cuando no hubo coordinador).
+      .populate('approvedBy', 'name email signature')
       // Coordinador que aprobó: se incluye su firma/DNI para el PDF de la planilla
       // de movilidad (firma del colaborador y del coordinador, VD-33).
       .populate('coordinatorApprovedBy', 'name email signature dni')
-      // Contabilidad que dio la aprobación final: nombre para la trazabilidad (VD-31).
-      .populate('contabilidadApprovedBy', 'name email')
+      // Contabilidad que dio la aprobación final: nombre y firma para la trazabilidad
+      // y el recuadro V°B° FINANZAS (VD-31).
+      .populate('contabilidadApprovedBy', 'name email signature')
       .populate('projectId', 'name')
-      .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
-      .populate('directaOrdenTrabajoId', 'nombre costCenterId')
+      .populate({
+        path: 'viaticoOrdenTrabajoId',
+        select: 'nombre costCenterId',
+        populate: { path: 'costCenterId', select: 'code name' },
+      })
+      .populate({
+        path: 'directaOrdenTrabajoId',
+        select: 'nombre costCenterId',
+        populate: { path: 'costCenterId', select: 'code name' },
+      })
       .populate('viaticoApproverChain', 'name email')
       // Cadena de aprobadores de la rendición directa: nombres para la trazabilidad (VD-31).
       .populate('directaApproverChain', 'name email')
@@ -2898,19 +2916,28 @@ export class ExpenseReportService implements OnModuleInit {
   async findOneWithAdvances(id: string) {
     const report = await this.expenseReportModel
       .findById(id)
-      .populate('userId', 'name email signature bankAccount dni')
+      .populate('userId', 'name email signature bankAccount dni area')
       .populate({
         path: 'expenseIds',
         populate: [
-          { path: 'categoryId', select: 'name' },
+          { path: 'categoryId', select: 'name cuenta' },
           { path: 'proyectId', select: 'name' },
+          {
+            path: 'ordenTrabajoId',
+            select: 'nombre costCenterId',
+            populate: { path: 'costCenterId', select: 'code name' },
+          },
         ],
       })
       .populate('advanceIds')
       .populate('createdBy', 'name email')
       .populate('approvedBy', 'name email')
       .populate('projectId', 'name')
-      .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
+      .populate({
+        path: 'viaticoOrdenTrabajoId',
+        select: 'nombre costCenterId',
+        populate: { path: 'costCenterId', select: 'code name' },
+      })
       .exec()
     if (!report)
       throw new NotFoundException(`Expense report with ID ${id} not found`)
