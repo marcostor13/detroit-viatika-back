@@ -30,6 +30,10 @@ export class CreateCategoryDto {
 
   @IsString()
   @IsOptional()
+  perfil?: string
+
+  @IsString()
+  @IsOptional()
   observaciones?: string
 
   @IsBoolean()

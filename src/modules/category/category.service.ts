@@ -25,6 +25,7 @@ export interface ICategoryItem {
   description?: string
   cuenta?: string
   cuentaDestino6x?: string
+  perfil?: string
   observaciones?: string
   isActive: boolean
   limit: number | null
@@ -102,6 +103,7 @@ export class CategoryService {
           description: d.description,
           cuenta: d.cuenta,
           cuentaDestino6x: d.cuentaDestino6x,
+          perfil: d.perfil,
           observaciones: d.observaciones,
           isActive: d.isActive,
           limit: d.limit ?? null,
@@ -265,6 +267,7 @@ export class CategoryService {
     rows: Array<{
       name: string
       cuenta?: string
+      perfil?: string
       description?: string
       observaciones?: string
       limit?: number | null
@@ -292,6 +295,7 @@ export class CategoryService {
           name: row.name.trim(),
           key,
           cuenta: row.cuenta?.trim() || undefined,
+          perfil: row.perfil?.trim() || undefined,
           description: row.description?.trim() || undefined,
           observaciones: row.observaciones?.trim() || undefined,
           limit: row.limit != null && !isNaN(row.limit) ? row.limit : null,
