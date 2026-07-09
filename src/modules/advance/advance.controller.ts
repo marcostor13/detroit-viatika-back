@@ -41,7 +41,13 @@ export class AdvanceController {
 
   /** Mis anticipos (colaborador) */
   @Get('my/:userId/client/:clientId')
-  @Roles(ROLES.COLABORADOR, ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
+  @Roles(
+    ROLES.COLABORADOR,
+    ROLES.ADMIN,
+    ROLES.SUPER_ADMIN,
+    ROLES.CONTABILIDAD,
+    ROLES.TESORERIA
+  )
   findMy(@Param('userId') userId: string, @Param('clientId') clientId: string) {
     return this.advanceService.findMyAdvances(userId, clientId)
   }
