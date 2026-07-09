@@ -168,25 +168,6 @@ export class CategoryService {
     }
   }
 
-  /**
-   * Busca una categoría activa del cliente por nombre exacto (case-insensitive).
-   * Devuelve null si no existe (no lanza). Usado para auto-asignar la categoría
-   * "Movilidad" a la planilla de movilidad (VD-28).
-   */
-  async findByNameForClient(
-    name: string,
-    clientId: string
-  ): Promise<CategoryDocument | null> {
-    const clientIdObject = new Types.ObjectId(clientId)
-    return this.categoryModel
-      .findOne({
-        clientId: clientIdObject,
-        isActive: { $ne: false },
-        name: { $regex: `^${name.trim()}$`, $options: 'i' },
-      })
-      .exec()
-  }
-
   async findByKey(key: string, clientId: string): Promise<CategoryDocument> {
     const clientIdObject = new Types.ObjectId(clientId)
     try {

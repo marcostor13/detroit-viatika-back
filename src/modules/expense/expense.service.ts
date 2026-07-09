@@ -1069,15 +1069,24 @@ export class ExpenseService {
       )
     }
 
-    // VD-28: la planilla de movilidad ya no pide categoría al usuario; se asigna
-    // automáticamente la categoría "Movilidad" del cliente.
-    const movilidadCategory = await this.categoryService.findByNameForClient(
-      'Movilidad',
+    // La categoría de la planilla de movilidad se elige entre las categorías
+    // "Planilla de movilidad" asignadas al colaborador (el frontend la resuelve
+    // sola si solo tiene una, o le pide elegir si tiene más de una). El backend
+    // valida que exista, pertenezca al cliente y sea efectivamente una categoría
+    // de planilla de movilidad.
+    if (!body.categoryId) {
+      throw new HttpException(
+        'No tienes asignada ninguna categoría de Planilla de movilidad. Contacta a un administrador para que te asigne una.',
+        HttpStatus.BAD_REQUEST
+      )
+    }
+    const movilidadCategory = await this.categoryService.findOne(
+      body.categoryId,
       body.clientId
     )
-    if (!movilidadCategory) {
+    if (!/planilla de movilidad/i.test(movilidadCategory.name)) {
       throw new HttpException(
-        'No existe una categoría "Movilidad" configurada para este cliente. Un administrador debe crearla antes de registrar planillas de movilidad.',
+        'La categoría seleccionada no es una categoría de Planilla de movilidad.',
         HttpStatus.BAD_REQUEST
       )
     }
