@@ -10,9 +10,6 @@ export interface CategoryDocument extends Document {
   cuenta?: string
   /** Cuenta destino 6X (gasto por naturaleza). Ej. 63.1.4.100 (alimentación). */
   cuentaDestino6x?: string
-  /** Perfil de categoría: nombre libre para agrupar categorías (VD-38). Sirve
-   *  para seleccionar todas las categorías de un perfil de una vez en permisos. */
-  perfil?: string
   observaciones?: string
   isActive: boolean
   limit: number | null
@@ -42,9 +39,6 @@ export class Category {
 
   @Prop()
   cuentaDestino6x?: string
-
-  @Prop()
-  perfil?: string
 
   @Prop()
   observaciones?: string
