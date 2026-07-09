@@ -40,7 +40,6 @@ import {
   canActOnChain,
   advanceChain,
   combineCostCenterChain,
-  buildApproverChain,
 } from '../advance/approval-chain.util'
 import { CreateViaticoExpenseReportDto } from './dto/create-viatico-expense-report.dto'
 import { PayViaticoDto } from './dto/pay-viatico.dto'
@@ -638,8 +637,8 @@ export class ExpenseReportService implements OnModuleInit {
    *   rendición (ver `resolveAssignedCoordinatorId`).
    * - Viático: `viaticoApproverChain`, la cadena de aprobadores tomada al
    *   solicitar el viático (ver `combineCostCenterChain`/`buildCostCenterChain`).
-   * - Rendición directa: `directaApproverChain`, la cadena del jefe inmediato
-   *   (aprobadores asignados) tomada al enviarla (ver `buildApproverChain`).
+   * - Rendición directa: `directaApproverChain`, la cadena de aprobadores del
+   *   centro de costo tomada al enviarla (ver `buildCostCenterChain`).
    * Ninguno usa la relación en vivo usuario→coordinador ni el aprobador actual
    * del centro de costo, así que si este cambia, las solicitudes ya creadas
    * conservan a su coordinador original.
@@ -1194,7 +1193,24 @@ export class ExpenseReportService implements OnModuleInit {
         const profile = await this.userService.findTransactionalProfile(
           (existing as any).userId.toString()
         )
-        const chain = buildApproverChain(profile?.approverIds)
+        // El aprobador de una directa es el del CENTRO DE COSTO (Project.approverId),
+        // igual que en viáticos: al colaborador ya no se le asigna un coordinador
+        // personal, sino centros de costo en sus permisos (profile.projectIds), cada
+        // uno con su aprobador. Se usa el centro de costo del reporte si lo tiene; si
+        // no, el principal del colaborador (projectIds[0]). VD-36 (corrige VD-25, que
+        // enrutaba por approverIds).
+        const reportProjectId = (existing as any).projectId?.toString()
+        const selectedProjectId = reportProjectId || profile?.projectIds?.[0]
+        if (!selectedProjectId) {
+          throw new BadRequestException(
+            'El colaborador no tiene centros de costo asignados. Un administrador debe asignarle al menos uno en sus permisos antes de enviar la rendición directa.'
+          )
+        }
+        const chain = await this.buildCostCenterChain(
+          { projectIds: profile?.projectIds },
+          selectedProjectId,
+          (existing as any).clientId.toString()
+        )
         $set.status = 'pending_l1'
         $set.directaApproverChain = chain
         $set.directaRequiredLevels = chain.length
