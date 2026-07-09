@@ -25,9 +25,11 @@ export class CreateExpenseDto {
   ordenTrabajoId?: string
 
   /**
-   * Categoría del gasto. Opcional porque la planilla de movilidad ya no la pide:
-   * el backend le asigna automáticamente la categoría "Movilidad" (VD-28). El
-   * resto de tipos de gasto siempre la envían desde el formulario.
+   * Categoría del gasto. Opcional a nivel de DTO porque en planilla_movilidad
+   * la resuelve el frontend (única categoría "Planilla de movilidad" asignada,
+   * o la que el colaborador elige si tiene más de una); el servicio la valida
+   * y la exige en ese caso. El resto de tipos de gasto siempre la envían desde
+   * el formulario.
    */
   @IsString()
   @IsOptional()
