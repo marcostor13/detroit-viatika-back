@@ -90,7 +90,13 @@ export class ProjectController {
   }
 
   @Get(':clientId')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.COLABORADOR,
+    ROLES.CONTABILIDAD,
+    ROLES.TESORERIA
+  )
   async findAll(
     @Param('clientId') clientId: string,
     @Request() req: any,
