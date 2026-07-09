@@ -959,10 +959,14 @@ export class ExpenseReportService implements OnModuleInit {
       // Coordinador que aprobó: se incluye su firma/DNI para el PDF de la planilla
       // de movilidad (firma del colaborador y del coordinador, VD-33).
       .populate('coordinatorApprovedBy', 'name email signature dni')
+      // Contabilidad que dio la aprobación final: nombre para la trazabilidad (VD-31).
+      .populate('contabilidadApprovedBy', 'name email')
       .populate('projectId', 'name')
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
       .populate('directaOrdenTrabajoId', 'nombre costCenterId')
       .populate('viaticoApproverChain', 'name email')
+      // Cadena de aprobadores de la rendición directa: nombres para la trazabilidad (VD-31).
+      .populate('directaApproverChain', 'name email')
       .exec()
 
     if (!report) {
