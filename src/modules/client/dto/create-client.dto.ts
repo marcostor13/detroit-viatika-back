@@ -49,6 +49,11 @@ export class CreateClientDto {
   @IsString()
   logo?: string
 
+  /** Cuenta de cargo para el archivo de pagos BBVA (cabecera). */
+  @IsOptional()
+  @IsString()
+  paymentAccount?: string
+
   @IsOptional()
   @ValidateNested()
   @Type(() => ClientLimitsDto)
