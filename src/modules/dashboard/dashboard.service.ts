@@ -400,10 +400,10 @@ export class DashboardService {
     const match: Record<string, any> = {
       clientId,
       isCajaChica: { $ne: true },
-      // Los viáticos aún en solicitud/aprobación (type='viatico') se contabilizan
-      // como anticipos, no como rendiciones. Al pagarse pasan a type='rendicion'
-      // (registrando gastos) y entonces sí cuentan aquí.
-      type: { $ne: 'viatico' },
+      // Los viáticos (type='viatico') SÍ cuentan como rendiciones: es lo que hace
+      // la página /rendiciones. El anticipo (monto S/) y la rendición (documento)
+      // son métricas distintas, por eso un viático aporta a ambas. Solo se excluye
+      // la caja chica.
       $expr: {
         $and: [{ $gte: [effectiveDate, from] }, { $lte: [effectiveDate, to] }],
       },
