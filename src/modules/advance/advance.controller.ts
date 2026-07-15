@@ -8,10 +8,16 @@ import {
   Body,
   Request,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Query,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { memoryStorage } from 'multer'
 import { AdvanceService } from './advance.service'
+import { PaymentBatchService, PaymentKind } from './payment/payment-batch.service'
 import { CreateAdvanceDto } from './dto/create-advance.dto'
 import { ApproveAdvanceDto, RejectAdvanceDto } from './dto/approve-advance.dto'
 import { ResubmitAdvanceDto } from './dto/resubmit-advance.dto'
@@ -27,8 +33,135 @@ import { AuditLogService } from '../audit-log/audit-log.service'
 export class AdvanceController {
   constructor(
     private readonly advanceService: AdvanceService,
+    private readonly paymentBatchService: PaymentBatchService,
     private readonly auditLogService: AuditLogService
   ) {}
+
+  // ─── Pagos por lote BBVA (VD-7) ──────────────────────────────────────────
+
+  /**
+   * Genera el archivo TXT de pagos masivos BBVA con TODOS los pendientes
+   * (anticipos + viáticos + reembolsos) que tengan datos bancarios válidos.
+   * Devuelve el archivo Latin-1 en base64 + los excluidos por datos incompletos.
+   */
+  @Get('payments/txt/client/:clientId')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
+  async generatePaymentsTxt(
+    @Param('clientId') clientId: string,
+    @Request() req
+  ) {
+    const result = await this.paymentBatchService.generateTxt(clientId)
+    this.auditLogService.log({
+      userId: req.user._id || req.user.sub,
+      userName: req.user.name || req.user.email,
+      action: 'generate_payments_txt',
+      module: 'tesoreria',
+      details: `${result.count} pagos · S/ ${result.totalSoles.toFixed(2)}`,
+      clientId: req.user.clientId,
+    })
+    return result
+  }
+
+  /**
+   * Concilia el PDF "Consulta de Pagos Masivos" de BBVA: por cada abono exitoso
+   * cruza titular + DNI + monto contra los pagos pendientes y los marca pagados.
+   */
+  @Post('payments/reconcile/client/:clientId')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 15 * 1024 * 1024 },
+    })
+  )
+  async reconcilePayments(
+    @Param('clientId') clientId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req
+  ) {
+    if (!file?.buffer) {
+      throw new BadRequestException('Debes adjuntar el PDF de BBVA.')
+    }
+    const actor = {
+      role: req.user?.roles?.[0] || req.user?.role,
+      permissions: req.user?.permissions,
+    }
+    const result = await this.paymentBatchService.reconcileFromPdf(
+      clientId,
+      file.buffer,
+      actor
+    )
+    this.auditLogService.log({
+      userId: req.user._id || req.user.sub,
+      userName: req.user.name || req.user.email,
+      action: 'reconcile_payments',
+      module: 'tesoreria',
+      details: `conciliados: ${result.conciliados.length}, sin conciliar: ${result.sinConciliar.length}`,
+      clientId: req.user.clientId,
+    })
+    return result
+  }
+
+  /**
+   * PRUEBAS: simula el PDF de "Consulta de Pagos Masivos" de BBVA y concilia
+   * todos los pagos pendientes (los marca como pagados) por el mismo motor que el
+   * PDF real, para poder continuar el flujo sin depender del banco.
+   */
+  @Post('payments/simulate-reconcile/client/:clientId')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
+  async simulateReconcile(@Param('clientId') clientId: string, @Request() req) {
+    const actor = {
+      role: req.user?.roles?.[0] || req.user?.role,
+      permissions: req.user?.permissions,
+    }
+    const result = await this.paymentBatchService.simulateReconcile(
+      clientId,
+      actor
+    )
+    this.auditLogService.log({
+      userId: req.user._id || req.user.sub,
+      userName: req.user.name || req.user.email,
+      action: 'simulate_reconcile_payments',
+      module: 'tesoreria',
+      details: `SIMULADO · conciliados: ${result.conciliados.length}, sin conciliar: ${result.sinConciliar.length}`,
+      clientId: req.user.clientId,
+    })
+    return result
+  }
+
+  /** Confirmación manual (fallback): marca como pagados los items indicados. */
+  @Post('payments/confirm-manual/client/:clientId')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
+  async confirmManualPayments(
+    @Param('clientId') clientId: string,
+    @Body()
+    body: {
+      items: Array<{ kind: PaymentKind; id: string }>
+      operationNumber?: string
+      paymentDate?: string
+    },
+    @Request() req
+  ) {
+    const actor = {
+      role: req.user?.roles?.[0] || req.user?.role,
+      permissions: req.user?.permissions,
+    }
+    const result = await this.paymentBatchService.confirmManual(
+      clientId,
+      body.items ?? [],
+      { operationNumber: body.operationNumber, paymentDate: body.paymentDate },
+      actor
+    )
+    this.auditLogService.log({
+      userId: req.user._id || req.user.sub,
+      userName: req.user.name || req.user.email,
+      action: 'confirm_manual_payments',
+      module: 'tesoreria',
+      details: `pagados: ${result.pagados}`,
+      clientId: req.user.clientId,
+    })
+    return result
+  }
 
   /** Colaborador solicita un anticipo */
   @Post()
