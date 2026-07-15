@@ -192,6 +192,54 @@ describe('PaymentBatchService', () => {
     })
   })
 
+  describe('simulateReconcile', () => {
+    it('marca como pagados todos los pendientes (simula el PDF de BBVA)', async () => {
+      advanceService.findBatchPayableAdvances.mockResolvedValue([
+        {
+          advanceId: 'a1',
+          user: { name: 'RAUL CUBA CRUZ', dni: '75162447', documentType: 'L', email: 'r@x.pe' },
+          remaining: 304,
+          cci: CCI_OTRO,
+        },
+      ])
+      expenseReportService.findBatchPayableViaticos.mockResolvedValue([
+        {
+          reportId: 'v1',
+          user: { name: 'ASTRID PENA', dni: '09831083', documentType: 'L', email: 'a@x.pe' },
+          remaining: 249.8,
+          cci: CCI_BBVA,
+        },
+      ])
+
+      const res = await service.simulateReconcile('c1', { role: 'TESORERIA' })
+
+      expect(res.conciliados).toHaveLength(2)
+      expect(res.sinConciliar).toHaveLength(0)
+      expect(res.noAbonados).toHaveLength(0)
+      expect(res.operationNumber).toMatch(/^SIM\d+/)
+      expect(advanceService.registerPayment).toHaveBeenCalledWith(
+        'a1',
+        expect.objectContaining({ method: 'transferencia_bancaria', amount: 304 }),
+        'TESORERIA',
+        undefined,
+        { bypassReceipt: true }
+      )
+      expect(expenseReportService.registerViaticoPayment).toHaveBeenCalledWith(
+        'v1',
+        expect.objectContaining({ amount: 249.8 }),
+        'TESORERIA',
+        undefined,
+        { bypassReceipt: true }
+      )
+    })
+
+    it('falla si no hay pagos pendientes con datos completos', async () => {
+      await expect(
+        service.simulateReconcile('c1', { role: 'TESORERIA' })
+      ).rejects.toThrow(/No hay pagos pendientes/)
+    })
+  })
+
   describe('confirmManual', () => {
     it('marca pagados los items indicados en su superficie', async () => {
       expenseReportService.findBatchPayableViaticos.mockResolvedValue([

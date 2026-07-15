@@ -27,6 +27,7 @@ export type AuditAction =
   | 'pay_advance'
   | 'generate_payments_txt'
   | 'reconcile_payments'
+  | 'simulate_reconcile_payments'
   | 'confirm_manual_payments'
   | 'create_user'
   | 'update_user'

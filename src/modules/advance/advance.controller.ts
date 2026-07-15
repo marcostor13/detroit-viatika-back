@@ -102,6 +102,33 @@ export class AdvanceController {
     return result
   }
 
+  /**
+   * PRUEBAS: simula el PDF de "Consulta de Pagos Masivos" de BBVA y concilia
+   * todos los pagos pendientes (los marca como pagados) por el mismo motor que el
+   * PDF real, para poder continuar el flujo sin depender del banco.
+   */
+  @Post('payments/simulate-reconcile/client/:clientId')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)
+  async simulateReconcile(@Param('clientId') clientId: string, @Request() req) {
+    const actor = {
+      role: req.user?.roles?.[0] || req.user?.role,
+      permissions: req.user?.permissions,
+    }
+    const result = await this.paymentBatchService.simulateReconcile(
+      clientId,
+      actor
+    )
+    this.auditLogService.log({
+      userId: req.user._id || req.user.sub,
+      userName: req.user.name || req.user.email,
+      action: 'simulate_reconcile_payments',
+      module: 'tesoreria',
+      details: `SIMULADO · conciliados: ${result.conciliados.length}, sin conciliar: ${result.sinConciliar.length}`,
+      clientId: req.user.clientId,
+    })
+    return result
+  }
+
   /** Confirmación manual (fallback): marca como pagados los items indicados. */
   @Post('payments/confirm-manual/client/:clientId')
   @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA)

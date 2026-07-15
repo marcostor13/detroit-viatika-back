@@ -12,6 +12,7 @@ import {
   BbvaDetailRecord,
   BbvaDocType,
   BbvaAccountType,
+  BbvaPdfSummary,
   buildBbvaTxt,
   toLatin1Buffer,
   solesToCents,
@@ -281,7 +282,49 @@ export class PaymentBatchService {
         'No se pudieron leer abonos del PDF. Verifica que sea la "Consulta de Pagos Masivos" de BBVA, o usa la confirmación manual.'
       )
     }
+    return this.reconcileParsedRows(clientId, parsed, actor)
+  }
 
+  /**
+   * PRUEBAS: simula el PDF de retorno de BBVA marcando como abonados TODOS los
+   * pagos pendientes con datos bancarios completos, y los concilia por el mismo
+   * motor que el PDF real (matching por DNI+monto + aplicación del pago). Permite
+   * continuar el flujo de Tesorería sin depender del banco. El PDF real de BBVA
+   * es la vía de producción; esto es solo una ayuda de prueba.
+   */
+  async simulateReconcile(
+    clientId: string,
+    actor: BatchActor
+  ): Promise<ReconcileResult> {
+    const { payable } = await this.collectPendingPayments(clientId)
+    if (!payable.length) {
+      throw new BadRequestException(
+        'No hay pagos pendientes con datos bancarios completos para simular.'
+      )
+    }
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const parsed: BbvaPdfSummary = {
+      rows: payable.map(p => ({
+        titular: normalizeName(p.beneficiaryName),
+        documentNumber: (p.documentNumber ?? '').replace(/\D/g, ''),
+        amount: p.amount,
+        situacion: 'ABONO ENVIADO',
+        success: true,
+      })),
+      // N° de operación pseudo-único (9 dígitos) y fecha/hora actuales.
+      operationNumber: `SIM${String(now.getTime()).slice(-9)}`,
+      executedAt: `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`,
+    }
+    return this.reconcileParsedRows(clientId, parsed, actor)
+  }
+
+  /** Núcleo de conciliación: cruza los abonos parseados con los pendientes y aplica el pago. */
+  private async reconcileParsedRows(
+    clientId: string,
+    parsed: BbvaPdfSummary,
+    actor: BatchActor
+  ): Promise<ReconcileResult> {
     const { payable } = await this.collectPendingPayments(clientId)
     const used = new Set<number>() // índices de payable ya conciliados
     const result: ReconcileResult = {
