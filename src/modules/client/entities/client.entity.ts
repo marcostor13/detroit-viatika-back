@@ -23,6 +23,8 @@ export interface ClientDocument extends Document {
   logo: string
   limits?: ClientLimits
   notificationSettings?: ClientNotificationSettings
+  /** Cuenta de cargo de la empresa para el archivo de pagos BBVA (cabecera). */
+  paymentAccount?: string
 }
 
 export interface GetClientDocument extends ClientDocument {
@@ -54,6 +56,10 @@ export class Client {
 
   @Prop()
   logo: string
+
+  /** Cuenta de cargo de la empresa para el archivo de pagos BBVA (cabecera). */
+  @Prop({ type: String, default: '' })
+  paymentAccount?: string
 
   @Prop({
     type: {

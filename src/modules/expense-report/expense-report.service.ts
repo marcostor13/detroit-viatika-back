@@ -2528,6 +2528,39 @@ export class ExpenseReportService implements OnModuleInit {
     })
   }
 
+  /**
+   * Viáticos (rendiciones tipo viatico) aprobados y pendientes de pago, para el
+   * lote de pagos BBVA. Devuelve el saldo por pagar y los datos bancarios (de la
+   * solicitud si existen, si no del perfil del colaborador). VD-7.
+   */
+  async findBatchPayableViaticos(clientId: string) {
+    const rows = await this.expenseReportModel
+      .find({
+        clientId: new Types.ObjectId(clientId),
+        type: 'viatico',
+        status: { $in: ['viatico_approved', 'partially_paid'] },
+      })
+      .populate('userId', 'name email dni documentType bankAccount')
+      .lean()
+      .exec()
+
+    return rows
+      .map((r: any) => {
+        const remaining =
+          Number(r.viaticoAmount ?? 0) - Number(r.viaticoPaidAmount ?? 0)
+        return {
+          reportId: String(r._id),
+          user: r.userId,
+          remaining: Math.round(remaining * 100) / 100,
+          bankName: r.viaticoBankName ?? r.userId?.bankAccount?.bankName ?? '',
+          accountNumber:
+            r.viaticoAccountNumber ?? r.userId?.bankAccount?.accountNumber ?? '',
+          cci: r.viaticoCci ?? r.userId?.bankAccount?.cci ?? '',
+        }
+      })
+      .filter(x => x.remaining > 0.009)
+  }
+
   async findPendingReimbursementsByClient(clientId: string) {
     const cid = new Types.ObjectId(clientId)
     const noPayment = [
@@ -2543,7 +2576,7 @@ export class ExpenseReportService implements OnModuleInit {
         'settlement.type': 'reembolso',
         $or: noPayment,
       })
-      .populate('userId', 'name email bankAccount')
+      .populate('userId', 'name email bankAccount dni documentType')
       .sort({ updatedAt: -1 })
       .lean()
       .exec()
@@ -2562,7 +2595,7 @@ export class ExpenseReportService implements OnModuleInit {
         'settlement.type': { $ne: 'reembolso' },
         $or: noPayment,
       })
-      .populate('userId', 'name email bankAccount')
+      .populate('userId', 'name email bankAccount dni documentType')
       .populate('expenseIds', 'total status')
       .sort({ updatedAt: -1 })
       .lean()
@@ -2689,7 +2722,8 @@ export class ExpenseReportService implements OnModuleInit {
     dto: RegisterReimbursementPaymentDto,
     userRole: string,
     userPermissions?: { canApproveL2?: boolean },
-    tenantCtx?: { requestClientId: string; isSuperAdmin: boolean }
+    tenantCtx?: { requestClientId: string; isSuperAdmin: boolean },
+    opts?: { bypassReceipt?: boolean }
   ) {
     // El reembolso lo registra Tesorería (Contabilidad/SuperAdmin o delegado
     // con L2). El Coordinador queda excluido aunque tenga canApproveL2 o el
@@ -2705,7 +2739,7 @@ export class ExpenseReportService implements OnModuleInit {
       )
     }
 
-    if (dto.method !== 'efectivo' && !dto.paymentReceiptUrl) {
+    if (!opts?.bypassReceipt && dto.method !== 'efectivo' && !dto.paymentReceiptUrl) {
       throw new BadRequestException(
         'El comprobante es obligatorio para pagos por transferencia o cheque.'
       )
@@ -4196,7 +4230,7 @@ export class ExpenseReportService implements OnModuleInit {
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
-  async registerViaticoPayment(id: string, dto: PayViaticoDto, userRole: string, userPermissions?: any): Promise<ExpenseReportDocument> {
+  async registerViaticoPayment(id: string, dto: PayViaticoDto, userRole: string, userPermissions?: any, opts?: { bypassReceipt?: boolean }): Promise<ExpenseReportDocument> {
     const report = await this.expenseReportModel.findById(id)
     if (!report) throw new NotFoundException(`Viático ${id} no encontrado`)
     if (report.type !== 'viatico') throw new BadRequestException('Esta rendición no es de tipo viático')
@@ -4211,7 +4245,7 @@ export class ExpenseReportService implements OnModuleInit {
     const canPay = [ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.TESORERIA].includes(userRole as ROLES) || userPermissions?.canApproveL2 === true
     if (!canPay) throw new ForbiddenException('No tienes permiso para registrar pagos')
 
-    if (dto.method !== 'efectivo' && !dto.paymentReceiptUrl) throw new BadRequestException('El comprobante es obligatorio para pagos por transferencia o cheque.')
+    if (!opts?.bypassReceipt && dto.method !== 'efectivo' && !dto.paymentReceiptUrl) throw new BadRequestException('El comprobante es obligatorio para pagos por transferencia o cheque.')
     if (dto.paymentReceiptUrl) {
       const v = this.isValidViaticoReceipt(dto.paymentReceiptMimeType, dto.paymentReceiptFileName, dto.paymentReceiptSizeBytes)
       if (!v.ok) throw new BadRequestException(v.reason)

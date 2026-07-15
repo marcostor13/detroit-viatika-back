@@ -1305,6 +1305,38 @@ export class AdvanceService implements OnModuleInit {
       .exec()
   }
 
+  /**
+   * Anticipos (solicitud de fondos) aprobados y pendientes de pago, para el lote
+   * de pagos BBVA. Devuelve el saldo por pagar y los datos bancarios (de la
+   * solicitud si los trae, si no del perfil del colaborador). VD-7.
+   */
+  async findBatchPayableAdvances(clientId: string) {
+    const rows = await this.advanceModel
+      .find({
+        clientId: new Types.ObjectId(clientId),
+        status: { $in: ['approved', 'partially_paid'] },
+      })
+      .populate('userId', 'name email dni documentType bankAccount')
+      .sort({ createdAt: 1 })
+      .lean()
+      .exec()
+
+    return rows
+      .map((a: any) => {
+        const remaining = Number(a.amount ?? 0) - Number(a.paidAmount ?? 0)
+        return {
+          advanceId: String(a._id),
+          user: a.userId,
+          remaining: Math.round(remaining * 100) / 100,
+          bankName: a.requestBankName ?? a.userId?.bankAccount?.bankName ?? '',
+          accountNumber:
+            a.requestAccountNumber ?? a.userId?.bankAccount?.accountNumber ?? '',
+          cci: a.requestCci ?? a.userId?.bankAccount?.cci ?? '',
+        }
+      })
+      .filter(x => x.remaining > 0.009)
+  }
+
   /** Advances sin ExpenseReport vinculado (modelo legado sin fase de gastos iniciada). */
   async findOrphaned(
     clientId: string,
@@ -1596,7 +1628,8 @@ export class AdvanceService implements OnModuleInit {
     id: string,
     dto: PayAdvanceDto,
     userRole: string,
-    userPermissions?: any
+    userPermissions?: any,
+    opts?: { bypassReceipt?: boolean }
   ): Promise<Advance> {
     const advance = await this.advanceModel.findById(id)
     if (!advance) throw new NotFoundException(`Viático ${id} no encontrado`)
@@ -1645,7 +1678,9 @@ export class AdvanceService implements OnModuleInit {
 
     // El comprobante es obligatorio salvo cuando el pago es en efectivo. Si se
     // adjunta uno (en cualquier método), se valida formato/tamaño.
-    if (dto.method !== 'efectivo' && !dto.paymentReceiptUrl) {
+    // En pagos por lote BBVA (bypassReceipt) el respaldo es el archivo/PDF del
+    // banco, no un comprobante por transacción.
+    if (!opts?.bypassReceipt && dto.method !== 'efectivo' && !dto.paymentReceiptUrl) {
       throw new BadRequestException(
         'El comprobante es obligatorio para pagos por transferencia o cheque.'
       )

@@ -72,6 +72,11 @@ export class CreateUserDto {
   @IsOptional()
   dni?: string
 
+  /** Tipo de documento para pagos BBVA (R/L/P/E/M). Default L. */
+  @IsEnum(['R', 'L', 'P', 'E', 'M'])
+  @IsOptional()
+  documentType?: 'R' | 'L' | 'P' | 'E' | 'M'
+
   @IsString()
   @IsOptional()
   employeeCode?: string
