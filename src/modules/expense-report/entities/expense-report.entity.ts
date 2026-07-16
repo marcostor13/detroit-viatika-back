@@ -8,6 +8,17 @@ import {
   PaymentInfo,
   ReturnRecord,
 } from '../../advance/entities/advance.entity'
+import { ChainStep } from '../../advance/approval-chain.util'
+
+/** Forma Mongoose de un `ChainStep` (ver approval-chain.util.ts) para subdocumentos embebidos. */
+export const chainStepSchemaDefinition = {
+  level: { type: Number, required: true },
+  projectId: { type: Types.ObjectId, ref: 'Project', required: true },
+  projectRole: { type: String, enum: ['principal', 'seleccionado'], required: true },
+  approverIds: { type: [{ type: Types.ObjectId, ref: 'User' }], default: [] },
+  escalatedFrom: { type: Number, required: false },
+  _id: false,
+}
 
 export type ExpenseReportStatus =
   | 'solicited'
@@ -170,8 +181,8 @@ export interface ExpenseReportDocument extends Document {
   viaticoAmount?: number
   viaticoRequiredLevels?: number
   viaticoApprovalLevel?: number
-  /** Cadena ordenada de aprobadores (snapshot de User.approverIds al crear la solicitud). */
-  viaticoApproverChain?: Types.ObjectId[]
+  /** Cadena por centro de costo (N2 principal/seleccionado), snapshot al crear la solicitud. */
+  viaticoApproverChain?: ChainStep[]
   viaticoApprovalHistory?: ApprovalEntry[]
   viaticoPaidAmount?: number
   viaticoPayments?: AdvancePayment[]
@@ -196,13 +207,13 @@ export interface ExpenseReportDocument extends Document {
   viaticoCci?: string
   /** Orden de Trabajo (LIM-XXX-NNNNNN) a la que se imputa el gasto del viático. */
   viaticoOrdenTrabajoId?: Types.ObjectId
-  // Campos exclusivos de rendición directa (cadena de aprobación por centro de costo)
-  directaRequiredLevels?: number
-  directaApprovalLevel?: number
-  /** Cadena ordenada de aprobadores de centro de costo (snapshot al enviar la rendición). */
-  directaApproverChain?: Types.ObjectId[]
-  directaApprovalHistory?: ApprovalEntry[]
-  /** Orden de Trabajo (LIM-XXX-NNNNNN) elegida al crear la rendición directa; heredada por todos sus comprobantes. */
+  /**
+   * Orden de Trabajo (LIM-XXX-NNNNNN) elegida al crear la rendición directa;
+   * heredada por todos sus comprobantes.
+   * @remarks la cadena de aprobación de rendición directa ya NO vive aquí a
+   * nivel de reporte — se resuelve por comprobante, igual que una rendición
+   * normal (ver `Expense.approverChain`).
+   */
   directaOrdenTrabajoId?: Types.ObjectId
 }
 
@@ -472,9 +483,9 @@ export class ExpenseReport {
   @Prop({ type: Number, default: 0 })
   viaticoApprovalLevel?: number
 
-  /** Cadena ordenada de aprobadores (snapshot de User.approverIds al crear la solicitud). */
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: undefined })
-  viaticoApproverChain?: Types.ObjectId[]
+  /** Cadena por centro de costo (N2 principal/seleccionado), snapshot al crear la solicitud. */
+  @Prop({ type: [chainStepSchemaDefinition], default: undefined })
+  viaticoApproverChain?: ChainStep[]
 
   @Prop({
     type: [
@@ -594,34 +605,11 @@ export class ExpenseReport {
   @Prop({ type: Types.ObjectId, ref: 'OrdenTrabajo', required: false })
   viaticoOrdenTrabajoId?: Types.ObjectId
 
-  // ─── Campos exclusivos de rendición directa (cadena por centro de costo) ────
-
-  @Prop({ type: Number, default: 1 })
-  directaRequiredLevels?: number
-
-  @Prop({ type: Number, default: 0 })
-  directaApprovalLevel?: number
-
-  /** Cadena ordenada de aprobadores de centro de costo (snapshot al enviar la rendición). */
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: undefined })
-  directaApproverChain?: Types.ObjectId[]
-
-  @Prop({
-    type: [
-      {
-        level: { type: Number },
-        approvedBy: { type: String },
-        action: { type: String, enum: ['approved', 'rejected', 'resubmitted'] },
-        notes: { type: String },
-        date: { type: Date },
-        _id: false,
-      },
-    ],
-    default: [],
-  })
-  directaApprovalHistory?: ApprovalEntry[]
-
-  /** Orden de Trabajo (LIM-XXX-NNNNNN) elegida al crear la rendición directa; heredada por todos sus comprobantes. */
+  /**
+   * Orden de Trabajo (LIM-XXX-NNNNNN) elegida al crear la rendición directa;
+   * heredada por todos sus comprobantes. La cadena de aprobación de rendición
+   * directa ya no vive a nivel de reporte — ver `Expense.approverChain`.
+   */
   @Prop({ type: Types.ObjectId, ref: 'OrdenTrabajo', required: false })
   directaOrdenTrabajoId?: Types.ObjectId
 }

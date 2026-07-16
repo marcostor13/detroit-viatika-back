@@ -2,6 +2,15 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Document, Types } from 'mongoose'
 import { GetClientDocument } from '../../client/entities/client.entity'
 
+/**
+ * Aprobadores de un nivel explícito (identidad fija: 1, 2, 3…). Un nivel puede
+ * no existir para un centro de costo — se omite en la cadena, no se renumera.
+ */
+export interface ApproverLevel {
+  level: number
+  userIds: Types.ObjectId[]
+}
+
 export interface ProjectDocument extends Document {
   name: string
   code: string
@@ -25,8 +34,10 @@ export interface ProjectDocument extends Document {
   area?: string
   /** Marca si el centro de costo es administrativo (usa su propia cuenta, no la de proyecto). */
   esAdministrativo?: boolean
-  /** Aprobador de las solicitudes de viático que se imputan a este centro de costo. */
+  /** @deprecated usar approverLevels (nivel 2). Se conserva para migración. */
   approverId?: Types.ObjectId
+  /** Aprobadores por nivel explícito (N1, N2, N3…) de este centro de costo. */
+  approverLevels?: ApproverLevel[]
 }
 
 export interface GetProjectDocument {
@@ -79,9 +90,22 @@ export class Project {
   @Prop({ type: Boolean, default: false })
   esAdministrativo?: boolean
 
-  /** Aprobador de las solicitudes de viático que se imputan a este centro de costo. */
+  /** @deprecated usar approverLevels (nivel 2). Se conserva para migración. */
   @Prop({ type: Types.ObjectId, ref: 'User', required: false })
   approverId?: Types.ObjectId
+
+  /** Aprobadores por nivel explícito (N1, N2, N3…) de este centro de costo. */
+  @Prop({
+    type: [
+      {
+        level: { type: Number, required: true },
+        userIds: { type: [{ type: Types.ObjectId, ref: 'User' }], default: [] },
+        _id: false,
+      },
+    ],
+    default: undefined,
+  })
+  approverLevels?: ApproverLevel[]
 }
 
 export const ProjectSchema = SchemaFactory.createForClass(Project)

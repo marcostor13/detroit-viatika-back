@@ -39,7 +39,10 @@ import { CategoryService } from '../category/category.service'
 import {
   canActOnChain,
   advanceChain,
-  combineCostCenterChain,
+  buildSolicitudChain,
+  buildRendicionChain,
+  ChainStep,
+  ChainProject,
 } from '../advance/approval-chain.util'
 import { CreateViaticoExpenseReportDto } from './dto/create-viatico-expense-report.dto'
 import { PayViaticoDto } from './dto/pay-viatico.dto'
@@ -381,6 +384,20 @@ export class ExpenseReportService implements OnModuleInit {
         'Existen comprobantes rechazados. Corrígelos antes de aprobar la rendición.'
       )
     }
+
+    // Regla 1.4 (decisión "esperar a que todos completen"): la rendición solo
+    // pasa a Contabilidad cuando TODOS sus comprobantes completaron su propia
+    // cadena N1/N2/[N2 sel] — no se permite avance parcial.
+    const hasPendingChain = expenses.some((e: any) => {
+      const required = e?.requiredLevels ?? e?.approverChain?.length ?? 0
+      const level = e?.approvalLevel ?? 0
+      return level < required
+    })
+    if (hasPendingChain) {
+      throw new BadRequestException(
+        'Existen comprobantes que aún no completaron su cadena de aprobación.'
+      )
+    }
   }
 
   /**
@@ -625,34 +642,44 @@ export class ExpenseReportService implements OnModuleInit {
       // Orden de Trabajo imputada, para mostrarla en el detalle de la solicitud.
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
       .populate('directaOrdenTrabajoId', 'nombre costCenterId')
+      // Estado de la cadena por comprobante (regla 1.4) — para mostrar progreso
+      // agregado de rendición directa (ya no tiene cadena a nivel de reporte).
+      // `total` también poblado: reportExpensesTotal() lo necesita y antes de
+      // este populate expenseIds llegaban sin poblar (siempre devolvía 0).
+      .populate('expenseIds', 'total status approvalLevel requiredLevels contabilidadStatus')
       .sort({ createdAt: -1 })
       .exec()
   }
 
   /**
-   * Rendiciones a cargo de un Coordinador. Combina tres mecanismos, todos
-   * resueltos desde el aprobador del centro de costo (`Project.approverId`)
-   * pero cada uno con su propio snapshot:
+   * Rendiciones a cargo de un Coordinador. Combina mecanismos, cada uno con
+   * su propio snapshot:
    * - Rendición normal: `assignedCoordinatorId`, tomado al crear/editar la
    *   rendición (ver `resolveAssignedCoordinatorId`).
-   * - Viático: `viaticoApproverChain`, la cadena de aprobadores tomada al
-   *   solicitar el viático (ver `combineCostCenterChain`/`buildCostCenterChain`).
-   * - Rendición directa: `directaApproverChain`, la cadena de aprobadores del
-   *   centro de costo tomada al enviarla (ver `buildCostCenterChain`).
+   * - Viático: `viaticoApproverChain`, la cadena por centro de costo tomada
+   *   al solicitar el viático (ver `buildSolicitudChain`/`buildSolicitudCostCenterChain`).
+   * - Rendición directa: ya no tiene cadena a nivel de reporte — se resuelve
+   *   por comprobante (`Expense.approverChain`, ver `buildRendicionChain`);
+   *   se incluyen los reportes directa que tengan al menos un comprobante
+   *   con este coordinador en su cadena.
    * Ninguno usa la relación en vivo usuario→coordinador ni el aprobador actual
    * del centro de costo, así que si este cambia, las solicitudes ya creadas
    * conservan a su coordinador original.
    */
   async findAllByCoordinator(coordinatorId: string, clientId: string) {
     const coordinatorObjectId = new Types.ObjectId(coordinatorId)
+    const directaReportIds = await this.expenseModel
+      .find({ 'approverChain.approverIds': coordinatorObjectId })
+      .distinct('expenseReportId')
+      .exec()
     return await this.expenseReportModel
       .find({
         clientId: new Types.ObjectId(clientId),
         isCajaChica: { $ne: true },
         $or: [
           { assignedCoordinatorId: coordinatorObjectId },
-          { type: 'viatico', viaticoApproverChain: coordinatorObjectId },
-          { isDirecta: true, directaApproverChain: coordinatorObjectId },
+          { type: 'viatico', 'viaticoApproverChain.approverIds': coordinatorObjectId },
+          { isDirecta: true, _id: { $in: directaReportIds } },
         ],
       })
       .populate('userId', 'name email signature bankAccount')
@@ -677,7 +704,7 @@ export class ExpenseReportService implements OnModuleInit {
         clientId: new Types.ObjectId(clientId),
         isCajaChica: { $ne: true },
       })
-      .populate('expenseIds', 'total approvalCoord approvalCont')
+      .populate('expenseIds', 'total approvalLevel requiredLevels contabilidadStatus')
       .populate('createdBy', 'name email')
       .populate('viaticoLines.categoryId', 'name')
       .populate('projectId', 'code name')
@@ -711,7 +738,7 @@ export class ExpenseReportService implements OnModuleInit {
       })
       .populate(
         'expenseIds',
-        'total expenseType fechaEmision proveedor approvalCoord approvalCont'
+        'total expenseType fechaEmision proveedor approvalLevel requiredLevels contabilidadStatus'
       )
       .sort({ createdAt: -1 })
       .lean()
@@ -748,9 +775,7 @@ export class ExpenseReportService implements OnModuleInit {
    */
   private withDeletionApprovalFlag(report: any) {
     const hasApprovedExpense = (report.expenseIds ?? []).some(
-      (e: any) =>
-        e?.approvalCoord?.status === 'approved' ||
-        e?.approvalCont?.status === 'approved'
+      (e: any) => (e?.approvalLevel ?? 0) > 0 || e?.contabilidadStatus === 'approved'
     )
     // `createdByOther`: la solicitud la creó alguien distinto del dueño (ej.
     // Contabilidad creó una rendición directa para el colaborador). En ese caso
@@ -814,33 +839,11 @@ export class ExpenseReportService implements OnModuleInit {
       filter['expenseType'] = opts.type
     }
     if (opts.status && opts.status !== 'all') {
-      // El filtro se basa en la aprobación dual (approvalCont / approvalCoord),
-      // que es lo que la UI muestra como badge. Si un comprobante legacy no
-      // tiene aprobación dual, la UI lo muestra como "Pendiente" por defecto,
-      // por lo que el campo legacy `status` se ignora aquí para mantener
-      // coherencia visual.
-      if (opts.status === 'approved') {
-        filter['approvalCont.status'] = 'approved'
-        filter['approvalCoord.status'] = 'approved'
-      } else if (opts.status === 'rejected') {
-        and.push({
-          $or: [
-            { 'approvalCont.status': 'rejected' },
-            { 'approvalCoord.status': 'rejected' },
-          ],
-        })
-      } else if (opts.status === 'pending') {
-        filter['$nor'] = [
-          {
-            'approvalCont.status': 'approved',
-            'approvalCoord.status': 'approved',
-          },
-          { 'approvalCont.status': 'rejected' },
-          { 'approvalCoord.status': 'rejected' },
-        ]
-      } else {
-        filter['status'] = opts.status
-      }
+      // `status` en Expense refleja siempre computeCombinedStatus(cadena, contabilidad)
+      // desde cada mutación (approve/reject por documento, batch, resubmit), así
+      // que el filtro puede leerlo directo — ya no hace falta reconstruirlo desde
+      // los campos de aprobación dual (retirados, ver Expense.approverChain).
+      filter['status'] = opts.status
     }
     if (opts.search?.trim()) {
       // El "concepto" se guarda en distintos campos según el tipo de
@@ -981,9 +984,7 @@ export class ExpenseReportService implements OnModuleInit {
         select: 'nombre costCenterId',
         populate: { path: 'costCenterId', select: 'code name' },
       })
-      .populate('viaticoApproverChain', 'name email')
-      // Cadena de aprobadores de la rendición directa: nombres para la trazabilidad (VD-31).
-      .populate('directaApproverChain', 'name email')
+      .populate('viaticoApproverChain.approverIds', 'name email')
       .exec()
 
     if (!report) {
@@ -1119,7 +1120,7 @@ export class ExpenseReportService implements OnModuleInit {
     const dto = updateExpenseReportDto
     const existing = await this.expenseReportModel
       .findById(id)
-      .select('status isDirecta type clientId projectId userId')
+      .select('status isDirecta type clientId projectId userId expenseIds')
       .lean()
       .exec()
     if (!existing) {
@@ -1200,39 +1201,23 @@ export class ExpenseReportService implements OnModuleInit {
     if (dto.description !== undefined) $set.description = dto.description
     if (dto.budget !== undefined) $set.budget = dto.budget
 
-    // Rendición directa: al enviar (o reenviar tras rechazo), arma la cadena con
-    // el JEFE INMEDIATO del colaborador (sus aprobadores asignados) en vez de la
-    // cadena por centro de costo. El flujo es jefe inmediato → Contabilidad
-    // (VD-25): al completar esta cadena, `approveDirecta` la pasa a
-    // `pending_accounting`. Se recalcula en cada envío por si los aprobadores
-    // asignados cambiaron desde el último intento.
+    // Al enviar (o reenviar tras rechazo) una rendición normal, directa o de
+    // caja chica, se (re)construye la cadena de aprobación por documento
+    // (regla 1.4) de cada uno de sus comprobantes — ver `buildExpenseChains`.
+    // El viático tiene su propio flujo de creación/reenvío (createViatico/
+    // resubmitViatico) y no pasa por aquí.
     if (dto.status !== undefined) {
-      if (dto.status === 'submitted' && isDirecta) {
-        const profile = await this.userService.findTransactionalProfile(
-          (existing as any).userId.toString()
-        )
-        // El aprobador de una directa es el del CENTRO DE COSTO (Project.approverId),
-        // igual que en viáticos: al colaborador ya no se le asigna un coordinador
-        // personal, sino centros de costo en sus permisos (profile.projectIds), cada
-        // uno con su aprobador. Se usa el centro de costo del reporte si lo tiene; si
-        // no, el principal del colaborador (projectIds[0]). VD-36 (corrige VD-25, que
-        // enrutaba por approverIds).
-        const reportProjectId = (existing as any).projectId?.toString()
-        const selectedProjectId = reportProjectId || profile?.projectIds?.[0]
-        if (!selectedProjectId) {
-          throw new BadRequestException(
-            'El colaborador no tiene centros de costo asignados. Un administrador debe asignarle al menos uno en sus permisos antes de enviar la rendición directa.'
+      if (dto.status === 'submitted' && (existing as any).type !== 'viatico') {
+        const ownerId = (existing as any).userId?.toString()
+        const reportClientId = (existing as any).clientId?.toString()
+        if (ownerId && reportClientId) {
+          await this.buildExpenseChains(
+            ((existing as any).expenseIds ?? []) as Types.ObjectId[],
+            ownerId,
+            reportClientId
           )
         }
-        const chain = await this.buildCostCenterChain(
-          { projectIds: profile?.projectIds },
-          selectedProjectId,
-          (existing as any).clientId.toString()
-        )
-        $set.status = 'pending_l1'
-        $set.directaApproverChain = chain
-        $set.directaRequiredLevels = chain.length
-        $set.directaApprovalLevel = 0
+        $set.status = 'submitted'
       } else {
         $set.status = dto.status
       }
@@ -1584,18 +1569,17 @@ export class ExpenseReportService implements OnModuleInit {
         const ownerEmailKey = ownerEmail?.trim().toLowerCase() || ''
 
         if (isDirecta) {
-          // Rendición directa: pasa primero por la cadena de aprobadores de
-          // centro de costo (pending_l1) — igual que el viático — y solo llega
-          // a Contabilidad cuando esa cadena se completa (ver approveDirecta).
+          // Rendición directa: la cadena de aprobación ya no es a nivel de
+          // reporte — cada comprobante tiene la suya (ver `buildExpenseChains`).
+          // TODO(7.7): notificar a los approverIds del paso pendiente de cada
+          // comprobante recién construido, igual que `notifyViaticoCoordinator`.
           await this.notificationsService.create({
             userId: ownerId2,
             title: 'Rendición enviada para aprobación',
-            message: `Tu rendición "${fullyUpdatedReport.title}" fue enviada y está pendiente de la aprobación del centro de costo.`,
+            message: `Tu rendición "${fullyUpdatedReport.title}" fue enviada y está pendiente de aprobación por centro de costo.`,
             type: 'info',
             actionUrl: `/mis-rendiciones/${id}/detalle`,
           })
-
-          await this.notifyDirectaCoordinator(fullyUpdatedReport as ExpenseReportDocument)
         } else {
           // Flujo normal: admins in-app + coordinador (in-app + correo) + contabilidad.
           const admins = await this.userService.findAdminsByClient(clientId)
@@ -1811,8 +1795,8 @@ export class ExpenseReportService implements OnModuleInit {
   private async evaluateDeleteAuthorization(
     report: any,
     expenses: {
-      approvalCoord?: { status?: string }
-      approvalCont?: { status?: string }
+      approvalLevel?: number
+      contabilidadStatus?: string
     }[],
     actor: SolicitudDeleteActor
   ): Promise<{
@@ -1830,9 +1814,7 @@ export class ExpenseReportService implements OnModuleInit {
     const reportLevelApproved =
       !!report.coordinatorApprovedBy || !!report.contabilidadApprovedBy
     const anyExpenseApproved = expenses.some(
-      e =>
-        e.approvalCoord?.status === 'approved' ||
-        e.approvalCont?.status === 'approved'
+      e => (e.approvalLevel ?? 0) > 0 || e.contabilidadStatus === 'approved'
     )
 
     // Condiciones que restringen el borrado a solo Contabilidad/Superadmin (el
@@ -1925,7 +1907,7 @@ export class ExpenseReportService implements OnModuleInit {
     const expenses = expenseIds.length
       ? await this.expenseModel
         .find({ _id: { $in: expenseIds } })
-        .select('_id total file expenseType approvalCoord approvalCont')
+        .select('_id total file expenseType approvalLevel contabilidadStatus')
         .lean()
         .exec()
       : []
@@ -1980,7 +1962,7 @@ export class ExpenseReportService implements OnModuleInit {
     const expenses = expenseIds.length
       ? await this.expenseModel
         .find({ _id: { $in: expenseIds } })
-        .select('_id file approvalCoord approvalCont')
+        .select('_id file approvalLevel contabilidadStatus')
         .lean()
         .exec()
       : []
@@ -3717,26 +3699,110 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * Arma la cadena de aprobadores por centro de costo (usada por viático y por
-   * rendición directa): 1 nivel si el centro de costo elegido está entre los
-   * asignados al colaborador, 2 niveles (principal → elegido) si no lo está.
+   * Arma la cadena de aprobadores de la SOLICITUD de viático (regla 1.3):
+   * N2(seleccionado) si el centro está asignado al colaborador; N2(principal)
+   * → N2(seleccionado) si no lo está.
    */
-  private async buildCostCenterChain(
-    profile: { projectIds?: string[] },
+  private async buildSolicitudCostCenterChain(
+    profile: { projectIds?: string[]; primaryProjectId?: string },
     selectedProjectId: string,
+    creatorId: string,
     clientId: string
-  ): Promise<Types.ObjectId[]> {
+  ): Promise<ChainStep[]> {
     const assignedProjectIds = profile.projectIds ?? []
     const idsToLoad = [...new Set([...assignedProjectIds, selectedProjectId])]
     const projects = await this.projectService.findManyByIds(idsToLoad, clientId)
-    const approverByProjectId = new Map(
-      projects.map(p => [String(p._id), p.approverId as Types.ObjectId | undefined])
+    const projectById = new Map<string, ChainProject>(
+      projects.map(p => [String(p._id), p as unknown as ChainProject])
     )
-    return combineCostCenterChain({
+    return buildSolicitudChain({
       assignedProjectIds,
+      primaryProjectId: profile.primaryProjectId,
       selectedProjectId,
-      approverByProjectId,
+      creatorId,
+      projectById,
     })
+  }
+
+  /**
+   * (Re)construye la cadena de aprobación por documento (regla 1.4) de todos
+   * los comprobantes de un reporte (rendición normal, directa o caja chica) al
+   * enviarlo. Se recalcula en cada envío por si cambiaron los centros de costo
+   * asignados o los aprobadores desde el último intento; no toca comprobantes
+   * ya rechazados.
+   */
+  private async buildExpenseChains(
+    expenseIds: Types.ObjectId[],
+    ownerUserId: string,
+    clientId: string
+  ): Promise<void> {
+    if (expenseIds.length === 0) return
+    const profile = await this.userService.findTransactionalProfile(ownerUserId)
+    const assignedProjectIds = profile?.projectIds ?? []
+    const primaryProjectId = profile?.primaryProjectId
+
+    const expenses = await this.expenseModel
+      .find({ _id: { $in: expenseIds } })
+      .select('proyectId status')
+      .exec()
+
+    const projectIdsToLoad = [
+      ...new Set(
+        [...assignedProjectIds, ...expenses.map(e => e.proyectId?.toString())].filter(
+          (x): x is string => !!x
+        )
+      ),
+    ]
+    const projects = await this.projectService.findManyByIds(projectIdsToLoad, clientId)
+    const projectById = new Map<string, ChainProject>(
+      projects.map(p => [String(p._id), p as unknown as ChainProject])
+    )
+
+    for (const expense of expenses) {
+      if (expense.status === 'rejected') continue
+      const selectedProjectId = expense.proyectId?.toString()
+      if (!selectedProjectId) continue
+      const chain = buildRendicionChain({
+        assignedProjectIds,
+        primaryProjectId,
+        selectedProjectId,
+        creatorId: ownerUserId,
+        projectById,
+      })
+      expense.approverChain = chain
+      expense.requiredLevels = chain.length
+      expense.approvalLevel = 0
+      await expense.save()
+      if (chain.length > 0) {
+        void this.notifyExpensePendingApprovers(expense, chain[0])
+      }
+    }
+  }
+
+  /**
+   * Notifica (in-app) a los approverIds del paso actual de un comprobante que
+   * les toca revisarlo. Público: lo usa también `ExpenseService` al avanzar
+   * un paso de la cadena (approveByCoord/batchApproveByCoord).
+   */
+  async notifyExpensePendingApprovers(
+    expense: { _id: unknown; total?: number; expenseReportId?: unknown },
+    step: ChainStep
+  ): Promise<void> {
+    const expenseId = String((expense as any)._id)
+    for (const approverId of step.approverIds) {
+      try {
+        await this.notificationsService.create({
+          userId: approverId.toString(),
+          title: 'Comprobante pendiente de tu aprobación',
+          message: `Un comprobante de S/ ${Number((expense as any).total ?? 0).toFixed(2)} está pendiente de tu revisión (nivel ${step.level}).`,
+          type: 'info',
+          actionUrl: `/mis-rendiciones/${(expense as any).expenseReportId?.toString() ?? ''}/detalle`,
+          metadata: { expenseId, event: 'expense_pending_coord' },
+        })
+      } catch (err: unknown) {
+        this.logger.error(`Notif comprobante pendiente ${expenseId}: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
   }
 
   async createViatico(dto: CreateViaticoExpenseReportDto, userId: string, clientId: string): Promise<ExpenseReportDocument> {
@@ -3745,7 +3811,7 @@ export class ExpenseReportService implements OnModuleInit {
       throw new ForbiddenException('Debe registrar su firma digital en el perfil antes de solicitar viáticos.')
     }
 
-    const chain = await this.buildCostCenterChain(profile, dto.projectId, clientId)
+    const chain = await this.buildSolicitudCostCenterChain(profile, dto.projectId, userId, clientId)
 
     // `dto.amount` es el costo del viático (suma de líneas). El saldo heredado NO se
     // suma al anticipo: prefinancia ese costo igual que un saldo de la bolsa.
@@ -3754,6 +3820,12 @@ export class ExpenseReportService implements OnModuleInit {
       clientId
     )
 
+    // Regla 1.6: si todos los niveles del centro de costo quedaron omitidos
+    // (vacíos, o el creador era el único aprobador sin nivel superior), la
+    // cadena queda vacía — la solicitud pasa directo al gate de Contabilidad
+    // en vez de quedar en pending_l1 sin nadie que pueda avanzarla.
+    const initialStatus = chain.length === 0 ? 'pending_contabilidad' : 'pending_l1'
+
     const report = await this.expenseReportModel.create({
       type: 'viatico',
       userId: new Types.ObjectId(userId),
@@ -3761,7 +3833,7 @@ export class ExpenseReportService implements OnModuleInit {
       createdBy: new Types.ObjectId(userId),
       projectId: new Types.ObjectId(dto.projectId),
       description,
-      status: 'pending_l1',
+      status: initialStatus,
       expenseIds: [],
       budget: roundedSum,
       viaticoAmount: roundedSum,
@@ -3784,7 +3856,11 @@ export class ExpenseReportService implements OnModuleInit {
       ...(dto.ordenTrabajoId && { viaticoOrdenTrabajoId: new Types.ObjectId(dto.ordenTrabajoId) }),
     })
 
-    void this.notifyViaticoCoordinator(report as ExpenseReportDocument, userId, clientId)
+    if (initialStatus === 'pending_contabilidad') {
+      void this.notifyContabilidadPendingApproval(report as ExpenseReportDocument)
+    } else {
+      void this.notifyViaticoCoordinator(report as ExpenseReportDocument, userId, clientId)
+    }
 
     return this.findOne(String((report as any)._id)) as Promise<ExpenseReportDocument>
   }
@@ -3797,47 +3873,52 @@ export class ExpenseReportService implements OnModuleInit {
   private async notifyViaticoCoordinator(report: ExpenseReportDocument, collaboratorUserId: string, clientId: string): Promise<void> {
     const reportId = String((report as any)._id)
     const collaborator = await this.userService.findEmailNameClient(collaboratorUserId)
-    const coordId = report.viaticoApproverChain?.[report.viaticoApprovalLevel ?? 0]
-    if (!coordId) {
-      await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { status: 'skipped', sentAt: new Date(), errorMessage: 'Sin coordinador asignado' } } })
-      return
-    }
-    const coordinator = await this.userService.findEmailNameClient(coordId.toString())
-    if (!coordinator || !collaborator) {
-      await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Coordinador o colaborador no encontrado' } } })
-      return
-    }
-    if (coordinator.clientId && collaborator.clientId && coordinator.clientId.toString() !== collaborator.clientId.toString()) {
-      await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Coordinador de distinta empresa' } } })
+    const step = report.viaticoApproverChain?.[report.viaticoApprovalLevel ?? 0]
+    const approverIds = step?.approverIds ?? []
+    if (approverIds.length === 0) {
+      await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { status: 'skipped', sentAt: new Date(), errorMessage: 'Sin aprobador asignado en este paso' } } })
       return
     }
 
-    try {
-      await this.notificationsService.create({ userId: coordId.toString(), title: 'Nueva solicitud de viáticos pendiente', message: `${collaborator.name} solicitó viáticos — S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)}. Ingresa a Aprobaciones para revisar.`, type: 'info', actionUrl: '/viaticos', metadata: { reportId, collaboratorUserId, event: 'viatico_submitted' } })
-    } catch (err: unknown) { this.logger.error(`In-app notif viático ${reportId}: ${err instanceof Error ? err.message : String(err)}`) }
+    // Cualquiera de los aprobadores del paso puede completarlo — se notifica a todos.
+    for (const coordId of approverIds) {
+      const coordinator = await this.userService.findEmailNameClient(coordId.toString())
+      if (!coordinator || !collaborator) {
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Coordinador o colaborador no encontrado' } } })
+        continue
+      }
+      if (coordinator.clientId && collaborator.clientId && coordinator.clientId.toString() !== collaborator.clientId.toString()) {
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Coordinador de distinta empresa' } } })
+        continue
+      }
 
-    const coordEmailEnabled = await this.userService.isEmailEnabled(coordId.toString())
-    if (!coordEmailEnabled) {
-      await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Notificaciones por correo deshabilitadas' } } })
-      return
-    }
+      try {
+        await this.notificationsService.create({ userId: coordId.toString(), title: 'Nueva solicitud de viáticos pendiente', message: `${collaborator.name} solicitó viáticos — S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)}. Ingresa a Aprobaciones para revisar.`, type: 'info', actionUrl: '/viaticos', metadata: { reportId, collaboratorUserId, event: 'viatico_submitted' } })
+      } catch (err: unknown) { this.logger.error(`In-app notif viático ${reportId}: ${err instanceof Error ? err.message : String(err)}`) }
 
-    try {
-      const project = await this.projectService.findOne(report.projectId!.toString(), clientId)
-      const projectLabel = `[${project.code} - ${project.name}]`
-      const startStr = report.viaticoStartDate instanceof Date ? report.viaticoStartDate.toISOString().slice(0, 10) : String(report.viaticoStartDate ?? '').slice(0, 10)
-      const endStr = report.viaticoEndDate instanceof Date ? report.viaticoEndDate.toISOString().slice(0, 10) : String(report.viaticoEndDate ?? '').slice(0, 10)
-      await this.emailService.sendViaticoSolicitudToCoordinator(coordinator.email, {
-        clientId, coordinatorName: coordinator.name, collaboratorName: collaborator.name,
-        place: report.viaticoPlace ?? '', startDate: startStr, endDate: endStr,
-        totalFormatted: this.viaticoFormatMoney(report.viaticoAmount ?? 0),
-        projectLabel, platformUrl: this.emailService.buildAppUrl('/viaticos'),
-      })
-      await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'sent', sentAt: new Date() } } })
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      this.logger.error(`Correo coordinador viático ${reportId}: ${msg}`)
-      await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'failed', sentAt: new Date(), errorMessage: msg } } })
+      const coordEmailEnabled = await this.userService.isEmailEnabled(coordId.toString())
+      if (!coordEmailEnabled) {
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Notificaciones por correo deshabilitadas' } } })
+        continue
+      }
+
+      try {
+        const project = await this.projectService.findOne(report.projectId!.toString(), clientId)
+        const projectLabel = `[${project.code} - ${project.name}]`
+        const startStr = report.viaticoStartDate instanceof Date ? report.viaticoStartDate.toISOString().slice(0, 10) : String(report.viaticoStartDate ?? '').slice(0, 10)
+        const endStr = report.viaticoEndDate instanceof Date ? report.viaticoEndDate.toISOString().slice(0, 10) : String(report.viaticoEndDate ?? '').slice(0, 10)
+        await this.emailService.sendViaticoSolicitudToCoordinator(coordinator.email, {
+          clientId, coordinatorName: coordinator.name, collaboratorName: collaborator.name,
+          place: report.viaticoPlace ?? '', startDate: startStr, endDate: endStr,
+          totalFormatted: this.viaticoFormatMoney(report.viaticoAmount ?? 0),
+          projectLabel, platformUrl: this.emailService.buildAppUrl('/viaticos'),
+        })
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'sent', sentAt: new Date() } } })
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        this.logger.error(`Correo coordinador viático ${reportId}: ${msg}`)
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'failed', sentAt: new Date(), errorMessage: msg } } })
+      }
     }
   }
 
@@ -4051,95 +4132,12 @@ export class ExpenseReportService implements OnModuleInit {
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
-  /** Notifica al jefe inmediato al que le toca el turno de aprobar una rendición directa. */
-  private async notifyDirectaCoordinator(report: ExpenseReportDocument): Promise<void> {
-    const reportId = String((report as any)._id)
-    const coordId = report.directaApproverChain?.[report.directaApprovalLevel ?? 0]
-    if (!coordId) return
-    const coordinator = await this.userService.findEmailNameClient(coordId.toString())
-    if (!coordinator) return
-    try {
-      await this.notificationsService.create({
-        userId: coordId.toString(),
-        title: 'Nueva rendición directa pendiente',
-        message: `Una rendición directa (${report.title}) requiere tu aprobación como jefe inmediato.`,
-        type: 'info',
-        actionUrl: `/mis-rendiciones/${reportId}/detalle`,
-        metadata: { reportId, event: 'directa_submitted' },
-      })
-    } catch (err: unknown) {
-      this.logger.error(`In-app notif directa ${reportId}: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-
   /**
-   * Aprueba el nivel actual de la cadena del jefe inmediato de una rendición
-   * directa. Solo puede actuar el aprobador al que le toca el turno
-   * (directaApproverChain[directaApprovalLevel]) o Superadministrador.
-   * Al completar la cadena pasa a `pending_accounting` (gate final de
-   * Contabilidad): flujo jefe inmediato → Contabilidad (VD-25).
+   * @removed approveDirecta/rejectDirecta/notifyDirectaCoordinator — la
+   * aprobación de rendición directa ya no vive a nivel de reporte: usa la
+   * misma cadena por comprobante que la rendición normal (ver
+   * `buildExpenseChains` y `ExpenseService.approveByCoord/rejectByCoord`).
    */
-  async approveDirecta(id: string, opts: { approvedBy: string; notes?: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
-    const report = await this.expenseReportModel.findById(id)
-    if (!report) throw new NotFoundException(`Rendición ${id} no encontrada`)
-    if (!report.isDirecta) throw new BadRequestException('Esta rendición no es directa')
-    if (report.status !== 'pending_l1') throw new BadRequestException(`La rendición no está pendiente de aprobación (estado actual: ${report.status})`)
-
-    const chain = report.directaApproverChain ?? []
-    const approvalLevel = report.directaApprovalLevel ?? 0
-    if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
-      throw new ForbiddenException('No te corresponde aprobar esta rendición en este momento')
-    }
-
-    ;(report.directaApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
-
-    const { approvalLevel: nextLevel, isComplete } = advanceChain({ approvalLevel, requiredLevels: report.directaRequiredLevels ?? chain.length })
-    report.directaApprovalLevel = nextLevel
-
-    if (isComplete) {
-      await this.validateBeforeFinalApproval(id)
-      report.status = 'pending_accounting'
-      report.coordinatorApprovedAt = new Date()
-      report.coordinatorApprovedBy = new Types.ObjectId(actorId)
-      await report.save()
-      this.notificationsService.create({ userId: report.userId.toString(), title: 'Rendición en aprobación final', message: `Tu rendición "${report.title}" fue aprobada por tu jefe inmediato y está pendiente de la aprobación final de Contabilidad.`, type: 'info', actionUrl: `/mis-rendiciones/${id}/detalle` }).catch(() => {})
-      const fullyUpdatedReport = await this.findOne(id)
-      await this.notifyAccountingReportPendingApproval(id, fullyUpdatedReport)
-    } else {
-      await report.save()
-      this.notificationsService.create({ userId: report.userId.toString(), title: 'Rendición en revisión', message: `Tu rendición "${report.title}" fue aprobada en el nivel ${nextLevel} de ${report.directaRequiredLevels ?? chain.length} y está pendiente del siguiente aprobador.`, type: 'info', actionUrl: `/mis-rendiciones/${id}/detalle` }).catch(() => {})
-      this.notifyDirectaCoordinator(report as ExpenseReportDocument).catch(() => {})
-    }
-
-    return this.findOne(id) as Promise<ExpenseReportDocument>
-  }
-
-  /** Rechaza una rendición directa en su paso de cadena (aprobador de centro de costo al que le toca el turno, o Superadmin). */
-  async rejectDirecta(id: string, opts: { rejectedBy: string; rejectionReason: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
-    const report = await this.expenseReportModel.findById(id)
-    if (!report) throw new NotFoundException(`Rendición ${id} no encontrada`)
-    if (!report.isDirecta) throw new BadRequestException('Esta rendición no es directa')
-    if (report.status !== 'pending_l1') throw new BadRequestException(`No se puede rechazar en estado "${report.status}"`)
-
-    const chain = report.directaApproverChain ?? []
-    const approvalLevel = report.directaApprovalLevel ?? 0
-    if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
-      throw new ForbiddenException('No tienes permiso para rechazar esta rendición')
-    }
-    if ((opts.rejectionReason?.trim() ?? '').length < 10) {
-      throw new BadRequestException('El motivo de rechazo debe tener al menos 10 caracteres.')
-    }
-
-    ;(report.directaApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.rejectedBy, action: 'rejected', notes: opts.rejectionReason, date: new Date() })
-    report.status = 'rejected'
-    report.rejectionReason = opts.rejectionReason
-    report.rejectedByRole = 'coordinador'
-    await report.save()
-
-    this.notificationsService.create({ userId: report.userId.toString(), title: 'Rendición directa rechazada', message: `Tu rendición "${report.title}" fue rechazada. Motivo: ${opts.rejectionReason}`, type: 'error', actionUrl: `/mis-rendiciones/${id}/detalle` }).catch(() => {})
-
-    return this.findOne(id) as Promise<ExpenseReportDocument>
-  }
 
   async resubmitViatico(id: string, dto: ResubmitViaticoDto, actingUserId: string, clientId: string): Promise<ExpenseReportDocument> {
     const report = await this.expenseReportModel.findById(id)
@@ -4160,7 +4158,7 @@ export class ExpenseReportService implements OnModuleInit {
     // La cadena de aprobadores se recalcula desde el centro de costo elegido y
     // los centros de costo asignados actuales del colaborador (pueden haber
     // cambiado desde la solicitud original).
-    const chain = await this.buildCostCenterChain(profile, dto.projectId, clientId)
+    const chain = await this.buildSolicitudCostCenterChain(profile, dto.projectId, actingUserId, clientId)
 
     const wasEditing = report.status === 'pending_l1'
     report.viaticoPlace = dto.place.trim()
@@ -4180,7 +4178,8 @@ export class ExpenseReportService implements OnModuleInit {
     report.viaticoAmount = roundedSum
     report.budget = roundedSum
     report.description = description
-    report.status = 'pending_l1'
+    // Regla 1.6: cadena vacía (todos los niveles omitidos) va directo a Contabilidad.
+    report.status = chain.length === 0 ? 'pending_contabilidad' : 'pending_l1'
     report.viaticoApprovalLevel = 0
     report.viaticoApproverChain = chain
     report.viaticoRequiredLevels = chain.length
@@ -4191,7 +4190,11 @@ export class ExpenseReportService implements OnModuleInit {
     ;(report.viaticoApprovalHistory ?? []).push({ level: 0, approvedBy: actingUserId, action: 'resubmitted', notes: wasEditing ? 'Solicitud editada antes de aprobación' : 'Solicitud corregida y reenviada tras rechazo', date: new Date() })
     await report.save()
 
-    void this.notifyViaticoCoordinator(report as ExpenseReportDocument, actingUserId, clientId)
+    if (report.status === 'pending_contabilidad') {
+      void this.notifyContabilidadPendingApproval(report as ExpenseReportDocument)
+    } else {
+      void this.notifyViaticoCoordinator(report as ExpenseReportDocument, actingUserId, clientId)
+    }
 
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
@@ -4360,7 +4363,7 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('userId', 'name email bankAccount dni')
       .populate('projectId', 'code name')
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
-      .populate('viaticoApproverChain', 'name email')
+      .populate('viaticoApproverChain.approverIds', 'name email')
       .sort({ viaticoStartDate: -1, createdAt: -1 })
       .exec()
   }

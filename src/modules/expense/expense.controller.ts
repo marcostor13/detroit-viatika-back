@@ -447,9 +447,11 @@ export class ExpenseController {
 
   // ─── Aprobación dual: Coordinador / Contabilidad ─────────────────────────────
 
+  // La autorización real la hace canActOnChain en el servicio (¿el actor está
+  // en approverIds del paso pendiente?, o Superadmin) — el aprobador puede
+  // tener cualquier rol, por eso no se restringe por @Roles aquí.
   @Patch('invoice/:id/approve-coord')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COORDINADOR)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard)
   approveByCoord(
     @Param('id') id: string,
     @Request()
@@ -459,8 +461,7 @@ export class ExpenseController {
   }
 
   @Patch('invoice/:id/reject-coord')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COORDINADOR)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard)
   rejectByCoord(
     @Param('id') id: string,
     @Body() body: { reason: string },

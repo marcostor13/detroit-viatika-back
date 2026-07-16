@@ -82,6 +82,14 @@ export class ProjectService {
       av && typeof av === 'object' && av.name
         ? { _id: String(av._id), name: av.name, email: av.email }
         : undefined
+    const approverLevels = (project.approverLevels ?? []).map(lvl => ({
+      level: lvl.level,
+      userIds: (lvl.userIds ?? []).map((u: any) =>
+        u && typeof u === 'object' && u._id
+          ? { _id: String(u._id), name: u.name, email: u.email }
+          : { _id: String(u) }
+      ),
+    }))
     return {
       _id: project._id,
       name: project.name,
@@ -94,7 +102,20 @@ export class ProjectService {
       committedAdvanceTotal: project.committedAdvanceTotal ?? 0,
       approverId,
       approver,
+      approverLevels,
     }
+  }
+
+  private toApproverLevelDocs(
+    approverLevels: { level: number; userIds: string[] }[] | undefined
+  ): { level: number; userIds: Types.ObjectId[] }[] | undefined {
+    if (!approverLevels) return undefined
+    return approverLevels
+      .filter(lvl => lvl.userIds?.length)
+      .map(lvl => ({
+        level: lvl.level,
+        userIds: lvl.userIds.map(id => new Types.ObjectId(id)),
+      }))
   }
 
   /** Delta positivo al aprobar; negativo al registrar pago (Fase 3). */
@@ -137,6 +158,7 @@ export class ProjectService {
     const approverId = createProjectDto.approverId?.trim()
       ? new Types.ObjectId(createProjectDto.approverId.trim())
       : undefined
+    const approverLevels = this.toApproverLevelDocs(createProjectDto.approverLevels)
 
     let project: ProjectDocument
     try {
@@ -146,6 +168,7 @@ export class ProjectService {
         clientId,
         lineaNegocioId,
         approverId,
+        approverLevels,
       })
     } catch (error) {
       this.rethrowDuplicateCodeError(error, code)
@@ -187,6 +210,7 @@ export class ProjectService {
         .populate('clientId')
         .populate('lineaNegocioId', 'name code')
         .populate('approverId', 'name email')
+        .populate('approverLevels.userIds', 'name email')
         .exec(),
       this.projectModel.countDocuments(filter).exec(),
     ])
@@ -213,6 +237,19 @@ export class ProjectService {
     return this.toResponse(project)
   }
 
+  /**
+   * ¿Este usuario aparece como aprobador (cualquier nivel) en algún centro de
+   * costo de su empresa? Reemplaza el chequeo por rol "Coordinador" — la
+   * autorización real depende de estar en `approverLevels`, no del rol.
+   */
+  async isApproverForClient(userId: string, clientId: string): Promise<boolean> {
+    const exists = await this.projectModel.exists({
+      clientId: new Types.ObjectId(clientId),
+      'approverLevels.userIds': new Types.ObjectId(userId),
+    })
+    return !!exists
+  }
+
   /** Carga varios centros de costo por ID (usado al armar la cadena de aprobación). */
   async findManyByIds(ids: string[], clientId: string): Promise<ProjectDocument[]> {
     if (!ids.length) return []
@@ -220,7 +257,7 @@ export class ProjectService {
     const objectIds = ids.map(id => new Types.ObjectId(id))
     return this.projectModel
       .find({ _id: { $in: objectIds }, clientId: clientIdObject })
-      .select('approverId')
+      .select('approverLevels')
       .exec()
   }
 
@@ -255,6 +292,12 @@ export class ProjectService {
         : null
     }
 
+    // Niveles de aprobación: reemplazo completo del arreglo cuando se envía.
+    if ('approverLevels' in updatePayload) {
+      ;(updatePayload as Record<string, unknown>).approverLevels =
+        this.toApproverLevelDocs(updatePayload.approverLevels) ?? []
+    }
+
     if (updatePayload.code) {
       await this.ensureUniqueCode(updatePayload.code, clientIdObject, id)
     }
@@ -286,6 +329,7 @@ export class ProjectService {
         .populate('clientId')
         .populate('lineaNegocioId', 'name code')
         .populate('approverId', 'name email')
+        .populate('approverLevels.userIds', 'name email')
         .exec()
     } catch (error) {
       this.rethrowDuplicateCodeError(

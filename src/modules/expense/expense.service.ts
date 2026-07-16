@@ -10,6 +10,7 @@ import {
 import { CreateExpenseDto } from './dto/create-expense.dto'
 import { UpdateExpenseDto } from './dto/update-expense.dto'
 import { ConfigService } from '@nestjs/config'
+import { canActOnChain, advanceChain, ChainStep } from '../advance/approval-chain.util'
 import { Model, Types } from 'mongoose'
 import { Expense } from './entities/expense.entity'
 import { InjectModel } from '@nestjs/mongoose'
@@ -1902,27 +1903,33 @@ export class ExpenseService {
 
     // Corrección de un comprobante rechazado por el colaborador dueño: vuelve a
     // revisión. El front reenvía el `status: 'rejected'` original del documento, así
-    // que aquí se sobreescribe el estado y se reabren únicamente las aprobaciones que
-    // estaban rechazadas (la aprobación ya emitida por el otro rol se conserva).
+    // que aquí se sobreescribe el estado y se reabre únicamente el lado que estaba
+    // rechazado (la aprobación ya emitida por el otro rol se conserva). El lado
+    // "coordinador" ahora es una cadena de niveles: reabrirlo reinicia el turno al
+    // primer paso de la cadena ya construida (no se re-resuelve el centro de costo aquí).
     const existingAny = existing as unknown as {
       status?: string
-      approvalCoord?: { status?: string }
-      approvalCont?: { status?: string }
+      contabilidadStatus?: string
+      approverChain?: ChainStep[]
+      requiredLevels?: number
     }
     if (
       actor.roleName === ROLES.COLABORADOR &&
       existingAny.status === 'rejected'
     ) {
-      const coordRejected = existingAny.approvalCoord?.status === 'rejected'
-      const contRejected = existingAny.approvalCont?.status === 'rejected'
+      const contRejected = existingAny.contabilidadStatus === 'rejected'
+      const coordRejected = !contRejected
+      const nextCont = contRejected ? 'pending' : (existingAny.contabilidadStatus ?? 'pending')
+      if (coordRejected) {
+        updateDoc.approvalLevel = 0
+      }
+      if (contRejected) {
+        updateDoc.contabilidadStatus = 'pending'
+        updateDoc.contabilidadRejectionReason = ''
+      }
       const nextCoord = coordRejected
         ? 'pending'
-        : (existingAny.approvalCoord?.status ?? 'pending')
-      const nextCont = contRejected
-        ? 'pending'
-        : (existingAny.approvalCont?.status ?? 'pending')
-      if (coordRejected) updateDoc.approvalCoord = { status: 'pending' }
-      if (contRejected) updateDoc.approvalCont = { status: 'pending' }
+        : this.chainCoordStatus(existingAny)
       updateDoc.status = this.computeCombinedStatus(nextCoord, nextCont)
       updateDoc.rejectionReason = ''
       updateDoc.rejectedBy = ''
@@ -2456,7 +2463,18 @@ export class ExpenseService {
     }
   }
 
-  // ─── Aprobación dual: Coordinador / Contabilidad ─────────────────────────────
+  // ─── Aprobación por documento: cadena de centro de costo / Contabilidad ─────
+
+  /** 'approved' si la cadena N1/N2/[N2 sel] del comprobante ya se completó. */
+  private chainCoordStatus(expense: {
+    approverChain?: ChainStep[]
+    approvalLevel?: number
+    requiredLevels?: number
+  }): 'pending' | 'approved' {
+    const required = expense.requiredLevels ?? expense.approverChain?.length ?? 0
+    const level = expense.approvalLevel ?? 0
+    return level >= required ? 'approved' : 'pending'
+  }
 
   private computeCombinedStatus(
     coordStatus: string | undefined,
@@ -2469,6 +2487,12 @@ export class ExpenseService {
     return 'pending'
   }
 
+  /**
+   * Aprueba el paso actual de la cadena de centro de costo (regla 1.4) del
+   * comprobante. Solo puede actuar uno de los `approverIds` del paso
+   * pendiente, o Superadministrador. Cuando la cadena se completa, el
+   * comprobante queda a la espera del gate de Contabilidad.
+   */
   async approveByCoord(
     id: string,
     actor: ExpenseActorContext
@@ -2476,22 +2500,30 @@ export class ExpenseService {
     const expense = await this.loadExpenseOrThrow(id)
     this.assertCompanyAccess(expense, actor)
     const existing = expense as any
-    const contStatus = existing.approvalCont?.status ?? 'pending'
-    const newCombined = this.computeCombinedStatus('approved', contStatus)
+    const chain: ChainStep[] = existing.approverChain ?? []
+    const approvalLevel = existing.approvalLevel ?? 0
+    if (chain.length === 0) {
+      throw new BadRequestException(
+        'Este comprobante aún no tiene una cadena de aprobación asignada — la rendición debe estar enviada.'
+      )
+    }
+    if (!canActOnChain({ chain, approvalLevel, actorId: actor.userId, actorRole: actor.roleName })) {
+      throw new ForbiddenException('No te corresponde aprobar este comprobante en este momento')
+    }
+
+    const history = existing.approvalHistory ?? []
+    history.push({ level: approvalLevel + 1, approvedBy: actor.userId, action: 'approved', date: new Date() })
+    const { approvalLevel: nextLevel, isComplete } = advanceChain({
+      approvalLevel,
+      requiredLevels: existing.requiredLevels ?? chain.length,
+    })
+    const contStatus = existing.contabilidadStatus ?? 'pending'
+    const newCombined = this.computeCombinedStatus(isComplete ? 'approved' : 'pending', contStatus)
+
     const updated = await this.expenseRepository
       .findByIdAndUpdate(
         id,
-        {
-          $set: {
-            approvalCoord: {
-              status: 'approved',
-              userId: actor.userId,
-              userName: actor.roleName,
-              date: new Date(),
-            },
-            status: newCombined,
-          },
-        },
+        { $set: { approvalLevel: nextLevel, approvalHistory: history, status: newCombined } },
         { new: true }
       )
       .exec()
@@ -2500,11 +2532,19 @@ export class ExpenseService {
       .create({
         userId: String(expense.createdBy),
         title: 'Comprobante revisado por Coordinador',
-        message: `Tu comprobante fue aprobado por el coordinador.`,
+        message: isComplete
+          ? 'Tu comprobante fue aprobado por los aprobadores de centro de costo.'
+          : `Tu comprobante fue aprobado en el nivel ${nextLevel} de ${existing.requiredLevels ?? chain.length}.`,
         type: 'info',
         actionUrl: `/mis-rendiciones/${this.expenseReportIdString(expense)}/detalle`,
       })
       .catch(() => {})
+    if (!isComplete) {
+      const nextStep = chain[nextLevel]
+      if (nextStep) {
+        this.expenseReportService.notifyExpensePendingApprovers(updated, nextStep).catch(() => {})
+      }
+    }
     return updated
   }
 
@@ -2517,18 +2557,29 @@ export class ExpenseService {
       throw new BadRequestException('El motivo de rechazo es obligatorio.')
     const expense = await this.loadExpenseOrThrow(id)
     this.assertCompanyAccess(expense, actor)
+    const existing = expense as any
+    const chain: ChainStep[] = existing.approverChain ?? []
+    const approvalLevel = existing.approvalLevel ?? 0
+    const isAdminOverride = [ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD].includes(actor.roleName as any)
+    if (chain.length > 0) {
+      if (!canActOnChain({ chain, approvalLevel, actorId: actor.userId, actorRole: actor.roleName })) {
+        throw new ForbiddenException('No te corresponde rechazar este comprobante en este momento')
+      }
+    } else if (!isAdminOverride) {
+      // Sin cadena configurada para este centro de costo: no hay un aprobador
+      // de turno al que restringir, así que solo Administración/Contabilidad
+      // pueden rechazar (evita que cualquier usuario autenticado lo haga).
+      throw new ForbiddenException('No te corresponde rechazar este comprobante en este momento')
+    }
+    const history = existing.approvalHistory ?? []
+    history.push({ level: approvalLevel + 1, approvedBy: actor.userId, action: 'rejected', notes: reason, date: new Date() })
+
     const updated = await this.expenseRepository
       .findByIdAndUpdate(
         id,
         {
           $set: {
-            approvalCoord: {
-              status: 'rejected',
-              userId: actor.userId,
-              userName: actor.roleName,
-              date: new Date(),
-              reason,
-            },
+            approvalHistory: history,
             status: 'rejected',
             rejectionReason: reason,
           },
@@ -2549,6 +2600,7 @@ export class ExpenseService {
     return updated
   }
 
+  /** Gate final de Contabilidad, posterior a completar la cadena de centro de costo del comprobante. */
   async approveByContabilidad(
     id: string,
     actor: ExpenseActorContext
@@ -2556,19 +2608,16 @@ export class ExpenseService {
     const expense = await this.loadExpenseOrThrow(id)
     this.assertCompanyAccess(expense, actor)
     const existing = expense as any
-    const coordStatus = existing.approvalCoord?.status ?? 'pending'
+    const coordStatus = this.chainCoordStatus(existing)
     const newCombined = this.computeCombinedStatus(coordStatus, 'approved')
     const updated = await this.expenseRepository
       .findByIdAndUpdate(
         id,
         {
           $set: {
-            approvalCont: {
-              status: 'approved',
-              userId: actor.userId,
-              userName: actor.roleName,
-              date: new Date(),
-            },
+            contabilidadStatus: 'approved',
+            contabilidadApprovedBy: actor.userId,
+            contabilidadApprovedAt: new Date(),
             status: newCombined,
           },
         },
@@ -2602,13 +2651,10 @@ export class ExpenseService {
         id,
         {
           $set: {
-            approvalCont: {
-              status: 'rejected',
-              userId: actor.userId,
-              userName: actor.roleName,
-              date: new Date(),
-              reason,
-            },
+            contabilidadStatus: 'rejected',
+            contabilidadApprovedBy: actor.userId,
+            contabilidadApprovedAt: new Date(),
+            contabilidadRejectionReason: reason,
             status: 'rejected',
             rejectionReason: reason,
           },
@@ -2657,19 +2703,19 @@ export class ExpenseService {
 
     const expenses = await this.expenseRepository
       .find({ _id: { $in: ids } })
-      .select('approvalCont status')
+      .select('contabilidadStatus approverChain approvalLevel requiredLevels status')
       .lean()
       .exec()
 
     let count = 0
     for (const expense of expenses) {
       const e = expense as any
-      const contStatus = e.approvalCont?.status ?? 'pending'
-      if (contStatus === 'approved' && e.status !== 'approved') {
+      const contStatus = e.contabilidadStatus ?? 'pending'
+      const coordStatus = this.chainCoordStatus(e)
+      const combined = this.computeCombinedStatus(coordStatus, contStatus)
+      if (combined === 'approved' && e.status !== 'approved') {
         await this.expenseRepository
-          .findByIdAndUpdate(String(e._id), {
-            $set: { status: 'approved' },
-          })
+          .findByIdAndUpdate(String(e._id), { $set: { status: 'approved' } })
           .exec()
         count++
       }
@@ -2677,11 +2723,15 @@ export class ExpenseService {
     return { approved: count }
   }
 
+  /**
+   * Avanza el paso actual de la cadena de centro de costo de cada comprobante
+   * elegible del reporte en el que le toca el turno al actor — no salta
+   * niveles: un comprobante con más de un nivel pendiente solo avanza uno.
+   */
   async batchApproveByCoord(
     reportId: string,
     actor: ExpenseActorContext
   ): Promise<{ approved: number }> {
-    const { Model: ExpenseModel } = { Model: this.expenseRepository }
     const report = await (this.expenseReportService as any).expenseReportModel
       ?.findById(reportId)
       .select('expenseIds clientId')
@@ -2706,32 +2756,41 @@ export class ExpenseService {
 
     const expenses = await this.expenseRepository
       .find({ _id: { $in: ids } })
-      .select('approvalCoord approvalCont status createdBy expenseReportId')
-      .lean()
+      .select('approverChain approvalLevel requiredLevels approvalHistory contabilidadStatus status createdBy expenseReportId total')
       .exec()
 
     let count = 0
     for (const expense of expenses) {
       const e = expense as any
-      const contStatus = e.approvalCont?.status ?? 'pending'
-      const coordStatus = e.approvalCoord?.status ?? 'pending'
-      if (contStatus === 'approved' && coordStatus !== 'approved') {
-        const newCombined = this.computeCombinedStatus('approved', 'approved')
-        await this.expenseRepository
-          .findByIdAndUpdate(String(e._id), {
-            $set: {
-              approvalCoord: {
-                status: 'approved',
-                userId: actor.userId,
-                userName: actor.roleName,
-                date: new Date(),
-              },
-              status: newCombined,
-            },
-          })
-          .exec()
-        count++
+      const chain: ChainStep[] = e.approverChain ?? []
+      const approvalLevel = e.approvalLevel ?? 0
+      if (
+        chain.length === 0 ||
+        e.status === 'rejected' ||
+        !canActOnChain({ chain, approvalLevel, actorId: actor.userId, actorRole: actor.roleName })
+      ) {
+        continue
       }
+      const history = e.approvalHistory ?? []
+      history.push({ level: approvalLevel + 1, approvedBy: actor.userId, action: 'approved', date: new Date() })
+      const { approvalLevel: nextLevel, isComplete } = advanceChain({
+        approvalLevel,
+        requiredLevels: e.requiredLevels ?? chain.length,
+      })
+      const contStatus = e.contabilidadStatus ?? 'pending'
+      const newCombined = this.computeCombinedStatus(isComplete ? 'approved' : 'pending', contStatus)
+      await this.expenseRepository
+        .findByIdAndUpdate(String(e._id), {
+          $set: { approvalLevel: nextLevel, approvalHistory: history, status: newCombined },
+        })
+        .exec()
+      if (!isComplete) {
+        const nextStep = chain[nextLevel]
+        if (nextStep) {
+          this.expenseReportService.notifyExpensePendingApprovers(e, nextStep).catch(() => {})
+        }
+      }
+      count++
     }
     return { approved: count }
   }

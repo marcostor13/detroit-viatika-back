@@ -1,10 +1,25 @@
 import {
+  ArrayNotEmpty,
   IsBoolean,
+  IsInt,
   IsMongoId,
   IsNotEmpty,
   IsOptional,
   IsString,
+  Min,
+  ValidateNested,
 } from 'class-validator'
+import { Type } from 'class-transformer'
+
+export class ApproverLevelDto {
+  @IsInt()
+  @Min(1)
+  level: number
+
+  @IsMongoId({ each: true })
+  @ArrayNotEmpty()
+  userIds: string[]
+}
 
 export class CreateProjectDto {
   @IsString()
@@ -56,8 +71,14 @@ export class CreateProjectDto {
   @IsOptional()
   esAdministrativo?: boolean
 
-  /** Aprobador de las solicitudes de viático imputadas a este centro de costo. */
+  /** @deprecated usar approverLevels (nivel 2). */
   @IsMongoId()
   @IsOptional()
   approverId?: string
+
+  /** Aprobadores por nivel explícito (N1, N2, N3…) de este centro de costo. */
+  @ValidateNested({ each: true })
+  @Type(() => ApproverLevelDto)
+  @IsOptional()
+  approverLevels?: ApproverLevelDto[]
 }

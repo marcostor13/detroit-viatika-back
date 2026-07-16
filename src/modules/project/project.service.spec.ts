@@ -26,6 +26,7 @@ const expectedResponse = {
   clientName: mockProject.clientName,
   committedAdvanceTotal: mockProject.committedAdvanceTotal,
   client: mockProject.clientId,
+  approverLevels: [],
 }
 
 const makeQuery = (resolvedValue: any) => ({

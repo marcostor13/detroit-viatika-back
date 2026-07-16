@@ -418,6 +418,15 @@ export class UserService {
   async update(id: string, updateUserDto: UpdateUserDto) {
     const updateData: any = { ...updateUserDto }
 
+    if (updateUserDto.permissions?.primaryProjectId) {
+      const projectIds = updateUserDto.permissions.projectIds ?? []
+      if (!projectIds.includes(updateUserDto.permissions.primaryProjectId)) {
+        throw new BadRequestException(
+          'El centro de costo principal debe estar entre los centros de costo asignados.'
+        )
+      }
+    }
+
     if (updateData.roleId) {
       updateData.roleId = new Types.ObjectId(updateData.roleId)
     }
@@ -469,10 +478,13 @@ export class UserService {
     coordinatorId?: Types.ObjectId
     approverIds?: Types.ObjectId[]
     projectIds?: string[]
+    primaryProjectId?: string
   } | null> {
     const u = await this.userModel
       .findById(userId)
-      .select('signature coordinatorId approverIds permissions.projectIds')
+      .select(
+        'signature coordinatorId approverIds permissions.projectIds permissions.primaryProjectId'
+      )
       .exec()
     if (!u) return null
     return {
@@ -480,6 +492,7 @@ export class UserService {
       coordinatorId: u.coordinatorId,
       approverIds: u.approverIds,
       projectIds: u.permissions?.projectIds ?? [],
+      primaryProjectId: u.permissions?.primaryProjectId,
     }
   }
 

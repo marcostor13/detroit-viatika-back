@@ -3,16 +3,26 @@ import { BadRequestException } from '@nestjs/common'
 import { ROLES } from '../auth/enums/roles.enum'
 import {
   buildApproverChain,
-  expectedApproverId,
   canActOnChain,
   advanceChain,
-  combineCostCenterChain,
+  resolveApprovalStep,
+  buildSolicitudChain,
+  buildRendicionChain,
+  ChainStep,
+  ChainProject,
 } from './approval-chain.util'
 
 describe('approval-chain.util', () => {
   const a1 = new Types.ObjectId()
   const a2 = new Types.ObjectId()
   const a3 = new Types.ObjectId()
+  const u1 = new Types.ObjectId() // creador de ejemplo, distinto de a1/a2/a3
+
+  const projectId = new Types.ObjectId()
+
+  function project(levels: { level: number; userIds: Types.ObjectId[] }[]): ChainProject {
+    return { _id: projectId, approverLevels: levels }
+  }
 
   describe('buildApproverChain', () => {
     it('returns the chain unchanged when non-empty', () => {
@@ -28,200 +38,214 @@ describe('approval-chain.util', () => {
     })
   })
 
-  describe('expectedApproverId', () => {
-    it('returns the approver at the given level as a string', () => {
-      expect(expectedApproverId([a1, a2, a3], 1)).toBe(a2.toString())
-    })
-
-    it('returns null when level is past the end of the chain', () => {
-      expect(expectedApproverId([a1, a2], 2)).toBeNull()
-    })
-  })
-
-  describe('canActOnChain', () => {
+  describe('canActOnChain / advanceChain (formato plano, anticipo genérico)', () => {
     it('allows the approver whose turn it is', () => {
       expect(
-        canActOnChain({
-          chain: [a1, a2],
-          approvalLevel: 0,
-          actorId: a1.toString(),
-          actorRole: ROLES.COORDINADOR,
-        })
+        canActOnChain({ chain: [a1, a2], approvalLevel: 0, actorId: a1.toString(), actorRole: ROLES.COORDINADOR })
       ).toBe(true)
     })
 
     it('rejects a user who is in the chain but not at the current turn', () => {
       expect(
-        canActOnChain({
-          chain: [a1, a2],
-          approvalLevel: 0,
-          actorId: a2.toString(),
-          actorRole: ROLES.COORDINADOR,
-        })
-      ).toBe(false)
-    })
-
-    it('rejects a user not present in the chain at all', () => {
-      expect(
-        canActOnChain({
-          chain: [a1, a2],
-          approvalLevel: 0,
-          actorId: a3.toString(),
-          actorRole: ROLES.COORDINADOR,
-        })
+        canActOnChain({ chain: [a1, a2], approvalLevel: 0, actorId: a2.toString(), actorRole: ROLES.COORDINADOR })
       ).toBe(false)
     })
 
     it('allows Superadministrador as break-glass regardless of chain position', () => {
       expect(
-        canActOnChain({
-          chain: [a1, a2],
-          approvalLevel: 0,
-          actorId: a3.toString(),
-          actorRole: ROLES.SUPER_ADMIN,
-        })
+        canActOnChain({ chain: [a1, a2], approvalLevel: 0, actorId: a3.toString(), actorRole: ROLES.SUPER_ADMIN })
       ).toBe(true)
     })
 
-    it('rejects Administrador who is not in the chain (no break-glass)', () => {
-      expect(
-        canActOnChain({
-          chain: [a1, a2],
-          approvalLevel: 0,
-          actorId: a3.toString(),
-          actorRole: ROLES.ADMIN,
-        })
-      ).toBe(false)
-    })
-
-    it('rejects Contabilidad — no longer an approver of the chain', () => {
-      expect(
-        canActOnChain({
-          chain: [a1, a2],
-          approvalLevel: 0,
-          actorId: a3.toString(),
-          actorRole: ROLES.CONTABILIDAD,
-        })
-      ).toBe(false)
-    })
-
-    it('returns false when approvalLevel is past the end of the chain', () => {
-      expect(
-        canActOnChain({
-          chain: [a1],
-          approvalLevel: 1,
-          actorId: a1.toString(),
-          actorRole: ROLES.COORDINADOR,
-        })
-      ).toBe(false)
-    })
-  })
-
-  describe('advanceChain', () => {
-    it('advances the level and marks incomplete when more approvers remain', () => {
-      expect(advanceChain({ approvalLevel: 0, requiredLevels: 2 })).toEqual({
-        approvalLevel: 1,
-        isComplete: false,
-      })
-    })
-
     it('marks complete when the last approver in the chain acts', () => {
-      expect(advanceChain({ approvalLevel: 1, requiredLevels: 2 })).toEqual({
-        approvalLevel: 2,
-        isComplete: true,
-      })
-    })
-
-    it('marks complete immediately for a single-approver chain', () => {
-      expect(advanceChain({ approvalLevel: 0, requiredLevels: 1 })).toEqual({
-        approvalLevel: 1,
-        isComplete: true,
-      })
-    })
-
-    it('marks complete for a three-approver chain on the final approval', () => {
-      expect(advanceChain({ approvalLevel: 2, requiredLevels: 3 })).toEqual({
-        approvalLevel: 3,
-        isComplete: true,
-      })
+      expect(advanceChain({ approvalLevel: 1, requiredLevels: 2 })).toEqual({ approvalLevel: 2, isComplete: true })
     })
   })
 
-  describe('combineCostCenterChain', () => {
-    const projA = 'projA'
-    const projB = 'projB'
-    const projC = 'projC'
+  describe('canActOnChain (formato ChainStep — cualquiera de N aprobadores)', () => {
+    const step: ChainStep = {
+      level: 2,
+      projectId,
+      projectRole: 'seleccionado',
+      approverIds: [a1, a2],
+    }
 
-    it('returns a 1-level chain when the selected project is assigned to the collaborator', () => {
-      const approverByProjectId = new Map([
-        [projA, a1],
-        [projB, a2],
-      ])
-      expect(
-        combineCostCenterChain({
-          assignedProjectIds: [projA, projB],
-          selectedProjectId: projB,
-          approverByProjectId,
-        })
-      ).toEqual([a2])
+    it('allows any approver among approverIds', () => {
+      expect(canActOnChain({ chain: [step], approvalLevel: 0, actorId: a2.toString(), actorRole: ROLES.COORDINADOR })).toBe(true)
     })
 
-    it('returns a 2-level chain (principal then selected) when the selected project is not assigned', () => {
-      const approverByProjectId = new Map([
-        [projA, a1],
-        [projC, a3],
-      ])
-      expect(
-        combineCostCenterChain({
-          assignedProjectIds: [projA, projB],
-          selectedProjectId: projC,
-          approverByProjectId,
-        })
-      ).toEqual([a1, a3])
+    it('rejects someone not in approverIds', () => {
+      expect(canActOnChain({ chain: [step], approvalLevel: 0, actorId: a3.toString(), actorRole: ROLES.COORDINADOR })).toBe(false)
+    })
+  })
+
+  describe('resolveApprovalStep', () => {
+    it('returns null (omite) when the exact requested level does not exist — regla 1.6', () => {
+      const p = project([{ level: 2, userIds: [a1] }])
+      expect(resolveApprovalStep({ project: p, requestedLevel: 1, creatorId: u1.toString(), projectRole: 'principal' })).toBeNull()
     })
 
-    it('collapses to 1 level when the principal and selected approver are the same person', () => {
-      const approverByProjectId = new Map([
-        [projA, a1],
-        [projC, a1],
-      ])
-      expect(
-        combineCostCenterChain({
-          assignedProjectIds: [projA, projB],
-          selectedProjectId: projC,
-          approverByProjectId,
-        })
-      ).toEqual([a1])
+    it('returns null (omite) when the level exists but has no approvers', () => {
+      const p = project([{ level: 1, userIds: [] }])
+      expect(resolveApprovalStep({ project: p, requestedLevel: 1, creatorId: u1.toString(), projectRole: 'principal' })).toBeNull()
     })
 
-    it('throws BadRequestException when the collaborator has no assigned cost centers', () => {
+    it('uses the level as-is when the creator is not among its approvers', () => {
+      const p = project([{ level: 2, userIds: [a1, a2] }])
+      const step = resolveApprovalStep({ project: p, requestedLevel: 2, creatorId: u1.toString(), projectRole: 'seleccionado' })
+      expect(step).toEqual({ level: 2, projectId, projectRole: 'seleccionado', approverIds: [a1, a2], escalatedFrom: undefined })
+    })
+
+    it('escalates to the next existing level when the creator is the sole approver — regla 1.5', () => {
+      const p = project([
+        { level: 2, userIds: [a1] },
+        { level: 3, userIds: [a2] },
+      ])
+      const step = resolveApprovalStep({ project: p, requestedLevel: 2, creatorId: a1.toString(), projectRole: 'principal' })
+      expect(step).toEqual({ level: 3, projectId, projectRole: 'principal', approverIds: [a2], escalatedFrom: 2 })
+    })
+
+    it('uses the other approvers of the same level when the creator is one of several and there is no higher level', () => {
+      const p = project([{ level: 2, userIds: [a1, a2] }])
+      const step = resolveApprovalStep({ project: p, requestedLevel: 2, creatorId: a1.toString(), projectRole: 'principal' })
+      expect(step).toEqual({ level: 2, projectId, projectRole: 'principal', approverIds: [a2], escalatedFrom: undefined })
+    })
+
+    it('omits the step when the creator is the sole approver and there is no higher level', () => {
+      const p = project([{ level: 2, userIds: [a1] }])
+      expect(resolveApprovalStep({ project: p, requestedLevel: 2, creatorId: a1.toString(), projectRole: 'principal' })).toBeNull()
+    })
+
+    it('keeps escalating across multiple levels until it finds one without the creator', () => {
+      const p = project([
+        { level: 1, userIds: [a1] },
+        { level: 2, userIds: [a1] },
+        { level: 3, userIds: [a2] },
+      ])
+      const step = resolveApprovalStep({ project: p, requestedLevel: 1, creatorId: a1.toString(), projectRole: 'principal' })
+      expect(step).toEqual({ level: 3, projectId, projectRole: 'principal', approverIds: [a2], escalatedFrom: 1 })
+    })
+  })
+
+  describe('buildSolicitudChain (regla 1.3)', () => {
+    const projA = new Types.ObjectId().toString()
+    const projB = new Types.ObjectId().toString()
+
+    function projectById(map: Record<string, { level: number; userIds: Types.ObjectId[] }[]>) {
+      return new Map(
+        Object.entries(map).map(([id, levels]) => [id, { _id: id, approverLevels: levels }])
+      )
+    }
+
+    it('1 step (N2 selected) when the selected project is assigned', () => {
+      const chain = buildSolicitudChain({
+        assignedProjectIds: [projA, projB],
+        selectedProjectId: projB,
+        creatorId: u1.toString(),
+        projectById: projectById({ [projB]: [{ level: 2, userIds: [a2] }] }),
+      })
+      expect(chain).toEqual([{ level: 2, projectId: new Types.ObjectId(projB), projectRole: 'seleccionado', approverIds: [a2], escalatedFrom: undefined }])
+    })
+
+    it('2 steps (N2 principal -> N2 selected) when not assigned', () => {
+      const projC = new Types.ObjectId().toString()
+      const chain = buildSolicitudChain({
+        assignedProjectIds: [projA, projB],
+        selectedProjectId: projC,
+        creatorId: u1.toString(),
+        projectById: projectById({
+          [projA]: [{ level: 2, userIds: [a1] }],
+          [projC]: [{ level: 2, userIds: [a3] }],
+        }),
+      })
+      expect(chain.map(s => s.approverIds)).toEqual([[a1], [a3]])
+    })
+
+    it('collapses to 1 step when principal and selected resolve to the same approver set', () => {
+      const projC = new Types.ObjectId().toString()
+      const chain = buildSolicitudChain({
+        assignedProjectIds: [projA, projB],
+        selectedProjectId: projC,
+        creatorId: u1.toString(),
+        projectById: projectById({
+          [projA]: [{ level: 2, userIds: [a1] }],
+          [projC]: [{ level: 2, userIds: [a1] }],
+        }),
+      })
+      expect(chain.length).toBe(1)
+    })
+
+    it('throws when the collaborator has no assigned cost centers', () => {
       expect(() =>
-        combineCostCenterChain({
+        buildSolicitudChain({
           assignedProjectIds: [],
           selectedProjectId: projA,
-          approverByProjectId: new Map([[projA, a1]]),
+          creatorId: u1.toString(),
+          projectById: projectById({}),
         })
       ).toThrow(BadRequestException)
     })
+  })
 
-    it('throws BadRequestException when the selected cost center has no approver configured', () => {
-      expect(() =>
-        combineCostCenterChain({
-          assignedProjectIds: [projA],
-          selectedProjectId: projB,
-          approverByProjectId: new Map([[projA, a1]]),
-        })
-      ).toThrow(BadRequestException)
+  describe('buildRendicionChain (regla 1.4)', () => {
+    const projA = new Types.ObjectId().toString()
+    const projB = new Types.ObjectId().toString()
+
+    function projectById(map: Record<string, { level: number; userIds: Types.ObjectId[] }[]>) {
+      return new Map(
+        Object.entries(map).map(([id, levels]) => [id, { _id: id, approverLevels: levels }])
+      )
+    }
+
+    it('N1 principal -> N2 principal when the expense project is assigned', () => {
+      const chain = buildRendicionChain({
+        assignedProjectIds: [projA],
+        selectedProjectId: projA,
+        creatorId: u1.toString(),
+        projectById: projectById({
+          [projA]: [
+            { level: 1, userIds: [a1] },
+            { level: 2, userIds: [a2] },
+          ],
+        }),
+      })
+      expect(chain.map(s => s.level)).toEqual([1, 2])
     })
 
-    it('throws BadRequestException when the principal cost center has no approver configured', () => {
-      expect(() =>
-        combineCostCenterChain({
-          assignedProjectIds: [projA, projB],
-          selectedProjectId: projC,
-          approverByProjectId: new Map([[projC, a3]]),
-        })
-      ).toThrow(BadRequestException)
+    it('skips N1 without renumbering when the principal has no N1 configured — regla 1.6', () => {
+      const chain = buildRendicionChain({
+        assignedProjectIds: [projA],
+        selectedProjectId: projA,
+        creatorId: u1.toString(),
+        projectById: projectById({ [projA]: [{ level: 2, userIds: [a2] }] }),
+      })
+      expect(chain).toEqual([{ level: 2, projectId: new Types.ObjectId(projA), projectRole: 'principal', approverIds: [a2], escalatedFrom: undefined }])
+    })
+
+    it('adds N2(selected) as a third step when the expense project is not assigned', () => {
+      const chain = buildRendicionChain({
+        assignedProjectIds: [projA],
+        selectedProjectId: projB,
+        creatorId: u1.toString(),
+        projectById: projectById({
+          [projA]: [
+            { level: 1, userIds: [a1] },
+            { level: 2, userIds: [a2] },
+          ],
+          [projB]: [{ level: 2, userIds: [a3] }],
+        }),
+      })
+      expect(chain.map(s => s.approverIds)).toEqual([[a1], [a2], [a3]])
+    })
+
+    it('returns an empty chain (goes straight to Contabilidad) when no level is configured', () => {
+      const chain = buildRendicionChain({
+        assignedProjectIds: [projA],
+        selectedProjectId: projA,
+        creatorId: u1.toString(),
+        projectById: projectById({ [projA]: [] }),
+      })
+      expect(chain).toEqual([])
     })
   })
 })

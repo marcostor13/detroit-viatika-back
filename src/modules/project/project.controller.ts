@@ -74,6 +74,29 @@ export class ProjectController {
     return result
   }
 
+  /**
+   * ¿El usuario autenticado es aprobador (cualquier nivel) de algún centro de
+   * costo de su empresa? Reemplaza el chequeo por rol "Coordinador" en el
+   * frontend (sidebar, dashboard, detalle de rendición) — no cubre el
+   * anticipo genérico legacy (`Advance.approverIds`), fuera de alcance.
+   */
+  @Get('me/am-i-approver')
+  @Roles(
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.COLABORADOR,
+    ROLES.CONTABILIDAD,
+    ROLES.TESORERIA
+  )
+  async amIApprover(@Request() req: any) {
+    const userId = req.user._id || req.user.sub
+    const rawClient = req.user?.clientId
+    const clientId =
+      rawClient?._id?.toString?.() ?? rawClient?.toString?.() ?? String(rawClient ?? '')
+    const isApprover = await this.projectService.isApproverForClient(userId, clientId)
+    return { isApprover }
+  }
+
   @Get('bulk-import/template')
   async downloadTemplate() {
     const xlsx = await import('xlsx')

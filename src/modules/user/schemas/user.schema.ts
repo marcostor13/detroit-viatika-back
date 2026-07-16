@@ -15,11 +15,13 @@ export interface UserPermissions {
   /** Categorías sueltas asignadas directamente al usuario. */
   categoryIds: string[]
   /**
-   * Centros de costo (Project) asignados al colaborador, ORDENADOS: el primer
-   * elemento es su centro de costo principal — el que se usa como primer
-   * aprobador cuando solicita hacia un centro de costo que no tiene asignado.
+   * Centros de costo (Project) asignados al colaborador. `primaryProjectId`
+   * es la marca explícita del principal; si no está definida, se usa
+   * `projectIds[0]` como fallback (retrocompatibilidad).
    */
   projectIds: string[]
+  /** Centro de costo principal explícito. Debe estar contenido en `projectIds`. */
+  primaryProjectId?: string
 }
 
 export interface UserDocument extends Document {
@@ -112,6 +114,7 @@ export class User {
       canApproveL2: { type: Boolean, default: false },
       categoryIds: { type: [String], default: [] },
       projectIds: { type: [String], default: [] },
+      primaryProjectId: { type: String, required: false },
       _id: false,
     },
     default: () => ({

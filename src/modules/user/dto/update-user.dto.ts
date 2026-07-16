@@ -45,11 +45,20 @@ export class UpdatePermissionsDto {
   @IsOptional()
   categoryIds?: string[]
 
-  /** Centros de costo asignados, ORDENADOS: el primero es el principal del colaborador. */
+  /**
+   * Centros de costo asignados. El orden ya no determina el principal de forma
+   * implícita — ver `primaryProjectId`. Se mantiene `projectIds[0]` como
+   * fallback si `primaryProjectId` no está definido (retrocompatibilidad).
+   */
   @IsArray()
   @IsMongoId({ each: true })
   @IsOptional()
   projectIds?: string[]
+
+  /** Centro de costo principal explícito. Debe estar contenido en `projectIds`. */
+  @IsMongoId()
+  @IsOptional()
+  primaryProjectId?: string
 }
 
 export class UpdateUserDto {

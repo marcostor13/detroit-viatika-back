@@ -118,19 +118,26 @@ export class AdvanceService implements OnModuleInit {
     }
   }
 
+  /**
+   * Retirado (decisión 7.0.1, riesgo 2): la creación de solicitudes de
+   * viático por este módulo (con lugar/fechas/centro de costo) fue
+   * reemplazada por el flujo unificado `POST /expense-report/viatico`
+   * (`ExpenseReportService.createViatico`), que ya usa la cadena de centro
+   * de costo con niveles explícitos. `POST /advance` sigue vivo solo para
+   * el anticipo genérico (`createSimpleAdvance`) — sin centro de costo, sin
+   * equivalente en ExpenseReport.
+   */
   async create(dto: CreateAdvanceDto): Promise<Advance> {
     if (!dto.clientId) throw new BadRequestException('clientId es requerido')
     if (!dto.userId) throw new BadRequestException('userId es requerido')
 
-    if (this.isViaticoSolicitudPartial(dto)) {
+    if (this.isViaticoSolicitud(dto) || this.isViaticoSolicitudPartial(dto)) {
       throw new BadRequestException(
-        'Solicitud de viáticos incompleta: lugar, fecha inicio, fecha fin y centro de costo son obligatorios.'
+        'La solicitud de viáticos con centro de costo ya no se crea por este endpoint. Use POST /expense-report/viatico.'
       )
     }
 
-    return this.isViaticoSolicitud(dto)
-      ? await this.createViaticoSolicitud(dto)
-      : await this.createSimpleAdvance(dto)
+    return await this.createSimpleAdvance(dto)
   }
 
   /**

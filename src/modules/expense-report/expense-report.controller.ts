@@ -707,11 +707,12 @@ export class ExpenseReportController {
   }
 
   /**
-   * Aprueba el nivel actual de la cadena de aprobadores del viático. Solo el
-   * aprobador (Coordinador) al que le toca el turno, o Superadmin.
+   * Aprueba el nivel actual de la cadena de aprobadores del viático. La
+   * autorización real la hace `canActOnChain` en el servicio (¿el actor está
+   * en approverIds del paso pendiente?, o Superadmin) — el aprobador puede
+   * tener cualquier rol, por eso no se restringe por @Roles aquí.
    */
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
+  @UseGuards(AuthGuard('jwt'))
   @Patch(':id/viatico/approve')
   async approveViatico(
     @Param('id') id: string,
@@ -751,9 +752,12 @@ export class ExpenseReportController {
     return result
   }
 
-  /** Rechazar viático (aprobador al que le toca el turno, Contabilidad en el gate final, o Superadmin). */
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.COORDINADOR, ROLES.CONTABILIDAD, ROLES.SUPER_ADMIN)
+  /**
+   * Rechazar viático. El servicio ya distingue el caso (aprobador del paso
+   * pendiente vía canActOnChain, o Contabilidad/Superadmin en el gate final)
+   * — no se restringe por @Roles aquí.
+   */
+  @UseGuards(AuthGuard('jwt'))
   @Patch(':id/viatico/reject')
   async rejectViatico(
     @Param('id') id: string,
@@ -773,50 +777,11 @@ export class ExpenseReportController {
   }
 
   /**
-   * Aprueba el nivel actual de la cadena de aprobadores de centro de costo de
-   * una rendición directa. Solo el aprobador (Coordinador) al que le toca el
-   * turno, o Superadmin.
+   * @removed :id/directa/approve y :id/directa/reject — la aprobación de
+   * rendición directa ya no es a nivel de reporte. Usa los mismos endpoints
+   * por comprobante que la rendición normal: PATCH invoice/:id/approve-coord
+   * y PATCH invoice/:id/reject-coord (módulo expense).
    */
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
-  @Patch(':id/directa/approve')
-  async approveDirecta(
-    @Param('id') id: string,
-    @Body() body: { notes?: string },
-    @Request() req: any
-  ) {
-    const actorId = String(req.user._id || req.user.sub)
-    const actorRole = req.user?.roles?.[0] ?? ''
-    const result = await this.expenseReportService.approveDirecta(
-      id,
-      { approvedBy: actorId, notes: body.notes },
-      actorId,
-      actorRole
-    )
-    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'approve_directa', module: 'rendiciones', entityId: id, clientId: req.user.clientId })
-    return result
-  }
-
-  /** Rechazar rendición directa (aprobador de centro de costo al que le toca el turno, o Superadmin). */
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
-  @Patch(':id/directa/reject')
-  async rejectDirecta(
-    @Param('id') id: string,
-    @Body() body: { rejectionReason: string },
-    @Request() req: any
-  ) {
-    const actorId = String(req.user._id || req.user.sub)
-    const actorRole = req.user?.roles?.[0] ?? ''
-    const result = await this.expenseReportService.rejectDirecta(
-      id,
-      { rejectedBy: actorId, rejectionReason: body.rejectionReason },
-      actorId,
-      actorRole
-    )
-    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'reject_directa', module: 'rendiciones', entityId: id, details: body.rejectionReason, clientId: req.user.clientId })
-    return result
-  }
 
   /** Reenviar viático tras rechazo. */
   @UseGuards(AuthGuard('jwt'))

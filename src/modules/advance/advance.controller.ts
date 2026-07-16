@@ -129,11 +129,11 @@ export class AdvanceController {
   }
 
   /**
-   * Aprueba el nivel actual de la cadena de aprobadores. Solo puede actuar el
-   * aprobador (Coordinador) al que le toca el turno, o Superadmin (llave maestra).
+   * Aprueba el nivel actual de la cadena de aprobadores. La autorización real
+   * la hace `canActOnChain` (¿el actor está en el paso pendiente?, o
+   * Superadmin) — no se restringe por @Roles aquí.
    */
   @Patch(':id/approve')
-  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
   async approve(
     @Param('id') id: string,
     @Body() dto: ApproveAdvanceDto,
@@ -154,9 +154,8 @@ export class AdvanceController {
     return result
   }
 
-  /** Rechazo (aprobador al que le toca el turno, o Superadmin) */
+  /** Rechazo (aprobador al que le toca el turno, o Superadmin) — autorización real vía canActOnChain. */
   @Patch(':id/reject')
-  @Roles(ROLES.COORDINADOR, ROLES.SUPER_ADMIN)
   async reject(
     @Param('id') id: string,
     @Body() dto: RejectAdvanceDto,

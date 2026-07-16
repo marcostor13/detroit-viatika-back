@@ -1,5 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Document, Types } from 'mongoose'
+import { ApprovalEntry } from '../../advance/entities/advance.entity'
+import { ChainStep } from '../../advance/approval-chain.util'
+import { chainStepSchemaDefinition } from '../../expense-report/entities/expense-report.entity'
 
 export type ExpenseStatus =
   | 'pending'
@@ -123,8 +126,16 @@ export interface ExpenseDocument extends Document {
   internalCode?: string
   comentario?: string
   placaVehiculo?: string
-  approvalCoord?: ExpenseApproval
-  approvalCont?: ExpenseApproval
+  /** Cadena de aprobación por documento (regla 1.4): N1(principal)→N2(principal)→[N2(seleccionado)]. */
+  approverChain?: ChainStep[]
+  approvalLevel?: number
+  requiredLevels?: number
+  approvalHistory?: ApprovalEntry[]
+  /** Gate final de Contabilidad, posterior a completar approverChain. */
+  contabilidadStatus?: 'pending' | 'approved' | 'rejected'
+  contabilidadApprovedBy?: string
+  contabilidadApprovedAt?: Date
+  contabilidadRejectionReason?: string
   // --- Desglose contable (asientos Contanet) ---
   /** Base imponible afecta al IGV (valor venta gravado). */
   baseAfecta?: number
@@ -300,39 +311,43 @@ export class Expense {
   @Prop({ type: String, required: false })
   placaVehiculo?: string
 
-  @Prop({
-    type: {
-      status: {
-        type: String,
-        enum: ['pending', 'approved', 'rejected'],
-        default: 'pending',
-      },
-      userId: { type: String },
-      userName: { type: String },
-      date: { type: Date },
-      reason: { type: String },
-      _id: false,
-    },
-    required: false,
-  })
-  approvalCoord?: ExpenseApproval
+  /** Cadena de aprobación por documento (regla 1.4): N1(principal)→N2(principal)→[N2(seleccionado)]. */
+  @Prop({ type: [chainStepSchemaDefinition], default: undefined })
+  approverChain?: ChainStep[]
+
+  @Prop({ type: Number, default: 0 })
+  approvalLevel?: number
+
+  @Prop({ type: Number, default: 0 })
+  requiredLevels?: number
 
   @Prop({
-    type: {
-      status: {
-        type: String,
-        enum: ['pending', 'approved', 'rejected'],
-        default: 'pending',
+    type: [
+      {
+        level: { type: Number },
+        approvedBy: { type: String },
+        action: { type: String, enum: ['approved', 'rejected', 'resubmitted'] },
+        notes: { type: String },
+        date: { type: Date },
+        _id: false,
       },
-      userId: { type: String },
-      userName: { type: String },
-      date: { type: Date },
-      reason: { type: String },
-      _id: false,
-    },
-    required: false,
+    ],
+    default: [],
   })
-  approvalCont?: ExpenseApproval
+  approvalHistory?: ApprovalEntry[]
+
+  /** Gate final de Contabilidad, posterior a completar approverChain. */
+  @Prop({ type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' })
+  contabilidadStatus?: 'pending' | 'approved' | 'rejected'
+
+  @Prop({ type: String, required: false })
+  contabilidadApprovedBy?: string
+
+  @Prop({ type: Date, required: false })
+  contabilidadApprovedAt?: Date
+
+  @Prop({ type: String, required: false })
+  contabilidadRejectionReason?: string
 
   /** Sub-tipo para 'otros_gastos': TK (Ticket), RC (Recibos diversos), DJ (Declaración Jurada), OT (Otros) */
   @Prop({ type: String, required: false })
