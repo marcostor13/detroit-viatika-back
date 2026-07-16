@@ -7,6 +7,7 @@ import { Document, Types } from 'mongoose'
  */
 export interface CategoryProfileDocument extends Document {
   name: string
+  description?: string
   categoryIds: Types.ObjectId[]
   clientId: Types.ObjectId
   createdAt: Date
@@ -17,6 +18,9 @@ export interface CategoryProfileDocument extends Document {
 export class CategoryProfile {
   @Prop({ required: true, trim: true })
   name: string
+
+  @Prop({ required: false, trim: true })
+  description?: string
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Category' }], default: [] })
   categoryIds: Types.ObjectId[]

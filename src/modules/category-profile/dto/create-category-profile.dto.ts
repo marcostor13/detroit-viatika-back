@@ -11,6 +11,10 @@ export class CreateCategoryProfileDto {
   @IsNotEmpty()
   name: string
 
+  @IsString()
+  @IsOptional()
+  description?: string
+
   @IsArray()
   @IsOptional()
   @IsMongoId({ each: true })

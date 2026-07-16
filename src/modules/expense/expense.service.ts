@@ -2506,13 +2506,21 @@ export class ExpenseService {
 
   // ─── Aprobación por documento: cadena de centro de costo / Contabilidad ─────
 
-  /** 'approved' si la cadena N1/N2/[N2 sel] del comprobante ya se completó. */
+  /**
+   * 'approved' si la cadena N1/N2/[N2 sel] del comprobante ya se completó.
+   * `approverChain === undefined` significa que la cadena aún no se construyó
+   * (la rendición no ha sido enviada — ver `buildExpenseChains`); eso NO es lo
+   * mismo que una cadena ya construida y vacía por regla 1.6 (todos los niveles
+   * omitidos), que sí cuenta como completada. Sin esta distinción, `0 >= 0`
+   * marca como "approved" tanto lo uno como lo otro.
+   */
   private chainCoordStatus(expense: {
     approverChain?: ChainStep[]
     approvalLevel?: number
     requiredLevels?: number
   }): 'pending' | 'approved' {
-    const required = expense.requiredLevels ?? expense.approverChain?.length ?? 0
+    if (expense.approverChain === undefined) return 'pending'
+    const required = expense.requiredLevels ?? expense.approverChain.length ?? 0
     const level = expense.approvalLevel ?? 0
     return level >= required ? 'approved' : 'pending'
   }
@@ -2650,6 +2658,11 @@ export class ExpenseService {
     this.assertCompanyAccess(expense, actor)
     const existing = expense as any
     const coordStatus = this.chainCoordStatus(existing)
+    if (coordStatus !== 'approved') {
+      throw new BadRequestException(
+        'Este comprobante aún no completó la cadena de aprobación de centro de costo (N1/N2). No puede aprobarse por Contabilidad todavía.'
+      )
+    }
     const newCombined = this.computeCombinedStatus(coordStatus, 'approved')
     const updated = await this.expenseRepository
       .findByIdAndUpdate(

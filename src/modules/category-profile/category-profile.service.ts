@@ -34,6 +34,7 @@ export class CategoryProfileService {
     try {
       const profile = new this.profileModel({
         name: dto.name.trim(),
+        description: dto.description?.trim() || undefined,
         categoryIds: this.toObjectIds(dto.categoryIds),
         clientId: new Types.ObjectId(dto.clientId),
       })
@@ -79,6 +80,7 @@ export class CategoryProfileService {
   ): Promise<CategoryProfileDocument> {
     const update: Record<string, unknown> = {}
     if (dto.name !== undefined) update.name = dto.name.trim()
+    if (dto.description !== undefined) update.description = dto.description.trim()
     if (dto.categoryIds !== undefined)
       update.categoryIds = this.toObjectIds(dto.categoryIds)
 
