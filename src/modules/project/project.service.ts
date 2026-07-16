@@ -243,6 +243,9 @@ export class ProjectService {
    * autorización real depende de estar en `approverLevels`, no del rol.
    */
   async isApproverForClient(userId: string, clientId: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(clientId)) {
+      return false
+    }
     const exists = await this.projectModel.exists({
       clientId: new Types.ObjectId(clientId),
       'approverLevels.userIds': new Types.ObjectId(userId),
