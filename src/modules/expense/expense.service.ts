@@ -84,6 +84,12 @@ export class ExpenseService {
   private readonly logger = new Logger(ExpenseService.name)
   private readonly openai: OpenAI
   private readonly visionModel = 'gpt-5.1'
+  /**
+   * Umbral mínimo de caracteres para considerar que un PDF tiene capa de texto.
+   * Por debajo se asume escaneo/imagen y se envía el PDF completo al modelo de
+   * visión (VD-50).
+   */
+  private readonly PDF_MIN_TEXT_LENGTH = 20
 
   constructor(
     private readonly configService: ConfigService,
@@ -241,6 +247,34 @@ export class ExpenseService {
         content: [
           { type: 'text' as const, text: prompt },
           { type: 'image_url' as const, image_url: { url: imageUrl } },
+        ],
+      },
+    ]
+  }
+
+  /**
+   * Mensajes para leer un PDF con el modelo de visión enviando el archivo
+   * completo (base64). Se usa como respaldo cuando el PDF es un escaneo/imagen
+   * sin capa de texto: el modelo lee la imagen dentro del PDF (VD-50).
+   */
+  private buildPdfFileMessages(
+    prompt: string,
+    buffer: Buffer,
+    filename?: string
+  ) {
+    const dataUrl = `data:application/pdf;base64,${buffer.toString('base64')}`
+    return [
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: prompt },
+          {
+            type: 'file' as const,
+            file: {
+              filename: filename || 'documento.pdf',
+              file_data: dataUrl,
+            },
+          },
         ],
       },
     ]
@@ -984,20 +1018,27 @@ export class ExpenseService {
       const parsed = await pdfParse(file.buffer)
       const textFromPdf = parsed.text || ''
 
-      console.log('textFromPdf', textFromPdf)
-
       const prompt = PROMPT1
+      // Si el PDF trae capa de texto se envía el texto (más barato); si es un
+      // escaneo/imagen sin texto, se manda el PDF completo al modelo de visión
+      // para que lea la imagen dentro del PDF (VD-50).
+      const hasText = textFromPdf.trim().length >= this.PDF_MIN_TEXT_LENGTH
+      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
+        hasText
+          ? [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: prompt },
+                  { type: 'text', text: textFromPdf.substring(0, 15000) },
+                ],
+              },
+            ]
+          : this.buildPdfFileMessages(prompt, file.buffer, file.originalname)
+
       const completion = await this.openai.chat.completions.create({
         model: this.visionModel,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'text', text: textFromPdf.substring(0, 15000) },
-            ],
-          },
-        ],
+        messages,
         temperature: 0,
         max_completion_tokens: 8192,
       })
