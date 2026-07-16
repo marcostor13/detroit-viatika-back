@@ -3,6 +3,7 @@ import { ForbiddenException } from '@nestjs/common'
 import { Types } from 'mongoose'
 import { AdvanceController } from './advance.controller'
 import { AdvanceService } from './advance.service'
+import { PaymentBatchService } from './payment/payment-batch.service'
 import { AuditLogService } from '../audit-log/audit-log.service'
 import { ROLES } from '../auth/enums/roles.enum'
 
@@ -57,6 +58,14 @@ const mockAdvanceService = {
 
 const mockAuditLogService = { log: jest.fn().mockResolvedValue(undefined) }
 
+const mockPaymentBatchService = {
+  generateTxt: jest.fn().mockResolvedValue({ count: 0, totalSoles: 0, excluded: [] }),
+  reconcileFromPdf: jest
+    .fn()
+    .mockResolvedValue({ conciliados: [], sinConciliar: [], noAbonados: [] }),
+  confirmManual: jest.fn().mockResolvedValue({ pagados: 0, errores: [] }),
+}
+
 describe('AdvanceController', () => {
   let controller: AdvanceController
 
@@ -66,6 +75,7 @@ describe('AdvanceController', () => {
       controllers: [AdvanceController],
       providers: [
         { provide: AdvanceService, useValue: mockAdvanceService },
+        { provide: PaymentBatchService, useValue: mockPaymentBatchService },
         { provide: AuditLogService, useValue: mockAuditLogService },
       ],
     }).compile()

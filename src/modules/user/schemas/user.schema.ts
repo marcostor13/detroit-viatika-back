@@ -8,6 +8,9 @@ export interface BankAccount {
   accountType: 'ahorros' | 'corriente'
 }
 
+/** Tipo de documento para el archivo de pagos BBVA (VD-7). */
+export type UserDocumentType = 'R' | 'L' | 'P' | 'E' | 'M'
+
 export interface UserPermissions {
   modules: string[]
   canApproveL1: boolean
@@ -33,6 +36,8 @@ export interface UserDocument extends Document {
   roleId: Types.ObjectId
   isActive: boolean
   dni?: string
+  /** Tipo de documento para pagos BBVA (R=RUC, L=DNI, P=Pasaporte, E=C.Ext., M=C.Mil.). Default L. */
+  documentType?: UserDocumentType
   employeeCode?: string
   /** Subcuenta contable 14 del colaborador (asientos Contanet). Si vacío, se usa el DNI en cols AN-AS. */
   subcuenta14?: string
@@ -77,6 +82,10 @@ export class User {
 
   @Prop()
   dni?: string
+
+  /** Tipo de documento para el archivo de pagos BBVA. Default L (DNI). */
+  @Prop({ type: String, enum: ['R', 'L', 'P', 'E', 'M'], default: 'L' })
+  documentType?: UserDocumentType
 
   @Prop()
   employeeCode?: string
