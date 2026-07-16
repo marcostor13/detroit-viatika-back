@@ -989,6 +989,7 @@ export class EmailService {
       collaboratorName: string
       collaboratorDni?: string
       budgetFormatted: string
+      currencySymbol?: string
       projectLabel?: string
       bankName?: string
       accountType?: string
@@ -1292,6 +1293,7 @@ export class EmailService {
       startDate: string
       endDate: string
       totalFormatted: string
+      currencySymbol?: string
       projectLabel: string
       platformUrl?: string
     }
@@ -1333,6 +1335,7 @@ export class EmailService {
       startDate: string
       endDate: string
       totalFormatted: string
+      currencySymbol?: string
       projectLabel: string
       platformUrl?: string
     }
@@ -1374,6 +1377,7 @@ export class EmailService {
       startDate: string
       endDate: string
       totalFormatted: string
+      currencySymbol?: string
       projectLabel: string
       platformUrl?: string
     }
@@ -1549,6 +1553,7 @@ export class EmailService {
       coordinatorName?: string
       projectLabel: string
       amountFormatted: string
+      currencySymbol?: string
       transferDate: string
       reference?: string
       paymentMethod: string
@@ -1725,12 +1730,13 @@ export class EmailService {
       amountDue: string
       dueDate: string
       advanceId: string
+      currencySymbol?: string
     }
   ) {
     try {
       await this.send({
         to: email,
-        subject: `DEVOLUCIÓN PENDIENTE — Viático N° ${data.advanceId} — Monto S/ ${data.amountDue}`,
+        subject: `DEVOLUCIÓN PENDIENTE — Viático N° ${data.advanceId} — Monto ${data.currencySymbol ?? 'S/'} ${data.amountDue}`,
         template: './devolucion-pendiente',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1751,6 +1757,7 @@ export class EmailService {
       recipientName: string
       amountDue: string
       advanceId: string
+      currencySymbol?: string
     }
   ) {
     try {
@@ -1777,6 +1784,7 @@ export class EmailService {
       amountDue: string
       rejectionReason?: string
       advanceId: string
+      currencySymbol?: string
     }
   ) {
     try {

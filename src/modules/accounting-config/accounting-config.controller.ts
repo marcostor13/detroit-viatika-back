@@ -29,6 +29,24 @@ export class AccountingConfigController {
     private readonly auditLogService: AuditLogService
   ) {}
 
+  /**
+   * Códigos de moneda disponibles para la empresa. A diferencia de `GET :clientId`
+   * (que expone cuentas bancarias), este endpoint es liviano y apto para
+   * cualquier rol autenticado — lo usa el formulario de solicitud de viáticos.
+   */
+  @Get(':clientId/currencies')
+  @Roles(
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.COORDINADOR,
+    ROLES.COLABORADOR,
+    ROLES.CONTABILIDAD,
+    ROLES.TESORERIA
+  )
+  async getAvailableCurrencies(@Param('clientId') clientId: string) {
+    return this.accountingConfigService.getAvailableCurrencies(clientId)
+  }
+
   @Get(':clientId')
   @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD)
   async findOne(@Param('clientId') clientId: string) {

@@ -40,7 +40,7 @@
           <div class='row'><strong>Colaborador:</strong> {{collaboratorName}}</div>
           {{#if collaboratorDni}}<div class='row'><strong>DNI:</strong> {{collaboratorDni}}</div>{{/if}}
           <div class='row'><strong>Monto solicitado:</strong></div>
-          <div class='amount'>S/ {{budgetFormatted}}</div>
+          <div class='amount'>{{currencySymbol}} {{budgetFormatted}}</div>
         </div>
 
         {{#if hasBankAccount}}

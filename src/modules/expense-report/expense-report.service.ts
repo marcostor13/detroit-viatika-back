@@ -49,6 +49,7 @@ import { PayViaticoDto } from './dto/pay-viatico.dto'
 import { ResubmitViaticoDto } from './dto/resubmit-viatico.dto'
 import { CreateAdvanceLineDto } from '../advance/dto/create-advance.dto'
 import { Logger } from '@nestjs/common'
+import { monedaSymbol, DEFAULT_MONEDA } from '../../common/moneda.constants'
 
 /** Contexto del usuario que solicita eliminar una solicitud. */
 export interface SolicitudDeleteActor {
@@ -3637,6 +3638,11 @@ export class ExpenseReportService implements OnModuleInit {
     return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
+  /** Símbolo de moneda ('S/' / '$') a partir del código SUNAT guardado en el viático. */
+  private viaticoMoneySymbol(moneda?: string): string {
+    return monedaSymbol(moneda)
+  }
+
   private viaticoEscapeHtml(value: string): string {
     return String(value)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -3871,6 +3877,7 @@ export class ExpenseReportService implements OnModuleInit {
       expenseIds: [],
       budget: roundedSum,
       viaticoAmount: roundedSum,
+      viaticoMoneda: dto.moneda?.trim() || DEFAULT_MONEDA,
       viaticoApproverChain: chain,
       viaticoRequiredLevels: chain.length,
       viaticoApprovalLevel: 0,
@@ -3927,7 +3934,7 @@ export class ExpenseReportService implements OnModuleInit {
       }
 
       try {
-        await this.notificationsService.create({ userId: coordId.toString(), title: 'Nueva solicitud de viáticos pendiente', message: `${collaborator.name} solicitó viáticos — S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)}. Ingresa a Aprobaciones para revisar.`, type: 'info', actionUrl: '/viaticos', metadata: { reportId, collaboratorUserId, event: 'viatico_submitted' } })
+        await this.notificationsService.create({ userId: coordId.toString(), title: 'Nueva solicitud de viáticos pendiente', message: `${collaborator.name} solicitó viáticos — ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)}. Ingresa a Aprobaciones para revisar.`, type: 'info', actionUrl: '/viaticos', metadata: { reportId, collaboratorUserId, event: 'viatico_submitted' } })
       } catch (err: unknown) { this.logger.error(`In-app notif viático ${reportId}: ${err instanceof Error ? err.message : String(err)}`) }
 
       const coordEmailEnabled = await this.userService.isEmailEnabled(coordId.toString())
@@ -3945,6 +3952,7 @@ export class ExpenseReportService implements OnModuleInit {
           clientId, coordinatorName: coordinator.name, collaboratorName: collaborator.name,
           place: report.viaticoPlace ?? '', startDate: startStr, endDate: endStr,
           totalFormatted: this.viaticoFormatMoney(report.viaticoAmount ?? 0),
+          currencySymbol: this.viaticoMoneySymbol(report.viaticoMoneda),
           projectLabel, platformUrl: this.emailService.buildAppUrl('/viaticos'),
         })
         await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'sent', sentAt: new Date() } } })
@@ -3985,11 +3993,11 @@ export class ExpenseReportService implements OnModuleInit {
       // el viático quedó 100% cubierto por saldo, sin desembolso real).
       report.status = 'pending_contabilidad'
       await report.save()
-      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en aprobación final', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada por los centros de costo y está pendiente de la aprobación final de Contabilidad.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en aprobación final', message: `Tu solicitud por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada por los centros de costo y está pendiente de la aprobación final de Contabilidad.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
       await this.notifyContabilidadPendingApproval(report as ExpenseReportDocument)
     } else {
       await report.save()
-      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en revisión', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada en el nivel ${nextLevel} de ${report.viaticoRequiredLevels ?? chain.length} y está pendiente del siguiente aprobador.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en revisión', message: `Tu solicitud por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada en el nivel ${nextLevel} de ${report.viaticoRequiredLevels ?? chain.length} y está pendiente del siguiente aprobador.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
       this.notifyViaticoCoordinator(report as ExpenseReportDocument, report.userId.toString(), report.clientId.toString()).catch(() => {})
     }
 
@@ -4005,7 +4013,7 @@ export class ExpenseReportService implements OnModuleInit {
         await this.emailService.sendViaticoAprobacionContabilidad(r.email, {
           clientId: report.clientId.toString(), recipientName: r.name, urgent: false, urgentBanner: '',
           emailTitle: 'Solicitud de viáticos pendiente de tu aprobación',
-          detailBody: `<p>Viático por S/ ${this.viaticoEscapeHtml(this.viaticoFormatMoney(report.viaticoAmount ?? 0))} de ${this.viaticoEscapeHtml(collaborator?.name ?? '')} fue aprobado por los centros de costo correspondientes. Requiere tu aprobación final antes de quedar lista para pago.</p>`,
+          detailBody: `<p>Viático por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoEscapeHtml(this.viaticoFormatMoney(report.viaticoAmount ?? 0))} de ${this.viaticoEscapeHtml(collaborator?.name ?? '')} fue aprobado por los centros de costo correspondientes. Requiere tu aprobación final antes de quedar lista para pago.</p>`,
           projectLabel: '', platformUrl: this.emailService.buildAppUrl('/viaticos'),
         }).catch(() => {})
       }
@@ -4038,7 +4046,7 @@ export class ExpenseReportService implements OnModuleInit {
     const autoOpenedBySaldo = await this.onViaticoFullyApproved(report as ExpenseReportDocument)
 
     if (!autoOpenedBySaldo) {
-      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos aprobada', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada. El pago está siendo procesado.`, type: 'success', actionUrl: '/mis-rendiciones' }).catch(() => {})
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos aprobada', message: `Tu solicitud por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada. El pago está siendo procesado.`, type: 'success', actionUrl: '/mis-rendiciones' }).catch(() => {})
     }
 
     return this.findOne(id) as Promise<ExpenseReportDocument>
@@ -4058,7 +4066,7 @@ export class ExpenseReportService implements OnModuleInit {
       for (const r of recipients) {
         await this.emailService.sendViaticoAprobacionContabilidad(r.email, {
           clientId: report.clientId.toString(), recipientName: r.name, urgent: false, urgentBanner: '', emailTitle: 'Solicitud de viáticos aprobada',
-          detailBody: `<p>Viático por S/ ${this.viaticoEscapeHtml(this.viaticoFormatMoney(report.viaticoAmount ?? 0))} de ${this.viaticoEscapeHtml(collaborator?.name ?? '')} aprobado y listo para pago.</p>`,
+          detailBody: `<p>Viático por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoEscapeHtml(this.viaticoFormatMoney(report.viaticoAmount ?? 0))} de ${this.viaticoEscapeHtml(collaborator?.name ?? '')} aprobado y listo para pago.</p>`,
           projectLabel: '', platformUrl: this.emailService.buildAppUrl('/tesoreria'),
         }).catch(() => {})
       }
@@ -4100,6 +4108,7 @@ export class ExpenseReportService implements OnModuleInit {
             collaboratorName: collab?.name ?? 'Colaborador',
             collaboratorDni: collab?.dni,
             budgetFormatted: Number(report.viaticoAmount ?? 0).toFixed(2),
+            currencySymbol: this.viaticoMoneySymbol(report.viaticoMoneda),
             projectLabel,
             hasBankAccount,
             bankName: bank?.bankName || undefined,
@@ -4151,7 +4160,7 @@ export class ExpenseReportService implements OnModuleInit {
     report.viaticoRejectedByRole = rejectedByRole
     await report.save()
 
-    this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos rechazada', message: `Tu solicitud por S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue rechazada. Motivo: ${opts.rejectionReason}`, type: 'error', actionUrl: '/mis-rendiciones' }).catch(() => {})
+    this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos rechazada', message: `Tu solicitud por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue rechazada. Motivo: ${opts.rejectionReason}`, type: 'error', actionUrl: '/mis-rendiciones' }).catch(() => {})
 
     const collaborator = await this.userService.findEmailNameClient(report.userId.toString())
     if (collaborator?.email && await this.userService.isEmailEnabled(report.userId.toString())) {
@@ -4210,6 +4219,7 @@ export class ExpenseReportService implements OnModuleInit {
       ? new Types.ObjectId(dto.ordenTrabajoId)
       : undefined
     report.viaticoAmount = roundedSum
+    if (dto.moneda?.trim()) report.viaticoMoneda = dto.moneda.trim()
     report.budget = roundedSum
     report.description = description
     // Regla 1.6: cadena vacía (todos los niveles omitidos) va directo a Contabilidad.
@@ -4316,12 +4326,14 @@ export class ExpenseReportService implements OnModuleInit {
     const coordinator = coordinatorId ? await this.userService.findEmailNameClient(coordinatorId) : null
     const coordEmailEnabled = coordinatorId ? await this.userService.isEmailEnabled(coordinatorId) : false
 
+    const viaticoSym = this.viaticoMoneySymbol(report.viaticoMoneda)
     const paymentEmailData = {
       clientId: report.clientId.toString(),
       collaboratorName: collaborator?.name ?? 'Colaborador',
       coordinatorName: coordinator?.name,
       projectLabel,
       amountFormatted: this.viaticoFormatMoney(report.viaticoAmount ?? 0),
+      currencySymbol: viaticoSym,
       transferDate: new Date(dto.transferDate).toISOString().slice(0, 10),
       reference: dto.reference ?? '—',
       paymentMethod: dto.method,
@@ -4332,9 +4344,9 @@ export class ExpenseReportService implements OnModuleInit {
 
     const fullyPaidMsg = fullyPaid
       ? (inPrePaymentPhase
-          ? `Se registró el pago de tu viático por S/ ${this.viaticoFormatMoney(paymentAmount)}. Ya puedes registrar tus gastos.`
-          : `Se registró el pago restante de tu viático por S/ ${this.viaticoFormatMoney(paymentAmount)} (total pagado S/ ${this.viaticoFormatMoney(report.viaticoPaidAmount ?? 0)}).`)
-      : `Se registró un pago parcial de tu viático por S/ ${this.viaticoFormatMoney(paymentAmount)} (total pagado S/ ${this.viaticoFormatMoney(report.viaticoPaidAmount ?? 0)} de S/ ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)}).`
+          ? `Se registró el pago de tu viático por ${viaticoSym} ${this.viaticoFormatMoney(paymentAmount)}. Ya puedes registrar tus gastos.`
+          : `Se registró el pago restante de tu viático por ${viaticoSym} ${this.viaticoFormatMoney(paymentAmount)} (total pagado ${viaticoSym} ${this.viaticoFormatMoney(report.viaticoPaidAmount ?? 0)}).`)
+      : `Se registró un pago parcial de tu viático por ${viaticoSym} ${this.viaticoFormatMoney(paymentAmount)} (total pagado ${viaticoSym} ${this.viaticoFormatMoney(report.viaticoPaidAmount ?? 0)} de ${viaticoSym} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)}).`
 
     this.notificationsService.create({ userId: collabId, title: fullyPaid ? 'Pago de viático registrado' : 'Pago parcial de viático registrado', message: fullyPaidMsg, type: 'success', actionUrl: `/mis-rendiciones/${reportId}/detalle` }).catch(() => {})
 
@@ -4356,7 +4368,7 @@ export class ExpenseReportService implements OnModuleInit {
       this.notificationsService.create({
         userId: coordinatorId,
         title: fullyPaid ? 'Pago de viático registrado' : 'Pago parcial de viático registrado',
-        message: `Se registró el pago del viático de ${collaborator?.name ?? 'un colaborador'} por S/ ${this.viaticoFormatMoney(paymentAmount)}.`,
+        message: `Se registró el pago del viático de ${collaborator?.name ?? 'un colaborador'} por ${viaticoSym} ${this.viaticoFormatMoney(paymentAmount)}.`,
         type: 'info',
         actionUrl: `/mis-rendiciones/${reportId}/detalle`,
       }).catch(() => {})
@@ -4431,6 +4443,7 @@ export class ExpenseReportService implements OnModuleInit {
       this.emailService.sendDevolucionPendiente(collaborator.email, {
         clientId: report.clientId.toString(), recipientName: collaborator.name,
         amountDue: this.viaticoFormatMoney(report.settlement.difference),
+        currencySymbol: this.viaticoMoneySymbol(report.viaticoMoneda),
         dueDate: this.emailService.formatDateDDMMYYYY(dueDate), advanceId: id,
       }).catch(() => {})
     }

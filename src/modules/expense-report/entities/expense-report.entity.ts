@@ -179,6 +179,8 @@ export interface ExpenseReportDocument extends Document {
   reopenHistory?: ReopenRecord[]
   // Campos exclusivos de viático
   viaticoAmount?: number
+  /** Código de moneda SUNAT ('01' soles, '02' dólares). Default '01' para registros pre-existentes. */
+  viaticoMoneda?: string
   viaticoRequiredLevels?: number
   viaticoApprovalLevel?: number
   /** Cadena por centro de costo (N2 principal/seleccionado), snapshot al crear la solicitud. */
@@ -476,6 +478,10 @@ export class ExpenseReport {
 
   @Prop({ type: Number, required: false })
   viaticoAmount?: number
+
+  /** Código de moneda SUNAT ('01' soles, '02' dólares). Default '01' para registros pre-existentes. */
+  @Prop({ type: String, default: '01' })
+  viaticoMoneda?: string
 
   @Prop({ type: Number, default: 1 })
   viaticoRequiredLevels?: number

@@ -19,6 +19,11 @@ export class ResubmitAdvanceDto {
   @Min(0.01)
   amount: number
 
+  /** Código de moneda SUNAT ('01' soles, '02' dólares). Default '01' si no se envía. */
+  @IsString()
+  @IsOptional()
+  moneda?: string
+
   @IsString()
   @IsNotEmpty()
   description: string

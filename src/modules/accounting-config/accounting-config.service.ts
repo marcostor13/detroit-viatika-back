@@ -61,4 +61,20 @@ export class AccountingConfigService {
     const config = await this.findByClient(clientId)
     return config?.bankAccounts?.find(b => b.nroCuenta === nroCuenta) ?? null
   }
+
+  /**
+   * Códigos de moneda SUNAT disponibles para la empresa (derivados de
+   * `monedaOrigen` y `bankAccounts[].moneda`). Sin config guardada, solo soles.
+   * Endpoint liviano apto para cualquier rol autenticado (a diferencia del
+   * resto del plan de cuentas, que expone datos bancarios sensibles).
+   */
+  async getAvailableCurrencies(clientId: string): Promise<string[]> {
+    const config = await this.findByClient(clientId)
+    if (!config) return ['01']
+    const codes = new Set<string>([config.monedaOrigen || '01'])
+    for (const bank of config.bankAccounts ?? []) {
+      if (bank.moneda) codes.add(bank.moneda)
+    }
+    return Array.from(codes)
+  }
 }

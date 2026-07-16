@@ -168,6 +168,8 @@ export interface AdvanceDocument extends Document {
   requestBankName?: string
   requestAccountNumber?: string
   requestCci?: string
+  /** Código de moneda SUNAT ('01' soles, '02' dólares). Default '01' para registros pre-existentes. */
+  moneda?: string
 }
 
 /**
@@ -254,6 +256,10 @@ export class Advance {
 
   @Prop({ required: true, min: 0 })
   amount: number
+
+  /** Código de moneda SUNAT ('01' soles, '02' dólares). Default '01' para registros pre-existentes. */
+  @Prop({ type: String, default: '01' })
+  moneda?: string
 
   @Prop({ required: true })
   description: string

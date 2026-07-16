@@ -34,6 +34,7 @@ import { UserService } from '../user/user.service'
 import { UserPermissions } from '../user/schemas/user.schema'
 import { EmailService } from '../email/email.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { monedaSymbol, DEFAULT_MONEDA } from '../../common/moneda.constants'
 
 @Injectable()
 export class AdvanceService implements OnModuleInit {
@@ -202,6 +203,11 @@ export class AdvanceService implements OnModuleInit {
     })
   }
 
+  /** Símbolo de moneda ('S/' / '$') a partir del código SUNAT guardado en el anticipo/viático. */
+  private moneySymbol(moneda?: string): string {
+    return monedaSymbol(moneda)
+  }
+
   private isViaticoSolicitud(dto: CreateAdvanceDto): boolean {
     return !!(
       dto.place?.trim() &&
@@ -276,6 +282,7 @@ export class AdvanceService implements OnModuleInit {
         ? new Types.ObjectId(dto.expenseReportId)
         : undefined,
       amount: dto.amount,
+      moneda: dto.moneda?.trim() || DEFAULT_MONEDA,
       description: dto.description,
       status: 'pending_l1',
       approvalLevel: 0,
@@ -442,6 +449,7 @@ export class AdvanceService implements OnModuleInit {
       lines: lineDocs,
       observations: dto.observations?.trim(),
       amount: roundedSum,
+      moneda: dto.moneda?.trim() || DEFAULT_MONEDA,
       description,
       status: 'pending_l1',
       approvalLevel: 0,
@@ -587,7 +595,7 @@ export class AdvanceService implements OnModuleInit {
       await this.notificationsService.create({
         userId: coordId.toString(),
         title: 'Nueva solicitud de viáticos pendiente',
-        message: `${collaborator.name} solicitó viáticos para ${projectLabel} — S/ ${totalFormatted}. Ingresa a Tesorería para revisar.`,
+        message: `${collaborator.name} solicitó viáticos para ${projectLabel} — ${this.moneySymbol(advance.moneda)} ${totalFormatted}. Ingresa a Tesorería para revisar.`,
         type: 'info',
         actionUrl: '/tesoreria',
         metadata: {
@@ -626,6 +634,7 @@ export class AdvanceService implements OnModuleInit {
           startDate: startStr,
           endDate: endStr,
           totalFormatted,
+          currencySymbol: this.moneySymbol(advance.moneda),
           projectLabel,
           platformUrl,
         }
@@ -753,7 +762,7 @@ export class AdvanceService implements OnModuleInit {
     }
     const breakdownItems: string[] = []
     for (const [catName, total] of categoryTotals) {
-      const lineText = `${catName}: S/ ${this.formatViaticoMoney(total)}`
+      const lineText = `${catName}: ${this.moneySymbol(advance.moneda)} ${this.formatViaticoMoney(total)}`
       breakdownItems.push(
         `<li style="margin:6px 0;">${this.escapeHtmlForEmail(lineText)}</li>`
       )
@@ -764,7 +773,7 @@ export class AdvanceService implements OnModuleInit {
         : `<p style="margin:8px 0 16px;color:#64748b;font-size:13px;">${this.escapeHtmlForEmail('(sin líneas)')}</p>`
 
     const apprDate = `${this.emailService.formatDateDDMMYYYY(approvedAt)} ${String(approvedAt.getHours()).padStart(2, '0')}:${String(approvedAt.getMinutes()).padStart(2, '0')}`
-    const amountStr = `S/ ${this.formatViaticoMoney(advance.amount)}`
+    const amountStr = `${this.moneySymbol(advance.moneda)} ${this.formatViaticoMoney(advance.amount)}`
     const compromiso = `${amountStr} registrados en compromiso del centro de costo (hasta registro de pago en tesorería).`
 
     const tableOpen =
@@ -997,7 +1006,7 @@ export class AdvanceService implements OnModuleInit {
     const breakdownItems: string[] = []
     for (const [catName, total] of categoryTotals) {
       breakdownItems.push(
-        `<li style="margin:6px 0;">${this.escapeHtmlForEmail(`${catName}: S/ ${this.formatViaticoMoney(total)}`)}</li>`
+        `<li style="margin:6px 0;">${this.escapeHtmlForEmail(`${catName}: ${this.moneySymbol(advance.moneda)} ${this.formatViaticoMoney(total)}`)}</li>`
       )
     }
     const breakdownHtml =
@@ -1006,7 +1015,7 @@ export class AdvanceService implements OnModuleInit {
         : `<p style="margin:8px 0 16px;color:#64748b;font-size:13px;">${this.escapeHtmlForEmail('(sin líneas)')}</p>`
 
     const apprDate = `${this.emailService.formatDateDDMMYYYY(approvedAt)} ${String(approvedAt.getHours()).padStart(2, '0')}:${String(approvedAt.getMinutes()).padStart(2, '0')}`
-    const amountStr = `S/ ${this.formatViaticoMoney(advance.amount)}`
+    const amountStr = `${this.moneySymbol(advance.moneda)} ${this.formatViaticoMoney(advance.amount)}`
 
     const tableOpen =
       '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">'
@@ -1277,6 +1286,7 @@ export class AdvanceService implements OnModuleInit {
       coordinatorName: coordinator?.name,
       projectLabel,
       amountFormatted: this.formatViaticoMoney(advance.amount),
+      currencySymbol: this.moneySymbol(advance.moneda),
       transferDate,
       reference: advance.paymentInfo?.reference || '—',
       paymentMethod: advance.paymentInfo?.method || 'transferencia_bancaria',
@@ -1549,7 +1559,7 @@ export class AdvanceService implements OnModuleInit {
         .create({
           userId: saved.userId.toString(),
           title: 'Solicitud de viáticos aprobada',
-          message: `Tu solicitud de viáticos por S/ ${this.formatViaticoMoney(saved.amount)} fue aprobada. El pago está siendo procesado.`,
+          message: `Tu solicitud de viáticos por ${this.moneySymbol(saved.moneda)} ${this.formatViaticoMoney(saved.amount)} fue aprobada. El pago está siendo procesado.`,
           type: 'success',
           actionUrl: '/mis-rendiciones',
         })
@@ -1559,7 +1569,7 @@ export class AdvanceService implements OnModuleInit {
         .create({
           userId: saved.userId.toString(),
           title: 'Solicitud de viáticos en revisión',
-          message: `Tu solicitud de viáticos por S/ ${this.formatViaticoMoney(saved.amount)} fue aprobada en el nivel ${saved.approvalLevel} de ${saved.requiredLevels} y está pendiente del siguiente aprobador.`,
+          message: `Tu solicitud de viáticos por ${this.moneySymbol(saved.moneda)} ${this.formatViaticoMoney(saved.amount)} fue aprobada en el nivel ${saved.approvalLevel} de ${saved.requiredLevels} y está pendiente del siguiente aprobador.`,
           type: 'info',
           actionUrl: '/mis-rendiciones',
         })
@@ -1623,7 +1633,7 @@ export class AdvanceService implements OnModuleInit {
       .create({
         userId: saved.userId.toString(),
         title: 'Solicitud de viáticos rechazada',
-        message: `Tu solicitud de viáticos por S/ ${this.formatViaticoMoney(saved.amount)} fue rechazada. Motivo: ${dto.rejectionReason}`,
+        message: `Tu solicitud de viáticos por ${this.moneySymbol(saved.moneda)} ${this.formatViaticoMoney(saved.amount)} fue rechazada. Motivo: ${dto.rejectionReason}`,
         type: 'error',
         actionUrl: '/mis-rendiciones',
       })
@@ -1804,9 +1814,10 @@ export class AdvanceService implements OnModuleInit {
       ? `/mis-rendiciones/${reportId}/detalle`
       : '/mis-rendiciones'
     const fullyPaid = saved.status === 'paid'
+    const sym = this.moneySymbol(saved.moneda)
     const message = fullyPaid
-      ? `Se registró el pago de tu viático por S/ ${this.formatViaticoMoney(paymentAmount)} (total pagado S/ ${this.formatViaticoMoney(saved.paidAmount ?? paymentAmount)}). Ya puedes registrar tus gastos.`
-      : `Se registró un pago parcial de tu viático por S/ ${this.formatViaticoMoney(paymentAmount)} (total pagado S/ ${this.formatViaticoMoney(saved.paidAmount ?? paymentAmount)} de S/ ${this.formatViaticoMoney(saved.amount)}). Ya puedes registrar tus gastos.`
+      ? `Se registró el pago de tu viático por ${sym} ${this.formatViaticoMoney(paymentAmount)} (total pagado ${sym} ${this.formatViaticoMoney(saved.paidAmount ?? paymentAmount)}). Ya puedes registrar tus gastos.`
+      : `Se registró un pago parcial de tu viático por ${sym} ${this.formatViaticoMoney(paymentAmount)} (total pagado ${sym} ${this.formatViaticoMoney(saved.paidAmount ?? paymentAmount)} de ${sym} ${this.formatViaticoMoney(saved.amount)}). Ya puedes registrar tus gastos.`
     this.notificationsService
       .create({
         userId: saved.userId.toString(),
@@ -2133,6 +2144,7 @@ export class AdvanceService implements OnModuleInit {
           clientId: advance.clientId?.toString(),
           recipientName: collaborator.name,
           amountDue: this.formatViaticoMoney(advance.settlement.difference),
+          currencySymbol: this.moneySymbol(advance.moneda),
           dueDate: this.emailService.formatDateDDMMYYYY(dueDate),
           advanceId: id,
         })
@@ -2232,6 +2244,7 @@ export class AdvanceService implements OnModuleInit {
         clientId: advance.clientId?.toString(),
         recipientName: collaborator.name,
         amountDue: this.formatViaticoMoney(rr.amountDue),
+        currencySymbol: this.moneySymbol(advance.moneda),
         rejectionReason,
         advanceId: id,
       }).catch((err: any) =>
@@ -2345,6 +2358,7 @@ export class AdvanceService implements OnModuleInit {
     advance.lines = lineDocs
     advance.observations = dto.observations?.trim()
     advance.amount = roundedSum
+    if (dto.moneda?.trim()) advance.moneda = dto.moneda.trim()
     advance.description = description
     advance.status = 'pending_l1'
     advance.approvalLevel = 0
@@ -2528,7 +2542,7 @@ export class AdvanceService implements OnModuleInit {
       `Lugar: ${advance.place ?? '—'}`,
       `Fechas: ${startStr} al ${endStr}`,
       `Proyecto: ${projectLabel}`,
-      `Monto total: S/ ${totalFormatted}`,
+      `Monto total: ${this.moneySymbol(advance.moneda)} ${totalFormatted}`,
     ].join('\n')
 
     const platformUrl = this.emailService.buildAppUrl('/tesoreria')
@@ -2537,7 +2551,7 @@ export class AdvanceService implements OnModuleInit {
       .create({
         userId: coordId.toString(),
         title: 'Solicitud de viáticos cancelada',
-        message: `${collaborator.name} canceló su solicitud de viáticos para ${projectLabel} — S/ ${totalFormatted}.`,
+        message: `${collaborator.name} canceló su solicitud de viáticos para ${projectLabel} — ${this.moneySymbol(advance.moneda)} ${totalFormatted}.`,
         type: 'warning',
         actionUrl: '/viaticos',
       })
