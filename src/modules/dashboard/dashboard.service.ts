@@ -46,6 +46,14 @@ export class DashboardService {
       pendingReturns,
       reportByStatus,
       topLocations,
+      // Viáticos: en Detroit las solicitudes/anticipos no viven en `advances` sino
+      // como ExpenseReport con type='viatico'. Se agregan aquí y se combinan con los
+      // advances (legacy) para que los KPI de anticipos reflejen la data real.
+      viaticoAgg,
+      viaticoByStatus,
+      viaticoMonthly,
+      viaticoReturns,
+      topViaticoLocations,
     ] = await Promise.all([
       this.aggregateExpenseTotals(clientOid, query, range.from, range.to),
       this.aggregateExpenseTotals(
@@ -66,6 +74,11 @@ export class DashboardService {
       this.aggregatePendingReturns(clientOid, query, range),
       this.aggregateReportByStatus(clientOid, query, range),
       this.aggregateTopLocations(clientOid, query, range),
+      this.aggregateViaticoTotals(clientOid, query, range.from, range.to),
+      this.aggregateViaticoByStatus(clientOid, query, range),
+      this.aggregateViaticoMonthly(clientOid, query, range),
+      this.aggregateViaticoPendingReturns(clientOid, query, range),
+      this.aggregateTopViaticoLocations(clientOid, query, range),
     ])
 
     const totalGasto = expenseAgg.amount
@@ -89,8 +102,28 @@ export class DashboardService {
         {}
       )
 
+    // Combina filas {status, amount, count} sumando los duplicados (advances legacy
+    // + viáticos comparten claves de estado como 'pending_l1', 'paid', etc.).
+    const mergeStatusRows = (
+      rows: { status: string; amount: number; count: number }[]
+    ): { status: string; amount: number; count: number }[] => {
+      const m: Record<string, { status: string; amount: number; count: number }> =
+        {}
+      for (const r of rows) {
+        if (!m[r.status]) m[r.status] = { status: r.status, amount: 0, count: 0 }
+        m[r.status].amount += r.amount
+        m[r.status].count += r.count
+      }
+      return Object.values(m).sort((a, b) => b.amount - a.amount)
+    }
+
+    const anticipoByStatus = mergeStatusRows([
+      ...advanceByStatus,
+      ...viaticoByStatus,
+    ])
+
     const eStatus = statusMap(expenseByStatus)
-    const aStatus = statusMap(advanceByStatus)
+    const aStatus = statusMap(anticipoByStatus)
 
     const sumStatuses = (
       map: Record<string, { amount: number; count: number }>,
@@ -116,9 +149,11 @@ export class DashboardService {
     const tasaAprobacionGastos =
       decidedCount > 0 ? (gastoApproved.count / decidedCount) * 100 : 0
 
-    const anticipoSolicitado = advanceAgg.amount
+    const anticipoSolicitado = advanceAgg.amount + viaticoAgg.amount
+    const anticipoSolicitadoCount = advanceAgg.count + viaticoAgg.count
     const anticipoAprobado = sumStatuses(aStatus, [
       'approved',
+      'viatico_approved',
       'partially_paid',
       'paid',
       'settled',
@@ -131,7 +166,12 @@ export class DashboardService {
     const anticipoPendienteAprob = sumStatuses(aStatus, [
       'pending_l1',
       'pending_l2',
+      'pending_contabilidad',
     ])
+    const devolucionesPendientes = {
+      amount: pendingReturns.amount + viaticoReturns.amount,
+      count: pendingReturns.count + viaticoReturns.count,
+    }
 
     const reportStatusMap = reportByStatus.reduce<Record<string, number>>(
       (acc, r) => {
@@ -141,13 +181,20 @@ export class DashboardService {
       {}
     )
     const rendicionesTotal = reportByStatus.reduce((s, r) => s + r.count, 0)
+    // Detroit renombró los estados: 'submitted'/'pending_accounting' → además de
+    // 'pending_contabilidad' y la cadena por centro de costo ('pending_l1'/'pending_l2').
+    // 'open' = registrando gastos (en curso, no pendiente de aprobación).
     const rendicionesPendientes =
       (reportStatusMap['submitted'] ?? 0) +
-      (reportStatusMap['pending_accounting'] ?? 0)
+      (reportStatusMap['pending_accounting'] ?? 0) +
+      (reportStatusMap['pending_contabilidad'] ?? 0) +
+      (reportStatusMap['pending_l1'] ?? 0) +
+      (reportStatusMap['pending_l2'] ?? 0)
     const rendicionesAprobadas =
       (reportStatusMap['approved'] ?? 0) +
       (reportStatusMap['reimbursed'] ?? 0) +
-      (reportStatusMap['closed'] ?? 0)
+      (reportStatusMap['closed'] ?? 0) +
+      (reportStatusMap['settled'] ?? 0)
 
     return {
       range: {
@@ -167,49 +214,141 @@ export class DashboardService {
         gastoRejectedAmount: gastoRejected.amount,
         tasaAprobacionGastos,
         anticipoSolicitado,
-        anticipoSolicitadoCount: advanceAgg.count,
+        anticipoSolicitadoCount,
         anticipoAprobadoAmount: anticipoAprobado.amount,
         anticipoPagadoAmount: anticipoPagado.amount,
         anticipoPendienteAprobAmount: anticipoPendienteAprob.amount,
         anticipoPendienteAprobCount: anticipoPendienteAprob.count,
-        devolucionesPendientesAmount: pendingReturns.amount,
-        devolucionesPendientesCount: pendingReturns.count,
+        devolucionesPendientesAmount: devolucionesPendientes.amount,
+        devolucionesPendientesCount: devolucionesPendientes.count,
         rendicionesTotal,
         rendicionesPendientes,
         rendicionesAprobadas,
       },
       expenseByStatus,
       expenseByType,
-      advanceByStatus,
+      advanceByStatus: anticipoByStatus,
       reportByStatus,
       topCategories,
       topProjects,
       topCollaborators,
-      topLocations,
-      monthlySeries: this.mergeMonthly(expenseMonthly, advanceMonthly),
+      topLocations: this.mergeLocations([
+        ...topLocations,
+        ...topViaticoLocations,
+      ]),
+      monthlySeries: this.mergeMonthly(
+        expenseMonthly,
+        this.mergeMonthlyAmounts([...advanceMonthly, ...viaticoMonthly])
+      ),
     }
+  }
+
+  /** Suma montos mensuales por mes (para fusionar series de advances + viáticos). */
+  private mergeMonthlyAmounts(
+    rows: { month: string; amount: number }[]
+  ): { month: string; amount: number }[] {
+    const m = new Map<string, number>()
+    for (const r of rows) m.set(r.month, (m.get(r.month) ?? 0) + r.amount)
+    return Array.from(m, ([month, amount]) => ({ month, amount })).sort((a, b) =>
+      a.month.localeCompare(b.month)
+    )
+  }
+
+  /** Fusiona ubicaciones (advances + viáticos) por destino, sumando conteo y monto. */
+  private mergeLocations(
+    rows: {
+      place: string
+      count: number
+      amount: number
+      lat?: number
+      lng?: number
+    }[]
+  ) {
+    const m = new Map<
+      string,
+      { place: string; count: number; amount: number; lat?: number; lng?: number }
+    >()
+    for (const r of rows) {
+      const key = (r.place ?? '').toLowerCase().trim()
+      const cur = m.get(key)
+      if (cur) {
+        cur.count += r.count
+        cur.amount += r.amount
+        cur.lat = cur.lat ?? r.lat
+        cur.lng = cur.lng ?? r.lng
+      } else {
+        m.set(key, { ...r })
+      }
+    }
+    return Array.from(m.values())
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 20)
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────
 
   private resolveRange(dateFrom?: string, dateTo?: string): ResolvedRange {
-    const to = dateTo ? new Date(dateTo) : new Date()
-    to.setHours(23, 59, 59, 999)
+    // Los filtros llegan como 'YYYY-MM-DD'. `new Date('YYYY-MM-DD')` los interpreta
+    // como medianoche UTC y un `setHours` posterior corre en la zona local, lo que
+    // desplaza el borde y deja fuera registros del propio día en zonas con offset
+    // negativo (p. ej. America/Lima, UTC-5): al filtrar "hasta 15/07" se perdían los
+    // viáticos creados esa misma tarde. Se construye el borde como día local completo.
+    const to =
+      this.parseLocalDate(dateTo, true) ??
+      (() => {
+        const d = new Date()
+        d.setHours(23, 59, 59, 999)
+        return d
+      })()
 
-    let from: Date
-    if (dateFrom) {
-      from = new Date(dateFrom)
-    } else {
-      from = new Date(to)
-      from.setMonth(from.getMonth() - 6)
-    }
-    from.setHours(0, 0, 0, 0)
+    const from =
+      this.parseLocalDate(dateFrom, false) ??
+      (() => {
+        const d = new Date(to)
+        d.setMonth(d.getMonth() - 6)
+        d.setHours(0, 0, 0, 0)
+        return d
+      })()
 
     const spanMs = to.getTime() - from.getTime()
     const prevTo = new Date(from.getTime() - 1)
     const prevFrom = new Date(prevTo.getTime() - spanMs)
 
     return { from, to, prevFrom, prevTo }
+  }
+
+  /**
+   * Convierte 'YYYY-MM-DD' en el inicio (00:00:00.000) o fin (23:59:59.999) de ese
+   * día calendario en la zona local del servidor. Evita el corrimiento de un día
+   * que produce `new Date('YYYY-MM-DD')` (parseado en UTC) frente a `setHours` local.
+   */
+  private parseLocalDate(
+    value: string | undefined,
+    endOfDay: boolean
+  ): Date | null {
+    if (!value) return null
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value)
+    if (!m) {
+      const d = new Date(value)
+      if (isNaN(d.getTime())) return null
+      d.setHours(
+        endOfDay ? 23 : 0,
+        endOfDay ? 59 : 0,
+        endOfDay ? 59 : 0,
+        endOfDay ? 999 : 0
+      )
+      return d
+    }
+    const [, y, mo, da] = m
+    return new Date(
+      Number(y),
+      Number(mo) - 1,
+      Number(da),
+      endOfDay ? 23 : 0,
+      endOfDay ? 59 : 0,
+      endOfDay ? 59 : 0,
+      endOfDay ? 999 : 0
+    )
   }
 
   /** Match base para gastos (Expense) en el rango/filtros. */
@@ -261,6 +400,10 @@ export class DashboardService {
     const match: Record<string, any> = {
       clientId,
       isCajaChica: { $ne: true },
+      // Los viáticos (type='viatico') SÍ cuentan como rendiciones: es lo que hace
+      // la página /rendiciones. El anticipo (monto S/) y la rendición (documento)
+      // son métricas distintas, por eso un viático aporta a ambas. Solo se excluye
+      // la caja chica.
       $expr: {
         $and: [{ $gte: [effectiveDate, from] }, { $lte: [effectiveDate, to] }],
       },
@@ -268,6 +411,32 @@ export class DashboardService {
     if (query.projectId) match.projectId = new Types.ObjectId(query.projectId)
     if (query.collaboratorId)
       match.userId = new Types.ObjectId(query.collaboratorId)
+    return match
+  }
+
+  /**
+   * Match para viáticos-solicitud (ExpenseReport con type='viatico'), que en Detroit
+   * son la fuente real de los anticipos (la colección `advances` quedó en desuso).
+   */
+  private viaticoMatch(
+    clientId: Types.ObjectId,
+    query: DashboardQueryDto,
+    from: Date,
+    to: Date
+  ): Record<string, any> {
+    const effectiveDate = { $ifNull: ['$createdAt', { $toDate: '$_id' }] }
+    const match: Record<string, any> = {
+      clientId,
+      type: 'viatico',
+      $expr: {
+        $and: [{ $gte: [effectiveDate, from] }, { $lte: [effectiveDate, to] }],
+      },
+    }
+    if (query.projectId) match.projectId = new Types.ObjectId(query.projectId)
+    if (query.collaboratorId)
+      match.userId = new Types.ObjectId(query.collaboratorId)
+    if (query.categoryId)
+      match['viaticoLines.categoryId'] = new Types.ObjectId(query.categoryId)
     return match
   }
 
@@ -570,6 +739,129 @@ export class DashboardService {
       },
     ])
     return { amount: res[0]?.amount ?? 0, count: res[0]?.count ?? 0 }
+  }
+
+  // ─── Viático aggregations (ExpenseReport type='viatico') ──────────────────
+
+  /** Total solicitado en viáticos (monto pedido) y nº de solicitudes. */
+  private async aggregateViaticoTotals(
+    clientId: Types.ObjectId,
+    query: DashboardQueryDto,
+    from: Date,
+    to: Date
+  ): Promise<{ amount: number; count: number }> {
+    const res = await this.reportModel.aggregate([
+      { $match: this.viaticoMatch(clientId, query, from, to) },
+      {
+        $group: {
+          _id: null,
+          amount: { $sum: { $ifNull: ['$viaticoAmount', 0] } },
+          count: { $sum: 1 },
+        },
+      },
+    ])
+    return { amount: res[0]?.amount ?? 0, count: res[0]?.count ?? 0 }
+  }
+
+  private async aggregateViaticoByStatus(
+    clientId: Types.ObjectId,
+    query: DashboardQueryDto,
+    range: ResolvedRange
+  ): Promise<{ status: string; amount: number; count: number }[]> {
+    const res = await this.reportModel.aggregate([
+      { $match: this.viaticoMatch(clientId, query, range.from, range.to) },
+      {
+        $group: {
+          _id: { $ifNull: ['$status', 'pending_l1'] },
+          // Monto desembolsado real: viaticoPaidAmount cuando existe (pagos
+          // parciales), si no el monto solicitado.
+          amount: {
+            $sum: {
+              $ifNull: ['$viaticoPaidAmount', { $ifNull: ['$viaticoAmount', 0] }],
+            },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $project: { _id: 0, status: '$_id', amount: 1, count: 1 } },
+      { $sort: { amount: -1 } },
+    ])
+    return res
+  }
+
+  private async aggregateViaticoMonthly(
+    clientId: Types.ObjectId,
+    query: DashboardQueryDto,
+    range: ResolvedRange
+  ): Promise<{ month: string; amount: number }[]> {
+    const res = await this.reportModel.aggregate([
+      { $match: this.viaticoMatch(clientId, query, range.from, range.to) },
+      {
+        $group: {
+          _id: {
+            $dateToString: {
+              format: '%Y-%m',
+              date: { $ifNull: ['$createdAt', { $toDate: '$_id' }] },
+            },
+          },
+          amount: { $sum: { $ifNull: ['$viaticoAmount', 0] } },
+        },
+      },
+      { $project: { _id: 0, month: '$_id', amount: 1 } },
+      { $sort: { month: 1 } },
+    ])
+    return res
+  }
+
+  private async aggregateViaticoPendingReturns(
+    clientId: Types.ObjectId,
+    query: DashboardQueryDto,
+    range: ResolvedRange
+  ): Promise<{ amount: number; count: number }> {
+    const match = this.viaticoMatch(clientId, query, range.from, range.to)
+    match['viaticoReturnRecord.status'] = { $in: ['pending', 'proof_uploaded'] }
+    const res = await this.reportModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          amount: { $sum: { $ifNull: ['$viaticoReturnRecord.amountDue', 0] } },
+          count: { $sum: 1 },
+        },
+      },
+    ])
+    return { amount: res[0]?.amount ?? 0, count: res[0]?.count ?? 0 }
+  }
+
+  private async aggregateTopViaticoLocations(
+    clientId: Types.ObjectId,
+    query: DashboardQueryDto,
+    range: ResolvedRange
+  ): Promise<
+    { place: string; count: number; amount: number; lat?: number; lng?: number }[]
+  > {
+    const baseMatch = this.viaticoMatch(clientId, query, range.from, range.to)
+    const match = {
+      ...baseMatch,
+      viaticoPlace: { $exists: true, $nin: [null, ''] },
+    }
+    const res = await this.reportModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: { $toLower: { $trim: { input: '$viaticoPlace' } } },
+          place: { $first: '$viaticoPlace' },
+          count: { $sum: 1 },
+          amount: { $sum: { $ifNull: ['$viaticoAmount', 0] } },
+          lat: { $first: '$viaticoLat' },
+          lng: { $first: '$viaticoLng' },
+        },
+      },
+      { $sort: { amount: -1 } },
+      { $limit: 20 },
+      { $project: { _id: 0, place: 1, count: 1, amount: 1, lat: 1, lng: 1 } },
+    ])
+    return res
   }
 
   // ─── Expense report aggregations ──────────────────────────────────────────
