@@ -14,6 +14,7 @@ import { UploadService } from '../upload/upload.service'
 import { ProjectService } from '../project/project.service'
 import { CategoryService } from '../category/category.service'
 import { ROLES } from '../auth/enums/roles.enum'
+import { ChainStep } from '../advance/approval-chain.util'
 
 const mockAdvanceService = {
   liquidateExpenseReport: jest.fn().mockResolvedValue(undefined),
@@ -846,5 +847,417 @@ describe('ExpenseReportService — Fase 6 (reembolso: tenant y registro)', () =>
     expect(mockExpenseReportModel.findByIdAndUpdate).toHaveBeenCalled()
     expect(out.status).toBe('reimbursed')
     expect(mockEmailService.sendRendicionReembolsoPagado).toHaveBeenCalled()
+  })
+})
+
+describe('ExpenseReportService — aprobación de SOLICITUD de viático (regla 1.3, en paralelo entre niveles)', () => {
+  let service: ExpenseReportService
+  let mockExpenseReportModel: Record<string, jest.Mock>
+
+  const n1Id = new Types.ObjectId()
+  const n2Id = new Types.ObjectId()
+  const projectId = new Types.ObjectId()
+  const solicitudReportId = new Types.ObjectId().toString()
+  const solicitudUserId = new Types.ObjectId().toString()
+  const solicitudClientId = new Types.ObjectId().toString()
+
+  const mockUserServiceLocal = {
+    findEmailNameClient: jest.fn().mockResolvedValue(null),
+    findViaticoAccountingNotifyRecipients: jest.fn().mockResolvedValue([]),
+    isEmailEnabled: jest.fn().mockResolvedValue(false),
+  }
+  const mockNotificationsServiceLocal = { create: jest.fn().mockResolvedValue(undefined) }
+  const mockAdvanceServiceLocal = {}
+
+  function makeChain(): ChainStep[] {
+    return [
+      { level: 2, projectId, projectRole: 'seleccionado', approverIds: [n1Id] },
+    ]
+  }
+
+  function makeTwoStepChain(): ChainStep[] {
+    return [
+      { level: 2, projectId, projectRole: 'principal', approverIds: [n1Id] },
+      { level: 2, projectId, projectRole: 'seleccionado', approverIds: [n2Id] },
+    ]
+  }
+
+  function reportDoc(overrides: Record<string, unknown> = {}) {
+    return {
+      _id: solicitudReportId,
+      type: 'viatico',
+      status: 'pending_l1',
+      userId: solicitudUserId,
+      clientId: solicitudClientId,
+      viaticoApproverChain: makeChain(),
+      viaticoApprovalLevel: 0,
+      viaticoRequiredLevels: 1,
+      viaticoApprovalHistory: [],
+      viaticoAmount: 100,
+      viaticoMoneda: '01',
+      viaticoRejectedByRole: undefined as 'centro_costo' | 'contabilidad' | undefined,
+      save: jest.fn().mockResolvedValue(undefined),
+      ...overrides,
+    }
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks()
+    mockUserServiceLocal.findEmailNameClient.mockResolvedValue(null)
+    mockUserServiceLocal.findViaticoAccountingNotifyRecipients.mockResolvedValue([])
+
+    mockExpenseReportModel = {
+      findById: jest.fn(),
+      updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }),
+    }
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExpenseReportService,
+        { provide: getModelToken(ExpenseReport.name), useValue: mockExpenseReportModel },
+        { provide: getModelToken(Expense.name), useValue: {} },
+        { provide: getModelToken(CajaChicaReport.name), useValue: { countDocuments: jest.fn() } },
+        { provide: EmailService, useValue: {} },
+        { provide: NotificationsService, useValue: mockNotificationsServiceLocal },
+        { provide: UserService, useValue: mockUserServiceLocal },
+        { provide: AdvanceService, useValue: mockAdvanceServiceLocal },
+        { provide: UploadService, useValue: {} },
+        { provide: ProjectService, useValue: {} },
+        { provide: CategoryService, useValue: {} },
+      ],
+    }).compile()
+
+    service = module.get<ExpenseReportService>(ExpenseReportService)
+    jest.spyOn(service, 'findOne').mockResolvedValue(reportDoc() as never)
+  })
+
+  describe('approveViatico', () => {
+    it('deja que N2(seleccionado) apruebe antes que N2(principal) — cualquier orden', async () => {
+      const report = reportDoc({ viaticoApproverChain: makeTwoStepChain(), viaticoRequiredLevels: 2 })
+      mockExpenseReportModel.findById.mockResolvedValue(report)
+
+      await service.approveViatico(
+        solicitudReportId,
+        { approvedBy: n2Id.toString() },
+        n2Id.toString(),
+        ROLES.COLABORADOR
+      )
+
+      expect(report.viaticoApproverChain[1].approved).toBe(true)
+      expect(report.viaticoApproverChain[0].approved).toBeFalsy()
+      expect(report.status).toBe('pending_l1') // aún falta N2(principal)
+    })
+
+    it('rechaza a quien no es aprobador de ningún paso pendiente', async () => {
+      const report = reportDoc({ viaticoApproverChain: makeTwoStepChain(), viaticoRequiredLevels: 2 })
+      mockExpenseReportModel.findById.mockResolvedValue(report)
+      const stranger = new Types.ObjectId().toString()
+
+      await expect(
+        service.approveViatico(solicitudReportId, { approvedBy: stranger }, stranger, ROLES.COLABORADOR)
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('pasa a pending_contabilidad cuando ambos pasos ya aprobaron, sin importar el orden', async () => {
+      const chain = makeTwoStepChain()
+      chain[1].approved = true // N2(seleccionado) aprobó primero
+      const report = reportDoc({ viaticoApproverChain: chain, viaticoRequiredLevels: 2, viaticoApprovalLevel: 1 })
+      mockExpenseReportModel.findById.mockResolvedValue(report)
+
+      await service.approveViatico(
+        solicitudReportId,
+        { approvedBy: n1Id.toString() },
+        n1Id.toString(),
+        ROLES.COLABORADOR
+      )
+
+      expect(report.viaticoApproverChain.every((s) => s.approved)).toBe(true)
+      expect(report.status).toBe('pending_contabilidad')
+    })
+  })
+
+  describe('rejectViatico', () => {
+    it('deja que cualquier aprobador de un paso pendiente rechace la solicitud', async () => {
+      const report = reportDoc({ viaticoApproverChain: makeTwoStepChain(), viaticoRequiredLevels: 2 })
+      mockExpenseReportModel.findById.mockResolvedValue(report)
+
+      await service.rejectViatico(
+        solicitudReportId,
+        { rejectedBy: n2Id.toString(), rejectionReason: 'Falta sustento suficiente' },
+        n2Id.toString(),
+        ROLES.COLABORADOR
+      )
+
+      expect(report.status).toBe('rejected')
+      expect(report.viaticoRejectedByRole).toBe('centro_costo')
+    })
+
+    it('rechaza a quien no es aprobador de ningún paso pendiente', async () => {
+      const report = reportDoc({ viaticoApproverChain: makeTwoStepChain(), viaticoRequiredLevels: 2 })
+      mockExpenseReportModel.findById.mockResolvedValue(report)
+      const stranger = new Types.ObjectId().toString()
+
+      await expect(
+        service.rejectViatico(
+          solicitudReportId,
+          { rejectedBy: stranger, rejectionReason: 'motivo cualquiera' },
+          stranger,
+          ROLES.COLABORADOR
+        )
+      ).rejects.toThrow(ForbiddenException)
+    })
+  })
+})
+
+describe('ExpenseReportService — addExpenseToReport (reconstrucción de cadena por comprobante)', () => {
+  let service: ExpenseReportService
+  let mockExpenseReportModel: Record<string, jest.Mock>
+  let mockExpenseModel: Record<string, jest.Mock>
+  let mockProjectServiceLocal: { findManyByIds: jest.Mock }
+  let mockUserServiceLocal: { findTransactionalProfile: jest.Mock }
+
+  const addReportId = new Types.ObjectId().toString()
+  const addUserId = new Types.ObjectId().toString()
+  const addClientId = new Types.ObjectId().toString()
+  const existingExpenseId = new Types.ObjectId().toString()
+  const newExpenseId = new Types.ObjectId().toString()
+  const projectId = new Types.ObjectId().toString()
+
+  function reportSelectResult(overrides: Record<string, unknown> = {}) {
+    return {
+      status: 'submitted',
+      userId: addUserId,
+      clientId: addClientId,
+      expenseIds: [existingExpenseId],
+      ...overrides,
+    }
+  }
+
+  function mockFindByIdSelect(result: unknown) {
+    mockExpenseReportModel.findById.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue(result),
+        }),
+      }),
+    })
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks()
+
+    mockExpenseReportModel = {
+      findById: jest.fn(),
+      findByIdAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }),
+    }
+    mockExpenseModel = {
+      find: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      }),
+    }
+    mockProjectServiceLocal = { findManyByIds: jest.fn().mockResolvedValue([]) }
+    mockUserServiceLocal = { findTransactionalProfile: jest.fn().mockResolvedValue(null) }
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExpenseReportService,
+        { provide: getModelToken(ExpenseReport.name), useValue: mockExpenseReportModel },
+        { provide: getModelToken(Expense.name), useValue: mockExpenseModel },
+        { provide: getModelToken(CajaChicaReport.name), useValue: { countDocuments: jest.fn() } },
+        { provide: EmailService, useValue: {} },
+        { provide: NotificationsService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
+        { provide: UserService, useValue: mockUserServiceLocal },
+        { provide: AdvanceService, useValue: {} },
+        { provide: UploadService, useValue: {} },
+        { provide: ProjectService, useValue: mockProjectServiceLocal },
+        { provide: CategoryService, useValue: {} },
+      ],
+    }).compile()
+
+    service = module.get<ExpenseReportService>(ExpenseReportService)
+  })
+
+  it('agregar un comprobante a una rendición YA ENVIADA solo construye la cadena del nuevo (no toca los existentes)', async () => {
+    mockFindByIdSelect(reportSelectResult({ status: 'submitted' }))
+
+    await service.addExpenseToReport(addReportId, newExpenseId)
+
+    expect(mockExpenseModel.find).toHaveBeenCalledTimes(1)
+    const findArg = mockExpenseModel.find.mock.calls[0][0]
+    expect(findArg._id.$in.map((id: Types.ObjectId) => id.toString())).toEqual([newExpenseId])
+  })
+
+  it('agregar un comprobante a una rendición RECHAZADA reconstruye la cadena de TODOS y la reenvía', async () => {
+    mockFindByIdSelect(reportSelectResult({ status: 'rejected' }))
+
+    const result = await service.addExpenseToReport(addReportId, newExpenseId)
+
+    expect(mockExpenseReportModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      addReportId,
+      expect.objectContaining({
+        $set: { status: 'submitted' },
+        $unset: { rejectionReason: '', rejectedByRole: '' },
+      }),
+      { new: true }
+    )
+    expect(mockExpenseModel.find).toHaveBeenCalledTimes(1)
+    const findArg = mockExpenseModel.find.mock.calls[0][0]
+    expect(findArg._id.$in.map((id: Types.ObjectId) => id.toString()).sort()).toEqual(
+      [existingExpenseId, newExpenseId].sort()
+    )
+    expect(result).toBeDefined()
+  })
+
+  it('agregar un comprobante a una rendición ABIERTA (aún no enviada) no construye ninguna cadena', async () => {
+    mockFindByIdSelect(reportSelectResult({ status: 'open' }))
+
+    await service.addExpenseToReport(addReportId, newExpenseId)
+
+    expect(mockExpenseModel.find).not.toHaveBeenCalled()
+  })
+
+  const approverId = new Types.ObjectId().toString()
+
+  function mockProjectWithOneLevel() {
+    mockProjectServiceLocal.findManyByIds.mockResolvedValue([
+      {
+        _id: projectId,
+        approverLevels: [{ level: 1, userIds: [new Types.ObjectId(approverId)] }],
+      },
+    ])
+    mockUserServiceLocal.findTransactionalProfile.mockResolvedValue({
+      projectIds: [projectId],
+      primaryProjectId: projectId,
+    })
+  }
+
+  function mockExpenseDoc(overrides: Record<string, unknown> = {}): {
+    _id: Types.ObjectId
+    proyectId: Types.ObjectId
+    status: string
+    approverChain: ChainStep[] | undefined
+    requiredLevels?: number
+    approvalLevel?: number
+    save: jest.Mock
+  } {
+    return {
+      _id: new Types.ObjectId(newExpenseId),
+      proyectId: new Types.ObjectId(projectId),
+      status: 'pending',
+      approverChain: undefined,
+      save: jest.fn().mockResolvedValue(undefined),
+      ...overrides,
+    }
+  }
+
+  it('buildChainForNewExpense construye la cadena N1/N2 de un comprobante recién creado (chain-at-upload)', async () => {
+    mockProjectWithOneLevel()
+    const expenseDoc = mockExpenseDoc()
+    mockExpenseModel.find.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([expenseDoc]),
+    })
+
+    await service.buildChainForNewExpense(newExpenseId, addUserId, addClientId)
+
+    expect(expenseDoc.save).toHaveBeenCalledTimes(1)
+    expect(expenseDoc.approverChain).toHaveLength(1)
+    expect(expenseDoc.approverChain?.[0].approved).toBeFalsy()
+    expect(expenseDoc.requiredLevels).toBe(1)
+  })
+
+  it('buildChainForNewExpense no hace nada si falta ownerUserId o clientId', async () => {
+    await service.buildChainForNewExpense(newExpenseId, '', addClientId)
+    expect(mockExpenseModel.find).not.toHaveBeenCalled()
+  })
+
+  it('no reconstruye (ni pisa aprobaciones en curso de) un comprobante que YA tiene cadena — envío normal, safety net', async () => {
+    mockProjectWithOneLevel()
+    const existingChain: ChainStep[] = [
+      {
+        level: 1,
+        projectId: new Types.ObjectId(projectId),
+        projectRole: 'principal',
+        approverIds: [new Types.ObjectId(approverId)],
+        approved: true,
+        approvedBy: new Types.ObjectId(approverId),
+        approvedAt: new Date(),
+      },
+    ]
+    const expenseDoc = mockExpenseDoc({ approverChain: existingChain })
+    mockExpenseModel.find.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([expenseDoc]),
+    })
+
+    // Reenvío normal (rama wasSubmitted de addExpenseToReport): solo agrega un
+    // comprobante nuevo, pero si el motor volviera a mirar uno ya chained no
+    // debe pisarlo.
+    await service.buildChainForNewExpense(newExpenseId, addUserId, addClientId)
+
+    expect(expenseDoc.save).not.toHaveBeenCalled()
+    expect(expenseDoc.approverChain).toBe(existingChain)
+  })
+
+  it('agregar un comprobante a una rendición RECHAZADA SÍ reconstruye (force) la cadena de comprobantes que ya tenían aprobaciones', async () => {
+    mockProjectWithOneLevel()
+    const staleApprovedChain: ChainStep[] = [
+      {
+        level: 1,
+        projectId: new Types.ObjectId(projectId),
+        projectRole: 'principal',
+        approverIds: [new Types.ObjectId(approverId)],
+        approved: true,
+        approvedBy: new Types.ObjectId(approverId),
+        approvedAt: new Date(),
+      },
+    ]
+    const existingDoc = mockExpenseDoc({
+      _id: new Types.ObjectId(existingExpenseId),
+      approverChain: staleApprovedChain,
+    })
+    mockExpenseModel.find.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([existingDoc]),
+    })
+    mockFindByIdSelect(reportSelectResult({ status: 'rejected', expenseIds: [existingExpenseId] }))
+
+    await service.addExpenseToReport(addReportId, newExpenseId)
+
+    expect(existingDoc.save).toHaveBeenCalledTimes(1)
+    expect(existingDoc.approverChain).not.toBe(staleApprovedChain)
+    expect(existingDoc.approverChain?.[0].approved).toBeFalsy()
+  })
+
+  it('findAllByCoordinator lista cualquier reporte con un comprobante en la cadena del aprobador, sin exigir isDirecta (regla 1.9 — visible desde el upload, aunque siga `open`)', async () => {
+    const coordId = new Types.ObjectId().toString()
+    const reportWithChain = new Types.ObjectId()
+
+    // expenseModel.find(...).distinct('expenseReportId').exec() → reportes con
+    // un comprobante donde el coordinador es aprobador.
+    mockExpenseModel.find.mockReturnValue({
+      distinct: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue([reportWithChain]),
+      }),
+    })
+
+    const chainable: Record<string, jest.Mock> = {
+      populate: jest.fn().mockReturnThis(),
+      sort: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    }
+    mockExpenseReportModel.find = jest.fn().mockReturnValue(chainable)
+
+    await service.findAllByCoordinator(coordId, addClientId)
+
+    const query = mockExpenseReportModel.find.mock.calls[0][0] as { $or: Array<Record<string, any>> }
+    // Ninguna cláusula debe restringir a isDirecta: el match por cadena es general.
+    expect(query.$or.some(c => c['isDirecta'] === true)).toBe(false)
+    const chainClause = query.$or.find(c => c['_id']?.$in)
+    expect(chainClause).toBeDefined()
+    expect(
+      chainClause!['_id'].$in.map((x: Types.ObjectId) => x.toString())
+    ).toContain(reportWithChain.toString())
   })
 })

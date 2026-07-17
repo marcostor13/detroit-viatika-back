@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { getModelToken } from '@nestjs/mongoose'
 import { Types } from 'mongoose'
 import { ConfigService } from '@nestjs/config'
+import { BadRequestException, ForbiddenException } from '@nestjs/common'
 import { ExpenseService } from './expense.service'
 import { Expense } from './entities/expense.entity'
 import { EmailService } from '../email/email.service'
@@ -15,6 +16,8 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { CategoryService } from '../category/category.service'
 import { CreateExpenseDto } from './dto/create-expense.dto'
 import { Client } from '../client/entities/client.entity'
+import { ROLES } from '../auth/enums/roles.enum'
+import { ChainStep } from '../advance/approval-chain.util'
 
 describe('ExpenseService — email gating (isEmailEnabled)', () => {
   let service: ExpenseService
@@ -274,6 +277,150 @@ describe('ExpenseService — Fase 5 (plazos y límites de categoría)', () => {
       ).evaluateCategoryLimit(bodyBase(), 50)
       expect(out).toEqual({ percent: 60 })
       expect((out as { warning?: string }).warning).toBeUndefined()
+    })
+  })
+})
+
+describe('ExpenseService — aprobación por comprobante (regla 1.4, en paralelo entre niveles)', () => {
+  let service: ExpenseService
+  let mockExpenseModel: { findOne: jest.Mock; findByIdAndUpdate: jest.Mock }
+  let mockNotificationsService: { create: jest.Mock }
+
+  const clientId = new Types.ObjectId().toHexString()
+  const expenseId = new Types.ObjectId().toHexString()
+  const n1Id = new Types.ObjectId()
+  const n2Id = new Types.ObjectId()
+  const projectId = new Types.ObjectId()
+
+  const actorN1 = { userId: n1Id.toString(), roleName: ROLES.COLABORADOR, clientId }
+  const actorN2 = { userId: n2Id.toString(), roleName: ROLES.COLABORADOR, clientId }
+
+  function makeChain(): ChainStep[] {
+    return [
+      { level: 1, projectId, projectRole: 'principal', approverIds: [n1Id] },
+      { level: 2, projectId, projectRole: 'principal', approverIds: [n2Id] },
+    ]
+  }
+
+  function baseExpense(overrides: Record<string, unknown> = {}) {
+    return {
+      _id: expenseId,
+      clientId,
+      createdBy: new Types.ObjectId().toHexString(),
+      approverChain: makeChain(),
+      approvalLevel: 0,
+      requiredLevels: 2,
+      approvalHistory: [],
+      contabilidadStatus: 'pending',
+      status: 'pending',
+      ...overrides,
+    }
+  }
+
+  function mockLoadExpense(expense: unknown) {
+    const query = {
+      populate: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(expense),
+    }
+    mockExpenseModel.findOne.mockReturnValue(query)
+  }
+
+  function mockUpdate(result: unknown) {
+    mockExpenseModel.findByIdAndUpdate.mockReturnValue({
+      exec: jest.fn().mockResolvedValue(result),
+    })
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks()
+    mockNotificationsService = { create: jest.fn().mockResolvedValue(undefined) }
+    mockExpenseModel = { findOne: jest.fn(), findByIdAndUpdate: jest.fn() }
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExpenseService,
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('sk-test') } },
+        { provide: getModelToken(Expense.name), useValue: mockExpenseModel },
+        { provide: getModelToken(Client.name), useValue: {} },
+        { provide: EmailService, useValue: {} },
+        { provide: ProjectService, useValue: {} },
+        { provide: UserService, useValue: {} },
+        { provide: SunatConfigService, useValue: {} },
+        { provide: HttpService, useValue: {} },
+        { provide: UploadService, useValue: {} },
+        { provide: ExpenseReportService, useValue: {} },
+        { provide: NotificationsService, useValue: mockNotificationsService },
+        { provide: CategoryService, useValue: {} },
+      ],
+    }).compile()
+
+    service = module.get<ExpenseService>(ExpenseService)
+  })
+
+  describe('approveByCoord', () => {
+    it('deja que N2 apruebe antes que N1 (cualquier orden)', async () => {
+      const expense = baseExpense()
+      mockLoadExpense(expense)
+      mockUpdate({ ...expense })
+
+      await service.approveByCoord(expenseId, actorN2)
+
+      const [, updatePayload] = mockExpenseModel.findByIdAndUpdate.mock.calls[0]
+      expect(updatePayload.$set.approverChain[1].approved).toBe(true)
+      expect(updatePayload.$set.approverChain[0].approved).toBeFalsy()
+      expect(updatePayload.$set.status).toBe('pending')
+    })
+
+    it('rechaza a quien no es aprobador de ningún paso pendiente', async () => {
+      const expense = baseExpense()
+      mockLoadExpense(expense)
+      const stranger = { userId: new Types.ObjectId().toString(), roleName: ROLES.COLABORADOR, clientId }
+
+      await expect(service.approveByCoord(expenseId, stranger)).rejects.toThrow(ForbiddenException)
+    })
+
+    it('marca la cadena completa cuando N1 y N2 ya aprobaron, sin importar el orden', async () => {
+      const chain = makeChain()
+      chain[1].approved = true // N2 aprobó primero
+      const expense = baseExpense({ approverChain: chain, approvalLevel: 1 })
+      mockLoadExpense(expense)
+      mockUpdate({ ...expense })
+
+      await service.approveByCoord(expenseId, actorN1)
+
+      const [, updatePayload] = mockExpenseModel.findByIdAndUpdate.mock.calls[0]
+      expect(updatePayload.$set.approverChain.every((s: ChainStep) => s.approved)).toBe(true)
+      // Cadena de Coordinador completa, pero Contabilidad sigue pendiente.
+      expect(updatePayload.$set.status).toBe('pending')
+    })
+
+    it('rechaza aprobar cuando la rendición aún no fue enviada (approverChain vacío)', async () => {
+      const expense = baseExpense({ approverChain: [] })
+      mockLoadExpense(expense)
+
+      await expect(service.approveByCoord(expenseId, actorN1)).rejects.toThrow(BadRequestException)
+    })
+  })
+
+  describe('rejectByCoord', () => {
+    it('deja que cualquier aprobador de un paso pendiente rechace, no solo "el turno actual"', async () => {
+      const expense = baseExpense()
+      mockLoadExpense(expense)
+      mockUpdate({ ...expense, status: 'rejected' })
+
+      await service.rejectByCoord(expenseId, actorN2, 'Falta sustento suficiente')
+
+      expect(mockExpenseModel.findByIdAndUpdate).toHaveBeenCalled()
+      const [, updatePayload] = mockExpenseModel.findByIdAndUpdate.mock.calls[0]
+      expect(updatePayload.$set.status).toBe('rejected')
+    })
+
+    it('rechaza a quien no es aprobador de ningún paso pendiente', async () => {
+      const expense = baseExpense()
+      mockLoadExpense(expense)
+      const stranger = { userId: new Types.ObjectId().toString(), roleName: ROLES.COLABORADOR, clientId }
+
+      await expect(service.rejectByCoord(expenseId, stranger, 'motivo cualquiera')).rejects.toThrow(ForbiddenException)
     })
   })
 })

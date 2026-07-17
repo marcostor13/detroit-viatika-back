@@ -27,12 +27,14 @@ import { Types } from 'mongoose'
 import { UpdateUserDto, UpdatePermissionsDto } from './dto/update-user.dto'
 import { ParseObjectIdPipe } from './pipes/parse-objectid.pipe'
 import { AuditLogService } from '../audit-log/audit-log.service'
+import { ProjectService } from '../project/project.service'
 
 @Controller('user')
 export class UserController {
   constructor(
     private userService: UserService,
-    private auditLogService: AuditLogService
+    private auditLogService: AuditLogService,
+    private projectService: ProjectService
   ) {}
 
   @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -76,7 +78,14 @@ export class UserController {
     if (role === ROLES.COLABORADOR) {
       const hasRendicionesPermission =
         req?.user?.permissions?.modules?.includes('rendiciones')
-      if (!hasRendicionesPermission) {
+      const userId = req?.user?._id || req?.user?.sub
+      const isApprover =
+        !hasRendicionesPermission &&
+        (await this.projectService.isApproverForClient(
+          userId?.toString(),
+          clientId.toString()
+        ))
+      if (!hasRendicionesPermission && !isApprover) {
         throw new ForbiddenException(
           'No tienes permiso para ver usuarios de esta empresa'
         )

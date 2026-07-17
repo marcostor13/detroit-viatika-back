@@ -4,6 +4,7 @@ import { Types } from 'mongoose'
 import { ExpenseReportController } from './expense-report.controller'
 import { ExpenseReportService } from './expense-report.service'
 import { AuditLogService } from '../audit-log/audit-log.service'
+import { ProjectService } from '../project/project.service'
 import { ROLES } from '../auth/enums/roles.enum'
 
 const reportId = new Types.ObjectId().toHexString()
@@ -25,18 +26,24 @@ describe('ExpenseReportController — Fase 6 (reembolsos / documentos)', () => {
     log: jest.fn().mockResolvedValue(undefined),
   }
 
+  const mockProjectService = {
+    isApproverForClient: jest.fn().mockResolvedValue(false),
+  }
+
   const clientA = new Types.ObjectId().toHexString()
   const clientB = new Types.ObjectId().toHexString()
   const userSub = new Types.ObjectId().toHexString()
 
   beforeEach(async () => {
     jest.clearAllMocks()
+    mockProjectService.isApproverForClient.mockResolvedValue(false)
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ExpenseReportController],
       providers: [
         { provide: ExpenseReportService, useValue: mockExpenseReportService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: ProjectService, useValue: mockProjectService },
       ],
     }).compile()
 

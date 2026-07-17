@@ -10,15 +10,12 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
-  Query,
-  ForbiddenException,
   BadRequestException,
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
 import { memoryStorage } from 'multer'
 import { AdvanceService } from './advance.service'
 import { PaymentBatchService, PaymentKind } from './payment/payment-batch.service'
-import { CreateAdvanceDto } from './dto/create-advance.dto'
 import { ApproveAdvanceDto, RejectAdvanceDto } from './dto/approve-advance.dto'
 import { ResubmitAdvanceDto } from './dto/resubmit-advance.dto'
 import { PayAdvanceDto } from './dto/pay-advance.dto'
@@ -163,15 +160,6 @@ export class AdvanceController {
     return result
   }
 
-  /** Colaborador solicita un anticipo */
-  @Post()
-  @Roles(ROLES.COLABORADOR, ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
-  create(@Body() dto: CreateAdvanceDto, @Request() req) {
-    dto.userId = req.user?.sub || req.user?._id
-    dto.clientId = dto.clientId || req.user?.clientId
-    return this.advanceService.create(dto)
-  }
-
   /** Mis anticipos (colaborador) */
   @Get('my/:userId/client/:clientId')
   @Roles(
@@ -192,44 +180,6 @@ export class AdvanceController {
     return this.advanceService.findAllByClient(clientId)
   }
 
-  /** Página Viáticos: listado con filtros — Admin ve todos, coordinador ve solo los suyos */
-  @Get('viaticos/list')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
-  findForViaticosPage(
-    @Request() req,
-    @Query('status') status?: string,
-    @Query('dateFrom') dateFrom?: string,
-    @Query('dateTo') dateTo?: string
-  ) {
-    const userRole = req.user?.roles?.[0] || req.user?.role
-    const isAdminRole = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(userRole)
-    const canApproveL1 = req.user?.permissions?.canApproveL1 === true
-    const hasViaticosModule =
-      req.user?.permissions?.modules?.includes('viaticos') === true
-
-    if (!isAdminRole && !canApproveL1 && !hasViaticosModule) {
-      throw new ForbiddenException(
-        'Sin permiso para acceder a la gestión de viáticos'
-      )
-    }
-
-    const rawClient = req.user?.clientId
-    const clientId =
-      rawClient?._id?.toString?.() ??
-      rawClient?.toString?.() ??
-      String(rawClient ?? '')
-
-    return this.advanceService.findForViaticosPage({
-      requesterId: req.user?.sub || req.user?._id,
-      requesterRole: userRole,
-      requesterPermissions: req.user?.permissions,
-      clientId,
-      status,
-      dateFrom,
-      dateTo,
-    })
-  }
-
   /** Anticipos pendientes de acción (Admin/Tesorero) */
   @Get('pending/client/:clientId')
   @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
@@ -246,7 +196,7 @@ export class AdvanceController {
 
   /** Advances sin ExpenseReport vinculado — para vista unificada de rendiciones */
   @Get('orphaned/client/:clientId')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.COORDINADOR)
+  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD, ROLES.COORDINADOR, ROLES.COLABORADOR)
   findOrphaned(@Param('clientId') clientId: string, @Request() req) {
     return this.advanceService.findOrphaned(clientId, {
       userId: req.user?.sub || req.user?._id,
@@ -334,31 +284,6 @@ export class AdvanceController {
       userId: req.user._id || req.user.sub,
       userName: req.user.name || req.user.email,
       action: 'resubmit_advance',
-      module: 'tesoreria',
-      entityId: id,
-      clientId: req.user.clientId,
-    })
-    return result
-  }
-
-  /** Reenvío manual de correo al coordinador cuando el envío falló. */
-  @Patch(':id/resend-coordinator-email')
-  @Roles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
-  async resendCoordinatorEmail(@Param('id') id: string, @Request() req) {
-    const rawClient = req.user?.clientId
-    const clientId =
-      rawClient?._id?.toString?.() ??
-      rawClient?.toString?.() ??
-      String(rawClient ?? '')
-
-    const result = await this.advanceService.resendCoordinatorNotification(
-      id,
-      clientId
-    )
-    this.auditLogService.log({
-      userId: req.user._id || req.user.sub,
-      userName: req.user.name || req.user.email,
-      action: 'resend_coordinator_notification',
       module: 'tesoreria',
       entityId: id,
       clientId: req.user.clientId,

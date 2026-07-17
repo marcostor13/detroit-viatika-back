@@ -5,6 +5,8 @@ import {
   buildApproverChain,
   canActOnChain,
   advanceChain,
+  findActionableChainStep,
+  isChainFullyApproved,
   resolveApprovalStep,
   buildSolicitudChain,
   buildRendicionChain,
@@ -76,6 +78,56 @@ describe('approval-chain.util', () => {
 
     it('rejects someone not in approverIds', () => {
       expect(canActOnChain({ chain: [step], approvalLevel: 0, actorId: a3.toString(), actorRole: ROLES.COORDINADOR })).toBe(false)
+    })
+  })
+
+  describe('findActionableChainStep / isChainFullyApproved (aprobación en paralelo entre niveles)', () => {
+    function makeChain(): ChainStep[] {
+      return [
+        { level: 1, projectId, projectRole: 'principal', approverIds: [a1] },
+        { level: 2, projectId, projectRole: 'principal', approverIds: [a2] },
+      ]
+    }
+
+    it('lets N2 approve before N1 has acted (any order)', () => {
+      const chain = makeChain()
+      expect(findActionableChainStep({ chain, actorId: a2.toString(), actorRole: ROLES.COORDINADOR })).toBe(1)
+    })
+
+    it('returns -1 for someone who is not an approver of any pending step', () => {
+      const chain = makeChain()
+      expect(findActionableChainStep({ chain, actorId: a3.toString(), actorRole: ROLES.COORDINADOR })).toBe(-1)
+    })
+
+    it('skips steps already approved and finds the next pending one for the same approver', () => {
+      const chain = makeChain()
+      chain[0].approved = true
+      expect(findActionableChainStep({ chain, actorId: a1.toString(), actorRole: ROLES.COORDINADOR })).toBe(-1)
+      expect(findActionableChainStep({ chain, actorId: a2.toString(), actorRole: ROLES.COORDINADOR })).toBe(1)
+    })
+
+    it('SuperAdmin can act on the first pending step regardless of who the approvers are', () => {
+      const chain = makeChain()
+      expect(findActionableChainStep({ chain, actorId: a3.toString(), actorRole: ROLES.SUPER_ADMIN })).toBe(0)
+    })
+
+    it('returns -1 when every step is already approved', () => {
+      const chain = makeChain()
+      chain[0].approved = true
+      chain[1].approved = true
+      expect(findActionableChainStep({ chain, actorId: a1.toString(), actorRole: ROLES.COORDINADOR })).toBe(-1)
+    })
+
+    it('isChainFullyApproved is false while any step is pending, regardless of order', () => {
+      const chain = makeChain()
+      chain[1].approved = true // N2 approved first, N1 still pending
+      expect(isChainFullyApproved(chain)).toBe(false)
+      chain[0].approved = true
+      expect(isChainFullyApproved(chain)).toBe(true)
+    })
+
+    it('isChainFullyApproved is true for an empty chain (regla 1.6, all levels omitted)', () => {
+      expect(isChainFullyApproved([])).toBe(true)
     })
   })
 

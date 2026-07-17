@@ -17,6 +17,10 @@ export const chainStepSchemaDefinition = {
   projectRole: { type: String, enum: ['principal', 'seleccionado'], required: true },
   approverIds: { type: [{ type: Types.ObjectId, ref: 'User' }], default: [] },
   escalatedFrom: { type: Number, required: false },
+  /** Aprobación en paralelo entre niveles: este paso específico ya fue resuelto. */
+  approved: { type: Boolean, default: false },
+  approvedBy: { type: Types.ObjectId, ref: 'User', required: false },
+  approvedAt: { type: Date, required: false },
   _id: false,
 }
 
@@ -186,6 +190,16 @@ export interface ExpenseReportDocument extends Document {
   /** Cadena por centro de costo (N2 principal/seleccionado), snapshot al crear la solicitud. */
   viaticoApproverChain?: ChainStep[]
   viaticoApprovalHistory?: ApprovalEntry[]
+  /**
+   * Aprobación final de Contabilidad de la SOLICITUD (regla 1.3, gate tras
+   * completar `viaticoApproverChain`) — ver `approveViaticoContabilidad`.
+   * Campos propios y separados de `contabilidadApprovedAt`/`contabilidadApprovedBy`,
+   * que pertenecen a la aprobación de la RENDICIÓN de comprobantes (regla 1.4,
+   * posterior al pago); antes ambos gates compartían el mismo campo y el de la
+   * rendición pisaba el de la solicitud.
+   */
+  viaticoSolicitudContabilidadApprovedAt?: Date
+  viaticoSolicitudContabilidadApprovedBy?: Types.ObjectId
   viaticoPaidAmount?: number
   viaticoPayments?: AdvancePayment[]
   viaticoPaymentInfo?: PaymentInfo
@@ -507,6 +521,18 @@ export class ExpenseReport {
     default: [],
   })
   viaticoApprovalHistory?: ApprovalEntry[]
+
+  /**
+   * Aprobación final de Contabilidad de la SOLICITUD (regla 1.3), separada de
+   * `contabilidadApprovedAt`/`contabilidadApprovedBy` (aprobación de la
+   * RENDICIÓN de comprobantes, regla 1.4) para no pisar el registro de
+   * auditoría de una fase con el de la otra.
+   */
+  @Prop({ type: Date, required: false })
+  viaticoSolicitudContabilidadApprovedAt?: Date
+
+  @Prop({ type: Types.ObjectId, ref: 'User', required: false })
+  viaticoSolicitudContabilidadApprovedBy?: Types.ObjectId
 
   @Prop({ type: Number, required: false })
   viaticoPaidAmount?: number

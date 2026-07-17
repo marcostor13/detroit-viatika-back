@@ -4,6 +4,7 @@ import { Types } from 'mongoose'
 import { UserController } from './user.controller'
 import { UserService } from './user.service'
 import { AuditLogService } from '../audit-log/audit-log.service'
+import { ProjectService } from '../project/project.service'
 import { ROLES } from '../auth/enums/roles.enum'
 
 const clientId = new Types.ObjectId()
@@ -43,16 +44,22 @@ const mockUserService = {
 
 const mockAuditLogService = { log: jest.fn().mockResolvedValue(undefined) }
 
+const mockProjectService = {
+  isApproverForClient: jest.fn().mockResolvedValue(false),
+}
+
 describe('UserController', () => {
   let controller: UserController
 
   beforeEach(async () => {
     jest.clearAllMocks()
+    mockProjectService.isApproverForClient.mockResolvedValue(false)
     const module: TestingModule = await Test.createTestingModule({
       controllers: [UserController],
       providers: [
         { provide: UserService, useValue: mockUserService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: ProjectService, useValue: mockProjectService },
       ],
     }).compile()
     controller = module.get<UserController>(UserController)
@@ -117,6 +124,49 @@ describe('UserController', () => {
           req as never
         )
       ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('lanza ForbiddenException si COLABORADOR sin permiso ni aprobador consulta la lista', async () => {
+      mockProjectService.isApproverForClient.mockResolvedValue(false)
+      const req = makeReq({
+        roles: [ROLES.COLABORADOR],
+        clientId: clientId.toString(),
+        permissions: { modules: [] },
+      })
+      await expect(
+        controller.findAll(
+          clientId,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          req as never
+        )
+      ).rejects.toThrow(ForbiddenException)
+    })
+
+    it('permite a COLABORADOR aprobador (sin el modulo rendiciones) consultar la lista', async () => {
+      mockProjectService.isApproverForClient.mockResolvedValue(true)
+      const req = makeReq({
+        roles: [ROLES.COLABORADOR],
+        clientId: clientId.toString(),
+        permissions: { modules: [] },
+      })
+      await controller.findAll(
+        clientId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        req as never
+      )
+      expect(mockProjectService.isApproverForClient).toHaveBeenCalledWith(
+        userId.toString(),
+        clientId.toString()
+      )
+      expect(mockUserService.findAll).toHaveBeenCalledWith(clientId)
     })
 
     it('usa findAllPaginated cuando se pasan parametros de busqueda', async () => {

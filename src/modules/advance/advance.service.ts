@@ -31,7 +31,6 @@ import { ROLES } from '../auth/enums/roles.enum'
 import { ProjectService } from '../project/project.service'
 import { CategoryService } from '../category/category.service'
 import { UserService } from '../user/user.service'
-import { UserPermissions } from '../user/schemas/user.schema'
 import { EmailService } from '../email/email.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { monedaSymbol, DEFAULT_MONEDA } from '../../common/moneda.constants'
@@ -120,28 +119,6 @@ export class AdvanceService implements OnModuleInit {
   }
 
   /**
-   * Retirado (decisión 7.0.1, riesgo 2): la creación de solicitudes de
-   * viático por este módulo (con lugar/fechas/centro de costo) fue
-   * reemplazada por el flujo unificado `POST /expense-report/viatico`
-   * (`ExpenseReportService.createViatico`), que ya usa la cadena de centro
-   * de costo con niveles explícitos. `POST /advance` sigue vivo solo para
-   * el anticipo genérico (`createSimpleAdvance`) — sin centro de costo, sin
-   * equivalente en ExpenseReport.
-   */
-  async create(dto: CreateAdvanceDto): Promise<Advance> {
-    if (!dto.clientId) throw new BadRequestException('clientId es requerido')
-    if (!dto.userId) throw new BadRequestException('userId es requerido')
-
-    if (this.isViaticoSolicitud(dto) || this.isViaticoSolicitudPartial(dto)) {
-      throw new BadRequestException(
-        'La solicitud de viáticos con centro de costo ya no se crea por este endpoint. Use POST /expense-report/viatico.'
-      )
-    }
-
-    return await this.createSimpleAdvance(dto)
-  }
-
-  /**
    * Total fila (regla cliente):
    * - Si GLP/día > 0: importe × GLP/día × días
    * - Si no: importe × personas × días
@@ -208,15 +185,6 @@ export class AdvanceService implements OnModuleInit {
     return monedaSymbol(moneda)
   }
 
-  private isViaticoSolicitud(dto: CreateAdvanceDto): boolean {
-    return !!(
-      dto.place?.trim() &&
-      dto.startDate &&
-      dto.endDate &&
-      dto.projectId
-    )
-  }
-
   /** Fecha inicio del viaje es hoy o mañana (zona horaria del servidor). */
   private isViaticoTravelStartUrgent(start?: Date): boolean {
     if (!start) return false
@@ -256,48 +224,6 @@ export class AdvanceService implements OnModuleInit {
       }
     }
     return { ok: true }
-  }
-
-  private isViaticoSolicitudPartial(dto: CreateAdvanceDto): boolean {
-    const any =
-      !!dto.place?.trim() ||
-      !!dto.startDate ||
-      !!dto.endDate ||
-      !!dto.projectId
-    if (!any) return false
-    return !this.isViaticoSolicitud(dto)
-  }
-
-  private async createSimpleAdvance(dto: CreateAdvanceDto): Promise<Advance> {
-    const profile = await this.userService.findTransactionalProfile(
-      dto.userId!
-    )
-    const chain = buildApproverChain(profile?.approverIds)
-
-    const advance = await this.advanceModel.create({
-      userId: new Types.ObjectId(dto.userId),
-      clientId: new Types.ObjectId(dto.clientId),
-      approverChain: chain,
-      expenseReportId: dto.expenseReportId
-        ? new Types.ObjectId(dto.expenseReportId)
-        : undefined,
-      amount: dto.amount,
-      moneda: dto.moneda?.trim() || DEFAULT_MONEDA,
-      description: dto.description,
-      status: 'pending_l1',
-      approvalLevel: 0,
-      requiredLevels: chain.length,
-      approvalHistory: [],
-    })
-
-    if (dto.expenseReportId) {
-      await this.expenseReportService.addAdvanceToReport(
-        dto.expenseReportId,
-        (advance as any)._id.toString()
-      )
-    }
-
-    return advance
   }
 
   /** Validación compartida: nueva solicitud y reenvío tras rechazo (Fase 3). */
@@ -405,86 +331,6 @@ export class AdvanceService implements OnModuleInit {
       : metaDesc
 
     return { lineDocs, roundedSum, description }
-  }
-
-  private async createViaticoSolicitud(
-    dto: CreateAdvanceDto
-  ): Promise<Advance> {
-    const profile = await this.userService.findTransactionalProfile(dto.userId!)
-    if (!profile?.signature?.trim()) {
-      throw new ForbiddenException(
-        'Debe registrar su firma digital en el perfil antes de solicitar viáticos.'
-      )
-    }
-
-    const { lineDocs, roundedSum, description } =
-      await this.validateViaticoBusinessRulesAndLines(
-        {
-          place: dto.place!,
-          startDate: dto.startDate!,
-          endDate: dto.endDate!,
-          projectId: dto.projectId!,
-          lines: dto.lines,
-          observations: dto.observations,
-          amount: dto.amount,
-        },
-        dto.clientId!
-      )
-
-    const chain = buildApproverChain(profile.approverIds)
-
-    const advance = await this.advanceModel.create({
-      userId: new Types.ObjectId(dto.userId),
-      clientId: new Types.ObjectId(dto.clientId),
-      approverChain: chain,
-      expenseReportId: dto.expenseReportId
-        ? new Types.ObjectId(dto.expenseReportId)
-        : undefined,
-      projectId: new Types.ObjectId(dto.projectId!),
-      place: dto.place!.trim(),
-      ...(dto.lat != null && { lat: dto.lat }),
-      ...(dto.lng != null && { lng: dto.lng }),
-      startDate: new Date(dto.startDate!),
-      endDate: new Date(dto.endDate!),
-      lines: lineDocs,
-      observations: dto.observations?.trim(),
-      amount: roundedSum,
-      moneda: dto.moneda?.trim() || DEFAULT_MONEDA,
-      description,
-      status: 'pending_l1',
-      approvalLevel: 0,
-      requiredLevels: chain.length,
-      approvalHistory: [],
-      solicitudVersion: 1,
-      budgetCommitmentRecorded: false,
-      ...(dto.bankName?.trim() && { requestBankName: dto.bankName.trim() }),
-      ...(dto.accountNumber?.trim() && { requestAccountNumber: dto.accountNumber.trim() }),
-      ...(dto.cci?.trim() && { requestCci: dto.cci.trim() }),
-    })
-
-    if (dto.expenseReportId) {
-      await this.expenseReportService.addAdvanceToReport(
-        dto.expenseReportId,
-        (advance as any)._id.toString()
-      )
-    }
-
-    void this.notifyCoordinatorViatico(
-      advance as AdvanceDocument,
-      dto.userId!,
-      dto.clientId!
-    )
-
-    const refreshed = await this.advanceModel
-      .findById((advance as any)._id)
-      .populate('projectId')
-      .populate({
-        path: 'lines.categoryId',
-        select: 'name key limit isActive',
-      })
-      .exec()
-
-    return refreshed as Advance
   }
 
   /**
@@ -650,25 +496,6 @@ export class AdvanceService implements OnModuleInit {
         manualResendUrl,
       })
     }
-  }
-
-  async resendCoordinatorNotification(
-    advanceId: string,
-    clientId: string
-  ): Promise<Advance> {
-    const advance = await this.findOne(advanceId)
-    if (!advance.clientId || advance.clientId.toString() !== clientId) {
-      throw new ForbiddenException(
-        'No tiene permisos para reenviar esta notificación.'
-      )
-    }
-
-    await this.notifyCoordinatorViatico(
-      advance as AdvanceDocument,
-      advance.userId.toString(),
-      clientId
-    )
-    return this.findOne(advanceId)
   }
 
   private async notifyCollaboratorViaticoRejected(
@@ -1363,10 +1190,14 @@ export class AdvanceService implements OnModuleInit {
       clientId: new Types.ObjectId(clientId),
       expenseReportId: { $exists: false },
     }
-    // Un coordinador solo debe ver los anticipos huérfanos de los colaboradores
-    // que tiene asignados — mismo criterio que las rendiciones
+    // Un coordinador (rol Coordinador, o Colaborador con permiso de aprobador
+    // asignado vía costCenter) solo debe ver los anticipos huérfanos de los
+    // colaboradores que tiene asignados — mismo criterio que las rendiciones
     // (findAllByCoordinator). Sin esto, veía los de todo el cliente.
-    if (actor?.role === ROLES.COORDINADOR) {
+    if (
+      actor?.userId &&
+      (actor.role === ROLES.COORDINADOR || actor.role === ROLES.COLABORADOR)
+    ) {
       const userIds = await this.userService.findUserIdsByApprover(
         actor.userId,
         clientId
@@ -1378,60 +1209,6 @@ export class AdvanceService implements OnModuleInit {
       .populate('userId', 'name email')
       .populate('projectId', 'code name')
       .sort({ createdAt: -1 })
-      .exec()
-  }
-
-  async findForViaticosPage(opts: {
-    requesterId: string
-    requesterRole: string
-    requesterPermissions?: Partial<UserPermissions>
-    clientId: string
-    status?: string
-    dateFrom?: string
-    dateTo?: string
-  }) {
-    const isAdminRole = [
-      ROLES.ADMIN,
-      ROLES.SUPER_ADMIN,
-      ROLES.CONTABILIDAD,
-    ].includes(opts.requesterRole as ROLES)
-    // Aprobador real: rol Coordinador (único rol elegible como aprobador de cadena).
-    const isApprover = !isAdminRole && opts.requesterRole === ROLES.COORDINADOR
-
-    const filter: Record<string, unknown> = {
-      clientId: new Types.ObjectId(opts.clientId),
-    }
-
-    if (isApprover) {
-      // Coordinador: ve las solicitudes donde forma parte de la cadena de aprobadores.
-      filter['approverChain'] = new Types.ObjectId(opts.requesterId)
-    } else if (!isAdminRole) {
-      // Colaborador (con módulo «viaticos» pero sin permiso de aprobar):
-      // solo ve sus propios viáticos, a modo informativo.
-      filter['userId'] = new Types.ObjectId(opts.requesterId)
-    }
-
-    if (opts.status && opts.status !== 'all') {
-      filter['status'] = opts.status
-    }
-
-    if (opts.dateFrom || opts.dateTo) {
-      const dateFilter: Record<string, Date> = {}
-      if (opts.dateFrom) dateFilter['$gte'] = new Date(opts.dateFrom)
-      if (opts.dateTo) {
-        const to = new Date(opts.dateTo)
-        to.setHours(23, 59, 59, 999)
-        dateFilter['$lte'] = to
-      }
-      filter['createdAt'] = dateFilter
-    }
-
-    return this.advanceModel
-      .find(filter)
-      .populate('userId', 'name email bankAccount dni')
-      .populate('projectId', 'code name')
-      .populate('approverChain', 'name email')
-      .sort({ startDate: -1, createdAt: -1 })
       .exec()
   }
 
