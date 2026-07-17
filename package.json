@@ -20,8 +20,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "ts-node -r tsconfig-paths/register src/seed.ts",
-    "seed:demo": "ts-node -r tsconfig-paths/register src/seed-demo.ts",
-    "normalize:legacy": "ts-node -r tsconfig-paths/register src/normalize-legacy.ts"
+    "init": "ts-node -r tsconfig-paths/register src/init.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
