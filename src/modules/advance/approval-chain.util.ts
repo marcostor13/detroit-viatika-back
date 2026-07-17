@@ -34,6 +34,18 @@ export interface ChainStep {
   approvedAt?: Date
 }
 
+/**
+ * Copia PLANA de un paso de cadena. Imprescindible antes de hacer spread de un
+ * paso que viene de la base: los subdocumentos de Mongoose NO exponen sus
+ * campos por spread — `{ ...subdoc }` copia solo props internas (`_doc`, `$__`…)
+ * y PIERDE level/projectId/projectRole, rompiendo la validación `required` al
+ * guardar. Sobre un objeto plano el spread ya es seguro (no-op).
+ */
+export function plainChainStep(step: ChainStep): ChainStep {
+  const s = step as unknown as { toObject?: () => ChainStep }
+  return typeof s.toObject === 'function' ? s.toObject() : step
+}
+
 export interface ChainProject {
   _id: Types.ObjectId | string
   approverLevels?: ApproverLevel[]
