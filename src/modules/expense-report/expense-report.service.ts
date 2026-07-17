@@ -39,6 +39,7 @@ import { CategoryService } from '../category/category.service'
 import {
   findActionableChainStep,
   isChainFullyApproved,
+  plainChainStep,
   buildSolicitudChain,
   buildRendicionChain,
   ChainStep,
@@ -4036,7 +4037,7 @@ export class ExpenseReportService implements OnModuleInit {
     const approvalLevel = report.viaticoApprovalLevel ?? 0
     ;(report.viaticoApprovalHistory ?? []).push({ level: step.level, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
     chain[stepIndex] = {
-      ...step,
+      ...plainChainStep(step),
       approved: true,
       approvedBy: new Types.ObjectId(actorId),
       approvedAt: new Date(),

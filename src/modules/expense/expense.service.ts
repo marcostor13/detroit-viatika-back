@@ -10,7 +10,7 @@ import {
 import { CreateExpenseDto } from './dto/create-expense.dto'
 import { UpdateExpenseDto } from './dto/update-expense.dto'
 import { ConfigService } from '@nestjs/config'
-import { findActionableChainStep, isChainFullyApproved, ChainStep } from '../advance/approval-chain.util'
+import { findActionableChainStep, isChainFullyApproved, plainChainStep, ChainStep } from '../advance/approval-chain.util'
 import { Model, Types } from 'mongoose'
 import { Expense } from './entities/expense.entity'
 import { InjectModel } from '@nestjs/mongoose'
@@ -2017,7 +2017,7 @@ export class ExpenseService {
         // quedarían aprobaciones previas "fantasma" (approved:true) mientras
         // el contador ya muestra 0.
         updateDoc.approverChain = (existingAny.approverChain ?? []).map(step => ({
-          ...step,
+          ...plainChainStep(step),
           approved: false,
           approvedBy: undefined,
           approvedAt: undefined,
@@ -2626,7 +2626,7 @@ export class ExpenseService {
     const history = existing.approvalHistory ?? []
     history.push({ level: step.level, approvedBy: actor.userId, action: 'approved', date: new Date() })
     chain[stepIndex] = {
-      ...step,
+      ...plainChainStep(step),
       approved: true,
       approvedBy: new Types.ObjectId(actor.userId),
       approvedAt: new Date(),
@@ -2893,7 +2893,7 @@ export class ExpenseService {
       const history = e.approvalHistory ?? []
       history.push({ level: step.level, approvedBy: actor.userId, action: 'approved', date: new Date() })
       chain[stepIndex] = {
-        ...step,
+        ...plainChainStep(step),
         approved: true,
         approvedBy: new Types.ObjectId(actor.userId),
         approvedAt: new Date(),
