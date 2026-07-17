@@ -95,7 +95,6 @@ export class ExpenseReportService implements OnModuleInit {
     } catch (e) {
       this.logger.warn(`Index create skipped: ${(e as Error).message}`)
     }
-    await this.migrateViaticoApprovalChains()
     await this.migrateAssignedCoordinatorIds()
   }
 
@@ -184,74 +183,6 @@ export class ExpenseReportService implements OnModuleInit {
       clientId
     )
     return projects[0]?.approverId
-  }
-
-  /**
-   * Migración única e idempotente de solicitudes de viático en vuelo al nuevo
-   * modelo de cadena de aprobadores (ver AdvanceService.migrateApprovalChains,
-   * misma lógica aplicada a ExpenseReport type='viatico').
-   */
-  private async migrateViaticoApprovalChains() {
-    const pendingL2 = await this.expenseReportModel
-      .find({ type: 'viatico', status: 'pending_l2' })
-      .select('_id userId')
-      .exec()
-    for (const r of pendingL2) {
-      const profile = await this.userService.findTransactionalProfile(
-        r.userId.toString()
-      )
-      const legacyCoordId = profile?.coordinatorId
-      if (!legacyCoordId) continue
-      await this.expenseReportModel.updateOne(
-        { _id: (r as any)._id },
-        {
-          $set: {
-            status: 'pending_l1',
-            viaticoApproverChain: [legacyCoordId],
-            viaticoRequiredLevels: 1,
-            viaticoApprovalLevel: 0,
-          },
-        }
-      )
-    }
-    if (pendingL2.length > 0) {
-      this.logger.log(
-        `Migrados ${pendingL2.length} viático(s) de pending_l2 a la nueva cadena de aprobadores`
-      )
-    }
-
-    const orphanedPendingL1 = await this.expenseReportModel
-      .find({
-        type: 'viatico',
-        status: 'pending_l1',
-        $or: [
-          { viaticoApproverChain: { $exists: false } },
-          { viaticoApproverChain: { $size: 0 } },
-        ],
-      })
-      .select('_id userId')
-      .exec()
-    for (const r of orphanedPendingL1) {
-      const profile = await this.userService.findTransactionalProfile(
-        r.userId.toString()
-      )
-      const legacyCoordId = profile?.coordinatorId
-      if (!legacyCoordId) continue
-      await this.expenseReportModel.updateOne(
-        { _id: (r as any)._id },
-        {
-          $set: {
-            viaticoApproverChain: [legacyCoordId],
-            viaticoRequiredLevels: 1,
-          },
-        }
-      )
-    }
-    if (orphanedPendingL1.length > 0) {
-      this.logger.log(
-        `Backfill de viaticoApproverChain en ${orphanedPendingL1.length} viático(s) pending_l1`
-      )
-    }
   }
 
   private validatePaymentReceipt(
