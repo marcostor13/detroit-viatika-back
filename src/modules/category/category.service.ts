@@ -7,6 +7,10 @@ import {
 import { InjectModel } from '@nestjs/mongoose'
 import { Model, Types } from 'mongoose'
 import { Category, CategoryDocument } from './entities/category.entity'
+import {
+  CategoryProfile,
+  CategoryProfileDocument,
+} from '../category-profile/entities/category-profile.entity'
 import { CreateCategoryDto } from './dto/create-category.dto'
 import { UpdateCategoryDto } from './dto/update-category.dto'
 
@@ -36,6 +40,7 @@ export interface ICategoryItem {
 export interface IBulkCreateResult {
   created: number
   errors: { row: number; reason: string }[]
+  warnings: { row: number; reason: string }[]
 }
 
 @Injectable()
@@ -44,7 +49,9 @@ export class CategoryService {
 
   constructor(
     @InjectModel(Category.name)
-    private categoryModel: Model<CategoryDocument>
+    private categoryModel: Model<CategoryDocument>,
+    @InjectModel(CategoryProfile.name)
+    private categoryProfileModel: Model<CategoryProfileDocument>
   ) {}
 
   async create(
@@ -246,13 +253,15 @@ export class CategoryService {
     rows: Array<{
       name: string
       cuenta?: string
+      cuentaDestino6x?: string
       description?: string
       observaciones?: string
       limit?: number | null
+      perfil?: string
     }>,
     clientId: string
   ): Promise<IBulkCreateResult> {
-    const result: IBulkCreateResult = { created: 0, errors: [] }
+    const result: IBulkCreateResult = { created: 0, errors: [], warnings: [] }
     const clientIdObject = new Types.ObjectId(clientId)
 
     for (let i = 0; i < rows.length; i++) {
@@ -269,10 +278,11 @@ export class CategoryService {
 
       try {
         const key = this.generateKey(row.name)
-        await this.categoryModel.create({
+        const newCategory = await this.categoryModel.create({
           name: row.name.trim(),
           key,
           cuenta: row.cuenta?.trim() || undefined,
+          cuentaDestino6x: row.cuentaDestino6x?.trim() || undefined,
           description: row.description?.trim() || undefined,
           observaciones: row.observaciones?.trim() || undefined,
           limit: row.limit != null && !isNaN(row.limit) ? row.limit : null,
@@ -280,6 +290,27 @@ export class CategoryService {
           clientId: clientIdObject,
         })
         result.created++
+
+        const perfilName = row.perfil?.trim()
+        if (perfilName) {
+          try {
+            await this.categoryProfileModel
+              .findOneAndUpdate(
+                { name: perfilName, clientId: clientIdObject },
+                {
+                  $addToSet: { categoryIds: newCategory._id },
+                  $setOnInsert: { name: perfilName, clientId: clientIdObject },
+                },
+                { new: true, upsert: true }
+              )
+              .exec()
+          } catch (profileError: any) {
+            result.warnings.push({
+              row: rowNumber,
+              reason: `Categoría creada pero no se pudo vincular al perfil "${perfilName}": ${profileError?.message || 'error desconocido'}`,
+            })
+          }
+        }
       } catch (error) {
         const reason =
           error?.code === 11000

@@ -8,11 +8,22 @@ import { UpdateProjectDto } from './dto/update-project.dto'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model, Types } from 'mongoose'
 import { Project, ProjectDocument } from './entities/project.entity'
+import { LineaNegocioDocument } from '../linea-negocio/entities/linea-negocio.entity'
+import { UserDocument } from '../user/schemas/user.schema'
+
+export interface IBulkImportResult {
+  created: number
+  skipped: string[]
+  errors: string[]
+}
 
 @Injectable()
 export class ProjectService {
   constructor(
-    @InjectModel(Project.name) private projectModel: Model<ProjectDocument>
+    @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
+    @InjectModel('LineaNegocio')
+    private lineaNegocioModel: Model<LineaNegocioDocument>,
+    @InjectModel('User') private userModel: Model<UserDocument>
   ) {}
 
   private generateCode(name: string): string {
@@ -348,10 +359,49 @@ export class ProjectService {
     return this.toResponse(project)
   }
 
+  /** Parsea "Sí"/"No"/true/false/1/0 (o vacío) del Excel a boolean. Vacío => default. */
+  private parseExcelBoolean(value: unknown, defaultValue: boolean): boolean {
+    const str = String(value ?? '').trim().toLowerCase()
+    if (!str) return defaultValue
+    return ['si', 'sí', 'true', '1', 'yes'].includes(str)
+  }
+
+  /** Resuelve una lista de emails separados por coma a User._id dentro de la empresa. */
+  private async resolveApproverEmails(
+    raw: string,
+    clientId: Types.ObjectId
+  ): Promise<{ ids: Types.ObjectId[]; notFound: string[] }> {
+    const emails = raw
+      .split(',')
+      .map(e => e.trim().toLowerCase())
+      .filter(Boolean)
+    const ids: Types.ObjectId[] = []
+    const notFound: string[] = []
+    for (const email of emails) {
+      const user = await this.userModel
+        .findOne({ email, clientId })
+        .select('_id')
+        .exec()
+      if (user) ids.push(user._id as Types.ObjectId)
+      else notFound.push(email)
+    }
+    return { ids, notFound }
+  }
+
+  /**
+   * Carga masiva de centros de costo desde Excel. A diferencia de la versión
+   * inicial (solo nombre/código/clientName), cubre TODOS los campos del
+   * formulario normal, incluida la cadena de aprobadores (regla 1.4) — sin
+   * `approverLevels` un centro de costo creado por carga masiva nunca podría
+   * recibir comprobantes en la cadena de aprobación. Los aprobadores se
+   * expresan como email (no hay forma de que un Excel traiga un ObjectId) y
+   * se resuelven por fila; un email no encontrado es un ERROR explícito de
+   * fila, nunca se descarta en silencio.
+   */
   async bulkImport(
     rows: Array<Record<string, any>>,
     clientId: string
-  ): Promise<{ created: number; skipped: string[]; errors: string[] }> {
+  ): Promise<IBulkImportResult> {
     let created = 0
     const skipped: string[] = []
     const errors: string[] = []
@@ -377,11 +427,78 @@ export class ProjectService {
           skipped.push(code)
           continue
         }
+
+        let lineaNegocioId: Types.ObjectId | undefined
+        const lineaNegocioText = String(
+          row['Línea de Negocio'] ?? row['Linea de Negocio'] ?? ''
+        ).trim()
+        if (lineaNegocioText) {
+          const ln = await this.lineaNegocioModel
+            .findOne({
+              clientId: clientIdObj,
+              name: {
+                $regex: `^${lineaNegocioText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+                $options: 'i',
+              },
+            })
+            .exec()
+          if (!ln) {
+            errors.push(
+              `${code}: línea de negocio "${lineaNegocioText}" no encontrada`
+            )
+            continue
+          }
+          lineaNegocioId = ln._id as Types.ObjectId
+        }
+
+        const approverLevels: { level: number; userIds: Types.ObjectId[] }[] = []
+        let approverErrorFound = false
+        const levelHeaders: [number, string][] = [
+          [1, 'Aprobador N1'],
+          [2, 'Aprobador N2'],
+          [3, 'Aprobador N3'],
+        ]
+        for (const [level, header] of levelHeaders) {
+          const raw = String(row[header] ?? '').trim()
+          if (!raw) continue
+          const { ids, notFound } = await this.resolveApproverEmails(
+            raw,
+            clientIdObj
+          )
+          if (notFound.length) {
+            errors.push(
+              `${code}: aprobador(es) no encontrado(s) en Nivel ${level}: ${notFound.join(', ')}`
+            )
+            approverErrorFound = true
+            break
+          }
+          if (ids.length) approverLevels.push({ level, userIds: ids })
+        }
+        if (approverErrorFound) continue
+
         await this.projectModel.create({
           name,
           code,
           clientId: clientIdObj,
           clientName,
+          lineaNegocioId,
+          cuentaAnalitica9x:
+            String(
+              row['Cuenta Analítica 9x'] ?? row['Cuenta Analitica 9x'] ?? ''
+            ).trim() || undefined,
+          cuentaDestino6x:
+            String(row['Cuenta Destino 6x'] ?? '').trim() || undefined,
+          centroCosto:
+            String(row['Centro de Costo Contanet'] ?? '').trim() || undefined,
+          subCentroCosto:
+            String(row['Sub Centro de Costo'] ?? '').trim() || undefined,
+          area: String(row['Área'] ?? row['Area'] ?? '').trim() || undefined,
+          esAdministrativo: this.parseExcelBoolean(
+            row['Es Administrativo'],
+            false
+          ),
+          isActive: this.parseExcelBoolean(row['Activo'], true),
+          approverLevels: approverLevels.length ? approverLevels : undefined,
         })
         created++
       } catch (e: any) {

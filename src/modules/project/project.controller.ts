@@ -101,10 +101,45 @@ export class ProjectController {
   async downloadTemplate() {
     const xlsx = await import('xlsx')
     const ws = xlsx.utils.aoa_to_sheet([
-      ['Código', 'Nombre Proyecto', 'Nombre Cliente'],
+      [
+        'Código',
+        'Nombre Proyecto',
+        'Nombre Cliente',
+        'Línea de Negocio',
+        'Cuenta Analítica 9x',
+        'Cuenta Destino 6x',
+        'Centro de Costo Contanet',
+        'Sub Centro de Costo',
+        'Área',
+        'Es Administrativo',
+        'Activo',
+        'Aprobador N1',
+        'Aprobador N2',
+        'Aprobador N3',
+      ],
     ])
     const wb = xlsx.utils.book_new()
     xlsx.utils.book_append_sheet(wb, ws, 'Proyectos')
+
+    const instrWs = xlsx.utils.aoa_to_sheet([
+      ['Campo', 'Requerido', 'Descripción'],
+      ['Código', 'No', 'Se genera automáticamente desde el nombre si se deja vacío'],
+      ['Nombre Proyecto', 'Sí', 'Nombre del centro de costo'],
+      ['Nombre Cliente', 'No', 'Texto libre, solo informativo'],
+      ['Línea de Negocio', 'No', 'Debe coincidir con el nombre de una línea de negocio existente en la empresa'],
+      ['Cuenta Analítica 9x', 'No', 'Cuenta contable clase 9 (asientos Contanet)'],
+      ['Cuenta Destino 6x', 'No', 'Cuenta contable clase 6 destino (asientos Contanet)'],
+      ['Centro de Costo Contanet', 'No', 'Código Contanet del centro de costo (col. T), distinto del "Código" del proyecto'],
+      ['Sub Centro de Costo', 'No', 'Sub-centro de costo Contanet (col. U/V)'],
+      ['Área', 'No', 'Área Contanet (col. Y)'],
+      ['Es Administrativo', 'No', '"Sí" o "No" (vacío = No)'],
+      ['Activo', 'No', '"Sí" o "No" (vacío = Sí)'],
+      ['Aprobador N1', 'No', 'Email(s) de aprobador de nivel 1, separados por coma. Deben ser usuarios existentes en la empresa'],
+      ['Aprobador N2', 'No', 'Email(s) de aprobador de nivel 2, separados por coma'],
+      ['Aprobador N3', 'No', 'Email(s) de aprobador de nivel 3, separados por coma'],
+    ])
+    xlsx.utils.book_append_sheet(wb, instrWs, 'Instrucciones')
+
     const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
     return {
       file: buffer.toString('base64'),

@@ -111,6 +111,9 @@ export class CategoryController {
     const mapped = rows.map(row => ({
       name: String(row['Nombre*'] || row['Nombre'] || '').trim(),
       cuenta: String(row['Cuenta'] || '').trim() || undefined,
+      cuentaDestino6x:
+        String(row['Cuenta Destino 6x'] || row['Cuenta Destino'] || '').trim() ||
+        undefined,
       description:
         String(row['Descripción'] || row['Descripcion'] || '').trim() ||
         undefined,

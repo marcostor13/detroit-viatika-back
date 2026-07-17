@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,9 +9,14 @@ import {
   Post,
   Query,
   Request,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common'
 import { AuthGuard } from '@nestjs/passport'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { memoryStorage } from 'multer'
+import * as XLSX from 'xlsx'
 import { OrdenTrabajoService } from './orden-trabajo.service'
 import { CreateOrdenTrabajoDto } from './dto/create-orden-trabajo.dto'
 import { UpdateOrdenTrabajoDto } from './dto/update-orden-trabajo.dto'
@@ -52,6 +58,79 @@ export class OrdenTrabajoController {
       details: `${(result as any).nombre}`,
       clientId,
     })
+    return result
+  }
+
+  /** Parsea "Sí"/"No"/true/false/1/0 (o vacío) del Excel a boolean. Vacío => default. */
+  private parseExcelBoolean(value: unknown, defaultValue: boolean): boolean {
+    const str = String(value ?? '').trim().toLowerCase()
+    if (!str) return defaultValue
+    return ['si', 'sí', 'true', '1', 'yes'].includes(str)
+  }
+
+  @Post('import')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.CONTABILIDAD)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 2 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'application/octet-stream', // algunos navegadores envían .xlsx así
+        ]
+        const nombre = (file.originalname || '').toLowerCase()
+        const okExt = nombre.endsWith('.xlsx') || nombre.endsWith('.xls')
+        if (allowed.includes(file.mimetype) || okExt) {
+          cb(null, true)
+        } else {
+          cb(
+            new BadRequestException('Solo se permiten archivos Excel (.xlsx)'),
+            false
+          )
+        }
+      },
+    })
+  )
+  async importFromExcel(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('clientId') clientIdBody: string,
+    @Request() req: any
+  ) {
+    if (!file) throw new BadRequestException('No se recibió ningún archivo')
+    const clientId = this.resolveClientId(req, clientIdBody)
+
+    const workbook = XLSX.read(file.buffer, { type: 'buffer' })
+    const sheetName = workbook.SheetNames[0]
+    const sheet = workbook.Sheets[sheetName]
+    const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
+      defval: '',
+    })
+
+    const mapped = rows.map(row => ({
+      nombre: String(row['Nombre*'] || row['Nombre'] || '').trim(),
+      costCenterKey: String(
+        row['Código Centro de Costo*'] ||
+          row['Código Centro de Costo'] ||
+          row['Centro de Costo'] ||
+          row['costCenterId'] ||
+          ''
+      ).trim(),
+      isActive: this.parseExcelBoolean(row['Activo'], true),
+    }))
+
+    const result = await this.ordenTrabajoService.bulkCreate(mapped, clientId)
+
+    this.auditLogService.log({
+      userId: req.user._id || req.user.sub,
+      userName: req.user.name || req.user.email,
+      action: 'import_ordenes_trabajo',
+      module: 'configuracion',
+      details: `Importadas: ${result.created}, Errores: ${result.errors.length}`,
+      clientId,
+    })
+
     return result
   }
 

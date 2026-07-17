@@ -63,6 +63,7 @@ export type AuditAction =
   | 'create_orden_trabajo'
   | 'update_orden_trabajo'
   | 'delete_orden_trabajo'
+  | 'import_ordenes_trabajo'
   | 'create_caja_chica_report'
   | 'add_reports_caja_chica'
   | 'remove_report_caja_chica'

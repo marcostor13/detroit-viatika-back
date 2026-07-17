@@ -18,6 +18,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+export interface IBulkCreateResult {
+  created: number
+  errors: { row: number; reason: string }[]
+}
+
 @Injectable()
 export class OrdenTrabajoService {
   constructor(
@@ -104,6 +109,104 @@ export class OrdenTrabajoService {
       }
       throw error
     }
+  }
+
+  /**
+   * Resuelve un centro de costo por texto (código o nombre) para la carga
+   * masiva, donde el archivo Excel no puede traer un ObjectId. Prueba primero
+   * `code` (match exacto, case-insensitive) y si no hay resultado prueba
+   * `name` (también case-insensitive) — ambos scoped a la empresa.
+   */
+  private async resolveCostCenterByKey(
+    key: string,
+    clientId: Types.ObjectId
+  ): Promise<Types.ObjectId | null> {
+    const trimmed = key.trim()
+    if (!trimmed) return null
+    const rx = { $regex: `^${escapeRegExp(trimmed)}$`, $options: 'i' }
+    const byCode = await this.projectModel
+      .findOne({ clientId, code: rx })
+      .select('_id')
+      .exec()
+    if (byCode) return byCode._id
+    const byName = await this.projectModel
+      .findOne({ clientId, name: rx })
+      .select('_id')
+      .exec()
+    return byName ? byName._id : null
+  }
+
+  /**
+   * Carga masiva desde Excel (regla: mismo patrón que `CategoryService.bulkCreate`
+   * — no aborta el lote completo por una fila mala, acumula errores por fila).
+   * A diferencia de Category, cada fila tiene una referencia foránea
+   * (`costCenterId`) que el archivo solo puede expresar como texto (código o
+   * nombre del centro de costo), así que se resuelve por fila antes de crear.
+   */
+  async bulkCreate(
+    rows: Array<{ nombre: string; costCenterKey: string; isActive?: boolean }>,
+    clientId: string
+  ): Promise<IBulkCreateResult> {
+    const result: IBulkCreateResult = { created: 0, errors: [] }
+    const clientIdObject = new Types.ObjectId(clientId)
+    const seenNombres = new Set<string>()
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      const rowNumber = i + 2 // Excel: fila 1 = encabezado
+      const nombre = row.nombre?.trim()
+
+      if (!nombre) {
+        result.errors.push({ row: rowNumber, reason: 'El campo Nombre es obligatorio' })
+        continue
+      }
+      const nombreKey = nombre.toLowerCase()
+      if (seenNombres.has(nombreKey)) {
+        result.errors.push({
+          row: rowNumber,
+          reason: `Nombre "${nombre}" repetido en este mismo archivo`,
+        })
+        continue
+      }
+      if (!row.costCenterKey?.trim()) {
+        result.errors.push({
+          row: rowNumber,
+          reason: 'El campo Centro de Costo es obligatorio',
+        })
+        continue
+      }
+
+      try {
+        const costCenterId = await this.resolveCostCenterByKey(
+          row.costCenterKey,
+          clientIdObject
+        )
+        if (!costCenterId) {
+          result.errors.push({
+            row: rowNumber,
+            reason: `Centro de costo "${row.costCenterKey}" no encontrado en esta empresa`,
+          })
+          continue
+        }
+        await this.ensureUniqueNombre(nombre, clientIdObject)
+        await this.ordenTrabajoModel.create({
+          nombre,
+          costCenterId,
+          isActive: row.isActive ?? true,
+          clientId: clientIdObject,
+        })
+        seenNombres.add(nombreKey)
+        result.created++
+      } catch (error: any) {
+        const reason =
+          error?.code === 11000
+            ? `Ya existe una orden de trabajo con el nombre "${nombre}" en esta empresa`
+            : error?.message || 'Error desconocido'
+        result.errors.push({ row: rowNumber, reason })
+      }
+    }
+
+    return result
   }
 
   async findAll(

@@ -34,6 +34,7 @@ const makeQuery = (resolvedValue: any) => ({
   limit: jest.fn().mockReturnThis(),
   populate: jest.fn().mockReturnThis(),
   sort: jest.fn().mockReturnThis(),
+  select: jest.fn().mockReturnThis(),
   exec: jest.fn().mockResolvedValue(resolvedValue),
 })
 
@@ -57,6 +58,9 @@ const mockProjectModel = {
   },
 }
 
+const mockLineaNegocioModel = { findOne: jest.fn() }
+const mockUserModel = { findOne: jest.fn() }
+
 describe('ProjectService', () => {
   let service: ProjectService
 
@@ -65,11 +69,18 @@ describe('ProjectService', () => {
     mockProjectModel.db.model.mockReturnValue(mockExpenseModel)
     mockExpenseModel.countDocuments.mockReturnValue(Promise.resolve(0))
     mockProjectModel.findOne.mockReturnValue(makeQuery(null))
+    mockLineaNegocioModel.findOne.mockReturnValue(makeQuery(null))
+    mockUserModel.findOne.mockReturnValue(makeQuery(null))
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProjectService,
         { provide: getModelToken(Project.name), useValue: mockProjectModel },
+        {
+          provide: getModelToken('LineaNegocio'),
+          useValue: mockLineaNegocioModel,
+        },
+        { provide: getModelToken('User'), useValue: mockUserModel },
       ],
     }).compile()
     service = module.get<ProjectService>(ProjectService)
@@ -371,6 +382,84 @@ describe('ProjectService', () => {
       expect(result.created).toBe(1)
       expect(result.skipped).toHaveLength(1)
       expect(result.errors).toHaveLength(1)
+    })
+
+    it('resolves "Línea de Negocio" by name and passes its ObjectId through', async () => {
+      const lineaId = new Types.ObjectId()
+      mockProjectModel.findOne.mockReturnValue(makeQuery(null))
+      mockLineaNegocioModel.findOne.mockReturnValue(
+        makeQuery({ _id: lineaId })
+      )
+      mockProjectModel.create.mockResolvedValue(mockProject)
+
+      const result = await service.bulkImport(
+        [{ 'Nombre Proyecto': 'Alpha', 'Línea de Negocio': 'Construcción' }],
+        clientId
+      )
+
+      expect(result.created).toBe(1)
+      expect(mockProjectModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({ lineaNegocioId: lineaId })
+      )
+    })
+
+    it('errors the row when "Línea de Negocio" text does not match any record', async () => {
+      mockProjectModel.findOne.mockReturnValue(makeQuery(null))
+      mockLineaNegocioModel.findOne.mockReturnValue(makeQuery(null))
+
+      const result = await service.bulkImport(
+        [{ 'Nombre Proyecto': 'Alpha', 'Línea de Negocio': 'Inexistente' }],
+        clientId
+      )
+
+      expect(result.created).toBe(0)
+      expect(mockProjectModel.create).not.toHaveBeenCalled()
+      expect(result.errors[0]).toContain('línea de negocio')
+    })
+
+    it('resolves "Aprobador N1"/"Aprobador N2" emails to approverLevels', async () => {
+      const n1Id = new Types.ObjectId()
+      const n2Id = new Types.ObjectId()
+      mockProjectModel.findOne.mockReturnValue(makeQuery(null))
+      mockUserModel.findOne
+        .mockReturnValueOnce(makeQuery({ _id: n1Id }))
+        .mockReturnValueOnce(makeQuery({ _id: n2Id }))
+      mockProjectModel.create.mockResolvedValue(mockProject)
+
+      const result = await service.bulkImport(
+        [
+          {
+            'Nombre Proyecto': 'Alpha',
+            'Aprobador N1': 'n1@empresa.com',
+            'Aprobador N2': 'n2@empresa.com',
+          },
+        ],
+        clientId
+      )
+
+      expect(result.created).toBe(1)
+      expect(mockProjectModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          approverLevels: [
+            { level: 1, userIds: [n1Id] },
+            { level: 2, userIds: [n2Id] },
+          ],
+        })
+      )
+    })
+
+    it('errors the row (does not silently drop) when an approver email is not found', async () => {
+      mockProjectModel.findOne.mockReturnValue(makeQuery(null))
+      mockUserModel.findOne.mockReturnValue(makeQuery(null))
+
+      const result = await service.bulkImport(
+        [{ 'Nombre Proyecto': 'Alpha', 'Aprobador N1': 'ghost@empresa.com' }],
+        clientId
+      )
+
+      expect(result.created).toBe(0)
+      expect(mockProjectModel.create).not.toHaveBeenCalled()
+      expect(result.errors[0]).toContain('ghost@empresa.com')
     })
   })
 })

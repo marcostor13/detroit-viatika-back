@@ -850,6 +850,12 @@ export class UserService {
     documento: 'dni',
     'nro documento': 'dni',
     'numero de documento': 'dni',
+    tipodocumento: 'documentType',
+    'tipo documento': 'documentType',
+    'tipo de documento': 'documentType',
+    subcuenta14: 'subcuenta14',
+    'sub cuenta 14': 'subcuenta14',
+    'subcuenta 14': 'subcuenta14',
     employeecode: 'employeeCode',
     codigo: 'employeeCode',
     'codigo empleado': 'employeeCode',
@@ -1080,6 +1086,13 @@ export class UserService {
               }
             : undefined
 
+        const allowedDocTypes = ['R', 'L', 'P', 'E', 'M']
+        const documentType = allowedDocTypes.includes(
+          (row.documentType || '').toUpperCase()
+        )
+          ? (row.documentType.toUpperCase() as 'R' | 'L' | 'P' | 'E' | 'M')
+          : undefined
+
         const temporaryPassword =
           Math.random().toString(36).slice(-8) +
           Math.random().toString(36).slice(-4).toUpperCase()
@@ -1098,6 +1111,8 @@ export class UserService {
             ? { coordinatorId, approverIds: [coordinatorId] }
             : {}),
           ...(row.dni ? { dni: row.dni } : {}),
+          ...(documentType ? { documentType } : {}),
+          ...(row.subcuenta14 ? { subcuenta14: row.subcuenta14 } : {}),
           ...(row.employeeCode ? { employeeCode: row.employeeCode } : {}),
           ...(row.area ? { area: row.area } : {}),
           ...(row.cargo ? { cargo: row.cargo } : {}),

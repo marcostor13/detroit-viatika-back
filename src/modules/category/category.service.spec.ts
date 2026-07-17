@@ -4,6 +4,7 @@ import { NotFoundException } from '@nestjs/common'
 import { Types } from 'mongoose'
 import { CategoryService } from './category.service'
 import { Category } from './entities/category.entity'
+import { CategoryProfile } from '../category-profile/entities/category-profile.entity'
 
 const clientId = new Types.ObjectId().toString()
 const categoryId = new Types.ObjectId().toString()
@@ -63,6 +64,10 @@ MockModel.findOneAndUpdate = jest.fn()
 MockModel.findOneAndDelete = jest.fn()
 MockModel.countDocuments = jest.fn()
 MockModel.deleteMany = jest.fn()
+MockModel.create = jest.fn()
+
+const MockProfileModel: any = {}
+MockProfileModel.findOneAndUpdate = jest.fn()
 
 describe('CategoryService', () => {
   let service: CategoryService
@@ -73,6 +78,10 @@ describe('CategoryService', () => {
       providers: [
         CategoryService,
         { provide: getModelToken(Category.name), useValue: MockModel },
+        {
+          provide: getModelToken(CategoryProfile.name),
+          useValue: MockProfileModel,
+        },
       ],
     }).compile()
     service = module.get<CategoryService>(CategoryService)
@@ -229,6 +238,87 @@ describe('CategoryService', () => {
       await expect(service.remove(categoryId, clientId)).rejects.toThrow(
         NotFoundException
       )
+    })
+  })
+
+  describe('bulkCreate', () => {
+    it('reports a row error when name is missing', async () => {
+      const result = await service.bulkCreate([{ name: '' }], clientId)
+      expect(result.created).toBe(0)
+      expect(result.errors).toEqual([
+        { row: 2, reason: 'El campo Nombre es obligatorio' },
+      ])
+      expect(result.warnings).toEqual([])
+    })
+
+    it('creates a category and does not touch CategoryProfile when perfil is absent', async () => {
+      MockModel.create.mockResolvedValue({ ...mockCategory, _id: mockCategory._id })
+      const result = await service.bulkCreate(
+        [{ name: 'Movilidad' }],
+        clientId
+      )
+      expect(result.created).toBe(1)
+      expect(result.errors).toEqual([])
+      expect(MockProfileModel.findOneAndUpdate).not.toHaveBeenCalled()
+    })
+
+    it('links the new category into an existing/new profile via upsert + $addToSet', async () => {
+      MockModel.create.mockResolvedValue({ ...mockCategory, _id: mockCategory._id })
+      MockProfileModel.findOneAndUpdate.mockReturnValue(makeExec({}))
+      const result = await service.bulkCreate(
+        [{ name: 'Movilidad', perfil: 'Gastos de campo' }],
+        clientId
+      )
+      expect(result.created).toBe(1)
+      expect(result.warnings).toEqual([])
+      expect(MockProfileModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { name: 'Gastos de campo', clientId: expect.any(Types.ObjectId) },
+        expect.objectContaining({
+          $addToSet: { categoryIds: mockCategory._id },
+          $setOnInsert: {
+            name: 'Gastos de campo',
+            clientId: expect.any(Types.ObjectId),
+          },
+        }),
+        { new: true, upsert: true }
+      )
+    })
+
+    it('still counts the row as created if profile linkage fails, and reports a warning instead of an error', async () => {
+      MockModel.create.mockResolvedValue({ ...mockCategory, _id: mockCategory._id })
+      MockProfileModel.findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('perfil boom')),
+      })
+      const result = await service.bulkCreate(
+        [{ name: 'Movilidad', perfil: 'Gastos de campo' }],
+        clientId
+      )
+      expect(result.created).toBe(1)
+      expect(result.errors).toEqual([])
+      expect(result.warnings).toEqual([
+        {
+          row: 2,
+          reason:
+            'Categoría creada pero no se pudo vincular al perfil "Gastos de campo": perfil boom',
+        },
+      ])
+    })
+
+    it('reports a duplicate-key row error without aborting the batch', async () => {
+      MockModel.create
+        .mockRejectedValueOnce(Object.assign(new Error('dup'), { code: 11000 }))
+        .mockResolvedValueOnce({ ...mockCategory, _id: mockCategory._id })
+      const result = await service.bulkCreate(
+        [{ name: 'Movilidad' }, { name: 'Alimentación' }],
+        clientId
+      )
+      expect(result.created).toBe(1)
+      expect(result.errors).toEqual([
+        {
+          row: 2,
+          reason: 'Ya existe una categoría con nombre similar (clave duplicada)',
+        },
+      ])
     })
   })
 })
