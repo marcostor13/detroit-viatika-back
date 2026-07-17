@@ -4,11 +4,20 @@ import { ROLES } from '../auth/enums/roles.enum'
 import { ApproverLevel } from '../project/entities/project.entity'
 
 /**
- * Motor de aprobación por cadena ordenada, compartido entre el módulo Advance
+ * Motor de aprobación por cadena, compartido entre el módulo Advance
  * (anticipo genérico, sin centro de costo), el flujo de SOLICITUD de viáticos
  * y la RENDICIÓN por documento (comprobantes). Los niveles (N1/N2/N3…) son
  * ranuras explícitas por identidad — un nivel puede no existir para un centro
  * de costo y el paso correspondiente se omite sin renumerar (regla 1.6).
+ *
+ * Aprobación EN PARALELO entre niveles (N1/N2/N3…): cualquier aprobador de
+ * cualquier paso aún pendiente de un `ChainStep[]` puede actuar, sin importar
+ * el orden — N2 puede aprobar antes que N1. Contabilidad (fuera de esta
+ * cadena, gate separado en el servicio) es la única etapa secuencial: exige
+ * que TODOS los pasos estén aprobados. Ver `findActionableChainStep` /
+ * `isChainFullyApproved`. El formato plano (`Types.ObjectId[]`, anticipo
+ * genérico) sigue siendo estrictamente secuencial vía `canActOnChain`/
+ * `advanceChain` — es un mecanismo legado distinto, no se toca.
  */
 
 export interface ChainStep {
@@ -19,6 +28,10 @@ export interface ChainStep {
   approverIds: Types.ObjectId[]
   /** Presente si este paso es resultado de un escalamiento (regla 1.5). */
   escalatedFrom?: number
+  /** Aprobación en paralelo: este paso específico ya fue resuelto, sin importar el orden de los demás. */
+  approved?: boolean
+  approvedBy?: Types.ObjectId
+  approvedAt?: Date
 }
 
 export interface ChainProject {
@@ -68,6 +81,31 @@ export function advanceChain(opts: {
 }): { approvalLevel: number; isComplete: boolean } {
   const approvalLevel = opts.approvalLevel + 1
   return { approvalLevel, isComplete: approvalLevel >= opts.requiredLevels }
+}
+
+/**
+ * Índice del primer paso PENDIENTE de `chain` donde `actorId` es aprobador —
+ * cualquier paso no aprobado todavía, sin importar su posición (aprobación en
+ * paralelo entre niveles). Devuelve -1 si no le corresponde ningún paso
+ * pendiente. SuperAdmin: llave maestra sobre el primer paso pendiente.
+ */
+export function findActionableChainStep(opts: {
+  chain: ChainStep[]
+  actorId: string
+  actorRole: string
+}): number {
+  const { chain, actorId, actorRole } = opts
+  if (actorRole === ROLES.SUPER_ADMIN) {
+    return chain.findIndex(step => !step.approved)
+  }
+  return chain.findIndex(
+    step => !step.approved && step.approverIds.some(id => id.toString() === actorId)
+  )
+}
+
+/** `true` si TODOS los pasos de la cadena ya están aprobados, sin importar el orden en que se aprobaron. Cadena vacía (regla 1.6, todos los niveles omitidos) cuenta como completada. */
+export function isChainFullyApproved(chain: ChainStep[]): boolean {
+  return chain.every(step => !!step.approved)
 }
 
 function sameApproverSet(a: Types.ObjectId[], b: Types.ObjectId[]): boolean {

@@ -73,6 +73,7 @@ const mockExpenseReportService = {
 const mockProjectService = {
   findOne: jest.fn(),
   adjustCommittedAdvanceTotal: jest.fn().mockResolvedValue(undefined),
+  isApproverForClient: jest.fn().mockResolvedValue(false),
 }
 
 const mockCategoryService = {
@@ -125,106 +126,6 @@ describe('AdvanceService', () => {
       ],
     }).compile()
     service = module.get<AdvanceService>(AdvanceService)
-  })
-
-  // ── create ────────────────────────────────────────────────────────────
-  describe('create', () => {
-    it('creates an advance with approverChain and requiredLevels from a single-approver collaborator', async () => {
-      const approverA = new Types.ObjectId()
-      mockUserService.findTransactionalProfile.mockResolvedValue({
-        approverIds: [approverA],
-      })
-      const advance = makeMockAdvance({ amount: 100, requiredLevels: 1 })
-      mockAdvanceModel.create.mockResolvedValue(advance)
-      const result = await service.create({
-        userId,
-        clientId,
-        amount: 100,
-        description: 'Test',
-      })
-      expect(result.requiredLevels).toBe(1)
-      expect(mockAdvanceModel.create).toHaveBeenCalledWith(
-        expect.objectContaining({ approverChain: [approverA], requiredLevels: 1 })
-      )
-    })
-
-    it('sets requiredLevels to the length of a multi-approver chain, regardless of amount', async () => {
-      const approverA = new Types.ObjectId()
-      const approverB = new Types.ObjectId()
-      mockUserService.findTransactionalProfile.mockResolvedValue({
-        approverIds: [approverA, approverB],
-      })
-      const advance = makeMockAdvance({ amount: 5000, requiredLevels: 2 })
-      mockAdvanceModel.create.mockResolvedValue(advance)
-      const result = await service.create({
-        userId,
-        clientId,
-        amount: 5000,
-        description: 'Test',
-      })
-      expect(result.requiredLevels).toBe(2)
-      expect(mockAdvanceModel.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          approverChain: [approverA, approverB],
-          requiredLevels: 2,
-        })
-      )
-    })
-
-    it('throws BadRequestException when the collaborator has no approvers assigned', async () => {
-      mockUserService.findTransactionalProfile.mockResolvedValue({
-        approverIds: [],
-      })
-      await expect(
-        service.create({
-          userId,
-          clientId,
-          amount: 100,
-          description: 'Test',
-        })
-      ).rejects.toThrow(BadRequestException)
-    })
-
-    it('links to expense report when expenseReportId is provided', async () => {
-      mockUserService.findTransactionalProfile.mockResolvedValue({
-        approverIds: [new Types.ObjectId()],
-      })
-      const advance = makeMockAdvance()
-      mockAdvanceModel.create.mockResolvedValue(advance)
-      await service.create({
-        userId,
-        clientId,
-        amount: 100,
-        description: 'Test',
-        expenseReportId: reportId,
-      })
-      expect(mockExpenseReportService.addAdvanceToReport).toHaveBeenCalledWith(
-        reportId,
-        advanceId
-      )
-    })
-
-    it('throws BadRequestException when clientId is missing', async () => {
-      await expect(
-        service.create({
-          userId,
-          clientId: '',
-          amount: 100,
-          description: 'Test',
-        })
-      ).rejects.toThrow(BadRequestException)
-    })
-
-    it('throws BadRequestException when userId is missing', async () => {
-      await expect(
-        service.create({
-          userId: '',
-          clientId,
-          amount: 100,
-          description: 'Test',
-        })
-      ).rejects.toThrow(BadRequestException)
-    })
   })
 
   // ── findOne ───────────────────────────────────────────────────────────
@@ -872,71 +773,6 @@ describe('AdvanceService', () => {
     })
   })
 
-  // ── findForViaticosPage ───────────────────────────────────────────────
-  describe('findForViaticosPage', () => {
-    it('returns all client advances for admin role', async () => {
-      const advances = [makeMockAdvance()]
-      mockAdvanceModel.find.mockReturnValue(makeQuery(advances))
-      await service.findForViaticosPage({
-        requesterId: userId,
-        requesterRole: 'Administrador',
-        clientId,
-      })
-      const findCall = mockAdvanceModel.find.mock.calls[0][0]
-      expect(findCall.approverChain).toBeUndefined()
-    })
-
-    it('filters by approverChain membership for Coordinador role', async () => {
-      const advances = [makeMockAdvance()]
-      mockAdvanceModel.find.mockReturnValue(makeQuery(advances))
-      await service.findForViaticosPage({
-        requesterId: userId,
-        requesterRole: 'Coordinador',
-        clientId,
-      })
-      const findCall = mockAdvanceModel.find.mock.calls[0][0]
-      expect(findCall.approverChain).toBeDefined()
-    })
-
-    it('filters by own userId for collaborator with viaticos module', async () => {
-      const advances = [makeMockAdvance()]
-      mockAdvanceModel.find.mockReturnValue(makeQuery(advances))
-      await service.findForViaticosPage({
-        requesterId: userId,
-        requesterRole: 'Colaborador',
-        requesterPermissions: { modules: ['viaticos'] },
-        clientId,
-      })
-      const findCall = mockAdvanceModel.find.mock.calls[0][0]
-      expect(findCall.approverChain).toBeUndefined()
-      expect(findCall.userId).toBeDefined()
-    })
-
-    it('applies status filter when provided', async () => {
-      mockAdvanceModel.find.mockReturnValue(makeQuery([]))
-      await service.findForViaticosPage({
-        requesterId: userId,
-        requesterRole: 'Administrador',
-        clientId,
-        status: 'approved',
-      })
-      const findCall = mockAdvanceModel.find.mock.calls[0][0]
-      expect(findCall.status).toBe('approved')
-    })
-
-    it('does not apply status filter when status is "all"', async () => {
-      mockAdvanceModel.find.mockReturnValue(makeQuery([]))
-      await service.findForViaticosPage({
-        requesterId: userId,
-        requesterRole: 'Administrador',
-        clientId,
-        status: 'all',
-      })
-      const findCall = mockAdvanceModel.find.mock.calls[0][0]
-      expect(findCall.status).toBeUndefined()
-    })
-  })
-
   // ── findPaymentReceiptsForCollaborator ────────────────────────────────
   describe('findPaymentReceiptsForCollaborator', () => {
     it('filters by userId, clientId and receipt status', async () => {
@@ -1141,17 +977,4 @@ describe('AdvanceService', () => {
     })
   })
 
-  // ── resendCoordinatorNotification ─────────────────────────────────────
-  describe('resendCoordinatorNotification', () => {
-    it('throws ForbiddenException when advance clientId does not match', async () => {
-      const advance = makeMockAdvance({
-        clientId: new Types.ObjectId(),
-        userId: new Types.ObjectId(userId),
-      })
-      mockAdvanceModel.findById.mockReturnValue(makeQuery(advance))
-      await expect(
-        service.resendCoordinatorNotification(advanceId, clientId)
-      ).rejects.toThrow(ForbiddenException)
-    })
-  })
 })

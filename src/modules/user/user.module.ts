@@ -5,12 +5,14 @@ import { User, UserSchema } from './schemas/user.schema'
 import { UserController } from './user.controller'
 import { RoleModule } from '../role/role.module'
 import { AuditLogModule } from '../audit-log/audit-log.module'
+import { ProjectModule } from '../project/project.module'
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
     forwardRef(() => RoleModule),
     AuditLogModule,
+    ProjectModule,
   ],
   controllers: [UserController],
   providers: [UserService],

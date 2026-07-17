@@ -37,8 +37,8 @@ import { UploadService } from '../upload/upload.service'
 import { ProjectService } from '../project/project.service'
 import { CategoryService } from '../category/category.service'
 import {
-  canActOnChain,
-  advanceChain,
+  findActionableChainStep,
+  isChainFullyApproved,
   buildSolicitudChain,
   buildRendicionChain,
   ChainStep,
@@ -680,17 +680,21 @@ export class ExpenseReportService implements OnModuleInit {
    *   rendición (ver `resolveAssignedCoordinatorId`).
    * - Viático: `viaticoApproverChain`, la cadena por centro de costo tomada
    *   al solicitar el viático (ver `buildSolicitudChain`/`buildSolicitudCostCenterChain`).
-   * - Rendición directa: ya no tiene cadena a nivel de reporte — se resuelve
-   *   por comprobante (`Expense.approverChain`, ver `buildRendicionChain`);
-   *   se incluyen los reportes directa que tengan al menos un comprobante
-   *   con este coordinador en su cadena.
+   * - Rendición por comprobante (directa, normal o viático ya en fase de
+   *   rendición): ya no tiene cadena a nivel de reporte — se resuelve por
+   *   comprobante (`Expense.approverChain`, ver `buildRendicionChain`); se
+   *   incluye cualquier reporte que tenga al menos un comprobante con este
+   *   aprobador en su cadena, SIN importar el estado del reporte. Como la
+   *   cadena del comprobante se construye al SUBIRLO (regla 1.9), el aprobador
+   *   ve la rendición apenas se carga el primer comprobante, aunque el
+   *   colaborador todavía no la haya enviado (`open`).
    * Ninguno usa la relación en vivo usuario→coordinador ni el aprobador actual
    * del centro de costo, así que si este cambia, las solicitudes ya creadas
    * conservan a su coordinador original.
    */
   async findAllByCoordinator(coordinatorId: string, clientId: string) {
     const coordinatorObjectId = new Types.ObjectId(coordinatorId)
-    const directaReportIds = await this.expenseModel
+    const chainReportIds = await this.expenseModel
       .find({ 'approverChain.approverIds': coordinatorObjectId })
       .distinct('expenseReportId')
       .exec()
@@ -701,7 +705,7 @@ export class ExpenseReportService implements OnModuleInit {
         $or: [
           { assignedCoordinatorId: coordinatorObjectId },
           { type: 'viatico', 'viaticoApproverChain.approverIds': coordinatorObjectId },
-          { isDirecta: true, _id: { $in: directaReportIds } },
+          { _id: { $in: chainReportIds } },
         ],
       })
       .populate('userId', 'name email signature bankAccount')
@@ -892,6 +896,10 @@ export class ExpenseReportService implements OnModuleInit {
       .find(filter)
       .populate('categoryId', 'name')
       .populate('proyectId', 'name code')
+      // Nombres de los aprobadores de cada paso de la cadena (regla 1.4) para
+      // mostrarlos en la columna Estado en vez del ObjectId crudo, que no es
+      // legible para el usuario.
+      .populate('approverChain.approverIds', 'name email')
       .exec()
 
     const sorted = (all as unknown as Record<string, unknown>[]).sort(
@@ -983,18 +991,29 @@ export class ExpenseReportService implements OnModuleInit {
             select: 'nombre costCenterId',
             populate: { path: 'costCenterId', select: 'code name' },
           },
+          // Aprobadores N1/N2 esperados por comprobante (regla 1.4) y quién
+          // aprobó por Contabilidad — para mostrar nombres reales (no roles
+          // genéricos) en la sección Estado de la RENDICIÓN.
+          { path: 'approverChain.approverIds', select: 'name email' },
+          { path: 'contabilidadApprovedBy', select: 'name email' },
         ],
       })
       .populate('createdBy', 'name email')
       // Firma incluida para el recuadro V°B° JEFE INMEDIATO del formato ADF-FOR-004
       // (fallback cuando no hubo coordinador).
       .populate('approvedBy', 'name email signature')
+      // Coordinador snapshot de la rendición (regla 1.4, rendición normal/directa
+      // sin cadena por comprobante): nombre para mostrarlo en la sección Estado.
+      .populate('assignedCoordinatorId', 'name email')
       // Coordinador que aprobó: se incluye su firma/DNI para el PDF de la planilla
       // de movilidad (firma del colaborador y del coordinador, VD-33).
       .populate('coordinatorApprovedBy', 'name email signature dni')
       // Contabilidad que dio la aprobación final: nombre y firma para la trazabilidad
       // y el recuadro V°B° FINANZAS (VD-31).
       .populate('contabilidadApprovedBy', 'name email signature')
+      // Contabilidad que aprobó la SOLICITUD del viático (regla 1.3) — distinto de
+      // contabilidadApprovedBy, que es de la RENDICIÓN (regla 1.4, posterior al pago).
+      .populate('viaticoSolicitudContabilidadApprovedBy', 'name email')
       .populate('projectId', 'name')
       .populate({
         path: 'viaticoOrdenTrabajoId',
@@ -1223,13 +1242,15 @@ export class ExpenseReportService implements OnModuleInit {
     if (dto.description !== undefined) $set.description = dto.description
     if (dto.budget !== undefined) $set.budget = dto.budget
 
-    // Al enviar (o reenviar tras rechazo) una rendición normal, directa o de
-    // caja chica, se (re)construye la cadena de aprobación por documento
-    // (regla 1.4) de cada uno de sus comprobantes — ver `buildExpenseChains`.
-    // El viático tiene su propio flujo de creación/reenvío (createViatico/
-    // resubmitViatico) y no pasa por aquí.
+    // Al enviar (o reenviar tras rechazo) una rendición — normal, directa, de
+    // caja chica, o la RENDICIÓN de comprobantes de un viático ya pagado — se
+    // (re)construye la cadena de aprobación por documento (regla 1.4) de cada
+    // uno de sus comprobantes — ver `buildExpenseChains`. La SOLICITUD del
+    // viático (createViatico/resubmitViatico, regla 1.3) tiene su propio flujo
+    // y no pasa por aquí; pero una vez pagado y enviado a rendición, sus
+    // comprobantes necesitan la misma cadena N1/N2 que cualquier otra.
     if (dto.status !== undefined) {
-      if (dto.status === 'submitted' && (existing as any).type !== 'viatico') {
+      if (dto.status === 'submitted') {
         const ownerId = (existing as any).userId?.toString()
         const reportClientId = (existing as any).clientId?.toString()
         if (ownerId && reportClientId) {
@@ -2379,28 +2400,52 @@ export class ExpenseReportService implements OnModuleInit {
   async addExpenseToReport(reportId: string, expenseId: string) {
     const existing = await this.expenseReportModel
       .findById(reportId)
-      .select('status')
+      .select('status userId clientId expenseIds')
       .lean()
       .exec()
 
     const updateOp: Record<string, unknown> = {
       $push: { expenseIds: new Types.ObjectId(expenseId) },
     }
-    if ((existing as any)?.status === 'rejected') {
+    const wasRejected = (existing as any)?.status === 'rejected'
+    if (wasRejected) {
       updateOp.$set = { status: 'submitted' }
       updateOp.$unset = { rejectionReason: '', rejectedByRole: '' }
     }
 
-    return await this.expenseReportModel
+    const updated = await this.expenseReportModel
       .findByIdAndUpdate(reportId, updateOp, { new: true })
       .exec()
+
+    const ownerId = (existing as any)?.userId?.toString()
+    const reportClientId = (existing as any)?.clientId?.toString()
+    const wasSubmitted = (existing as any)?.status === 'submitted'
+    if (ownerId && reportClientId) {
+      if (wasRejected) {
+        // Rendición rechazada y corregida: se (re)construye la cadena de
+        // TODOS sus comprobantes (mismo criterio que un reenvío normal desde
+        // `update()`) — el revisor vuelve a validar todo desde cero.
+        const expenseIds = [
+          ...((existing as any)?.expenseIds ?? []),
+          new Types.ObjectId(expenseId),
+        ] as Types.ObjectId[]
+        await this.buildExpenseChains(expenseIds, ownerId, reportClientId, { force: true })
+      } else if (wasSubmitted) {
+        // Rendición ya enviada y en curso de aprobación: solo se construye la
+        // cadena del comprobante NUEVO — no se toca la de los existentes, que
+        // pueden tener aprobaciones N1/N2 ya en curso.
+        await this.buildExpenseChains([new Types.ObjectId(expenseId)], ownerId, reportClientId)
+      }
+    }
+
+    return updated
   }
 
   /** Cambia silenciosamente el estado de una rendición rechazada a enviada, sin notificaciones. */
   async resubmitSilent(reportId: string): Promise<void> {
     const existing = await this.expenseReportModel
       .findById(reportId)
-      .select('status')
+      .select('status userId clientId expenseIds')
       .lean()
       .exec()
     if (!existing || (existing as any).status !== 'rejected') return
@@ -2410,6 +2455,19 @@ export class ExpenseReportService implements OnModuleInit {
         $unset: { rejectionReason: '', rejectedByRole: '' },
       })
       .exec()
+    // Igual que en `update()`: al reenviar se (re)construye la cadena de cada
+    // comprobante — sin esto, comprobantes de la rendición reabierta quedaban
+    // con `approverChain` sin (re)construir, o con el de un envío anterior.
+    const ownerId = (existing as any).userId?.toString()
+    const reportClientId = (existing as any).clientId?.toString()
+    if (ownerId && reportClientId) {
+      await this.buildExpenseChains(
+        ((existing as any).expenseIds ?? []) as Types.ObjectId[],
+        ownerId,
+        reportClientId,
+        { force: true }
+      )
+    }
   }
 
   async removeExpenseFromReport(
@@ -3786,16 +3844,30 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * (Re)construye la cadena de aprobación por documento (regla 1.4) de todos
-   * los comprobantes de un reporte (rendición normal, directa o caja chica) al
-   * enviarlo. Se recalcula en cada envío por si cambiaron los centros de costo
-   * asignados o los aprobadores desde el último intento; no toca comprobantes
-   * ya rechazados.
+   * Construye la cadena de aprobación por documento (regla 1.4) de los
+   * comprobantes indicados que **todavía no tengan una** (`approverChain ===
+   * undefined`). No se usa ya únicamente al enviar la rendición completa: se
+   * llama sobre todo al registrar CADA comprobante (ver
+   * `buildChainForNewExpense`), para que N1/N2/[N2 sel] puedan empezar a
+   * aprobar desde el momento en que se sube, sin esperar a que el colaborador
+   * termine de cargar todo y haga clic en "Enviar". Que no toque comprobantes
+   * que YA tienen cadena es deliberado: evita pisar aprobaciones en curso si
+   * esta función se vuelve a llamar más tarde (p. ej. al enviar la rendición,
+   * como red de seguridad para comprobantes legados sin cadena). Tampoco toca
+   * comprobantes ya rechazados — su reapertura resetea la cadena aparte (ver
+   * `ExpenseService.updateExpense`, rama de corrección de rechazo).
+   *
+   * `opts.force` reconstruye la cadena aunque ya exista una — solo lo usan
+   * `addExpenseToReport` (rama `wasRejected`) y `resubmitSilent`: cuando se
+   * rechaza la RENDICIÓN completa (no un comprobante individual) y el
+   * colaborador corrige y reenvía, el revisor debe volver a validar todo
+   * desde cero, así que cualquier aprobación N1/N2 previa se descarta.
    */
   private async buildExpenseChains(
     expenseIds: Types.ObjectId[],
     ownerUserId: string,
-    clientId: string
+    clientId: string,
+    opts: { force?: boolean } = {}
   ): Promise<void> {
     if (expenseIds.length === 0) return
     const profile = await this.userService.findTransactionalProfile(ownerUserId)
@@ -3804,7 +3876,7 @@ export class ExpenseReportService implements OnModuleInit {
 
     const expenses = await this.expenseModel
       .find({ _id: { $in: expenseIds } })
-      .select('proyectId status')
+      .select('proyectId status approverChain')
       .exec()
 
     const projectIdsToLoad = [
@@ -3821,6 +3893,7 @@ export class ExpenseReportService implements OnModuleInit {
 
     for (const expense of expenses) {
       if (expense.status === 'rejected') continue
+      if (expense.approverChain !== undefined && !opts.force) continue
       const selectedProjectId = expense.proyectId?.toString()
       if (!selectedProjectId) continue
       const chain = buildRendicionChain({
@@ -3834,16 +3907,34 @@ export class ExpenseReportService implements OnModuleInit {
       expense.requiredLevels = chain.length
       expense.approvalLevel = 0
       await expense.save()
-      if (chain.length > 0) {
-        void this.notifyExpensePendingApprovers(expense, chain[0])
+      // Aprobación en paralelo: TODOS los pasos son accionables desde que se
+      // construye la cadena (no solo el primero) — se notifica a los
+      // aprobadores de cada uno.
+      for (const step of chain) {
+        void this.notifyExpensePendingApprovers(expense, step)
       }
     }
   }
 
   /**
-   * Notifica (in-app) a los approverIds del paso actual de un comprobante que
-   * les toca revisarlo. Público: lo usa también `ExpenseService` al avanzar
-   * un paso de la cadena (approveByCoord/batchApproveByCoord).
+   * Construye la cadena de aprobación de UN comprobante recién creado —
+   * público, lo llama `ExpenseService` justo después de guardarlo. Aprobación
+   * en paralelo desde el momento del registro: N1/N2/[N2 sel] pueden empezar
+   * a aprobar de inmediato, sin esperar a que se envíe la rendición completa.
+   */
+  async buildChainForNewExpense(
+    expenseId: string,
+    ownerUserId: string,
+    clientId: string
+  ): Promise<void> {
+    if (!ownerUserId || !clientId) return
+    await this.buildExpenseChains([new Types.ObjectId(expenseId)], ownerUserId, clientId)
+  }
+
+  /**
+   * Notifica (in-app) a los approverIds de un paso de un comprobante que les
+   * toca revisarlo. Se llama por cada paso pendiente al construir la cadena
+   * (aprobación en paralelo: todos son accionables desde el envío).
    */
   async notifyExpensePendingApprovers(
     expense: { _id: unknown; total?: number; expenseReportId?: unknown },
@@ -3928,21 +4019,27 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * Notifica al aprobador que le corresponde actuar ahora
-   * (viaticoApproverChain[viaticoApprovalLevel]). Se llama tanto al crear la
-   * solicitud (nivel 0) como al avanzar de nivel tras cada aprobación intermedia.
+   * Notifica a los aprobadores de TODOS los pasos aún pendientes de
+   * `viaticoApproverChain` (aprobación en paralelo entre niveles: N1/N2/N3
+   * son accionables desde el envío, sin importar el orden). Se llama tanto al
+   * crear la solicitud como tras cada aprobación intermedia, para reforzar el
+   * aviso a quienes todavía no actuaron.
    */
   private async notifyViaticoCoordinator(report: ExpenseReportDocument, collaboratorUserId: string, clientId: string): Promise<void> {
     const reportId = String((report as any)._id)
     const collaborator = await this.userService.findEmailNameClient(collaboratorUserId)
-    const step = report.viaticoApproverChain?.[report.viaticoApprovalLevel ?? 0]
-    const approverIds = step?.approverIds ?? []
+    const pendingSteps = (report.viaticoApproverChain ?? []).filter(s => !s.approved)
+    const approverIds = [
+      ...new Map(
+        pendingSteps.flatMap(s => s.approverIds).map(id => [id.toString(), id])
+      ).values(),
+    ]
     if (approverIds.length === 0) {
       await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { status: 'skipped', sentAt: new Date(), errorMessage: 'Sin aprobador asignado en este paso' } } })
       return
     }
 
-    // Cualquiera de los aprobadores del paso puede completarlo — se notifica a todos.
+    // Cualquiera de los aprobadores de cualquier paso pendiente puede actuar — se notifica a todos.
     for (const coordId of approverIds) {
       const coordinator = await this.userService.findEmailNameClient(coordId.toString())
       if (!coordinator || !collaborator) {
@@ -3986,10 +4083,11 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
-   * Aprueba el nivel actual de la cadena de aprobadores del viático. Solo puede
-   * actuar el aprobador correspondiente al turno (viaticoApproverChain[viaticoApprovalLevel])
-   * o Superadministrador (llave maestra). Cuando el aprobador es el último de la
-   * cadena, la solicitud queda `viatico_approved`; si no, avanza al siguiente aprobador.
+   * Aprueba UN paso de la cadena de aprobadores del viático (regla 1.3).
+   * Aprobación en paralelo entre niveles: cualquier aprobador de cualquier
+   * paso aún pendiente puede actuar, sin importar el orden, o
+   * Superadministrador (llave maestra). Cuando TODOS los pasos quedan
+   * aprobados, la solicitud pasa a la espera de Contabilidad.
    */
   async approveViatico(id: string, opts: { approvedBy: string; notes?: string }, actorId: string, actorRole: string): Promise<ExpenseReportDocument> {
     const report = await this.expenseReportModel.findById(id)
@@ -3998,14 +4096,23 @@ export class ExpenseReportService implements OnModuleInit {
     if (report.status !== 'pending_l1') throw new BadRequestException(`El viático no está pendiente de aprobación (estado actual: ${report.status})`)
 
     const chain = report.viaticoApproverChain ?? []
-    const approvalLevel = report.viaticoApprovalLevel ?? 0
-    if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
+    const stepIndex = findActionableChainStep({ chain, actorId, actorRole })
+    if (stepIndex === -1) {
       throw new ForbiddenException('No te corresponde aprobar esta solicitud en este momento')
     }
 
-    ;(report.viaticoApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
-
-    const { approvalLevel: nextLevel, isComplete } = advanceChain({ approvalLevel, requiredLevels: report.viaticoRequiredLevels ?? chain.length })
+    const step = chain[stepIndex]
+    const approvalLevel = report.viaticoApprovalLevel ?? 0
+    ;(report.viaticoApprovalHistory ?? []).push({ level: step.level, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
+    chain[stepIndex] = {
+      ...step,
+      approved: true,
+      approvedBy: new Types.ObjectId(actorId),
+      approvedAt: new Date(),
+    }
+    report.viaticoApproverChain = chain
+    const nextLevel = approvalLevel + 1
+    const isComplete = isChainFullyApproved(chain)
     report.viaticoApprovalLevel = nextLevel
 
     if (isComplete) {
@@ -4018,7 +4125,7 @@ export class ExpenseReportService implements OnModuleInit {
       await this.notifyContabilidadPendingApproval(report as ExpenseReportDocument)
     } else {
       await report.save()
-      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en revisión', message: `Tu solicitud por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada en el nivel ${nextLevel} de ${report.viaticoRequiredLevels ?? chain.length} y está pendiente del siguiente aprobador.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
+      this.notificationsService.create({ userId: report.userId.toString(), title: 'Solicitud de viáticos en revisión', message: `Tu solicitud por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)} fue aprobada por uno de sus aprobadores (${nextLevel} de ${report.viaticoRequiredLevels ?? chain.length}) y está pendiente de los demás niveles.`, type: 'info', actionUrl: '/mis-rendiciones' }).catch(() => {})
       this.notifyViaticoCoordinator(report as ExpenseReportDocument, report.userId.toString(), report.clientId.toString()).catch(() => {})
     }
 
@@ -4059,8 +4166,11 @@ export class ExpenseReportService implements OnModuleInit {
 
     const chainLevels = report.viaticoRequiredLevels ?? report.viaticoApproverChain?.length ?? 0
     ;(report.viaticoApprovalHistory ?? []).push({ level: chainLevels + 1, approvedBy: opts.approvedBy, action: 'approved', notes: opts.notes, date: new Date() })
-    report.contabilidadApprovedAt = new Date()
-    report.contabilidadApprovedBy = new Types.ObjectId(actorId)
+    // Campos propios de la SOLICITUD — no usar contabilidadApprovedAt/By: esos
+    // pertenecen a la aprobación de la RENDICIÓN de comprobantes (regla 1.4,
+    // posterior al pago) y se pisarían entre sí.
+    report.viaticoSolicitudContabilidadApprovedAt = new Date()
+    report.viaticoSolicitudContabilidadApprovedBy = new Types.ObjectId(actorId)
     report.status = 'viatico_approved'
     await report.save()
 
@@ -4157,24 +4267,27 @@ export class ExpenseReportService implements OnModuleInit {
     }
 
     let rejectedByRole: 'centro_costo' | 'contabilidad'
+    let rejectedAtLevel = (report.viaticoApprovalLevel ?? 0) + 1
     if (report.status === 'pending_contabilidad') {
       if (actorRole !== ROLES.CONTABILIDAD && actorRole !== ROLES.SUPER_ADMIN) {
         throw new ForbiddenException('No tienes permiso para rechazar esta solicitud')
       }
       rejectedByRole = 'contabilidad'
     } else {
+      // Aprobación en paralelo: cualquier aprobador de un paso aún pendiente
+      // puede rechazar la solicitud completa — no solo "el turno actual".
       const chain = report.viaticoApproverChain ?? []
-      const approvalLevel = report.viaticoApprovalLevel ?? 0
-      if (!canActOnChain({ chain, approvalLevel, actorId, actorRole })) {
+      const stepIndex = findActionableChainStep({ chain, actorId, actorRole })
+      if (stepIndex === -1) {
         throw new ForbiddenException('No tienes permiso para rechazar esta solicitud')
       }
+      rejectedAtLevel = chain[stepIndex].level
       rejectedByRole = 'centro_costo'
     }
 
     if ((opts.rejectionReason?.trim() ?? '').length < 10) throw new BadRequestException('El motivo de rechazo debe tener al menos 10 caracteres.')
 
-    const approvalLevel = report.viaticoApprovalLevel ?? 0
-    ;(report.viaticoApprovalHistory ?? []).push({ level: approvalLevel + 1, approvedBy: opts.rejectedBy, action: 'rejected', notes: opts.rejectionReason, date: new Date() })
+    ;(report.viaticoApprovalHistory ?? []).push({ level: rejectedAtLevel, approvedBy: opts.rejectedBy, action: 'rejected', notes: opts.rejectionReason, date: new Date() })
     report.status = 'rejected'
     report.viaticoRejectedBy = opts.rejectedBy
     report.viaticoRejectionReason = opts.rejectionReason
@@ -4412,10 +4525,19 @@ export class ExpenseReportService implements OnModuleInit {
 
   async findViaticos(opts: { requesterId: string; requesterRole: string; requesterPermissions?: any; clientId: string; status?: string; dateFrom?: string; dateTo?: string }) {
     const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD].includes(opts.requesterRole as ROLES)
-    const isApprover = !isAdmin && opts.requesterRole === ROLES.COORDINADOR
+    // El rol "Coordinador" casi nunca se asigna literalmente: en la práctica un
+    // aprobador es un Colaborador asignado como N1/N2 en algún centro de costo.
+    // Sin este chequeo, cualquier aprobador-Colaborador caía en el filtro por
+    // userId (solo sus propias solicitudes) y nunca veía las que debía aprobar.
+    const isApprover =
+      !isAdmin &&
+      (opts.requesterRole === ROLES.COORDINADOR ||
+        (await this.projectService.isApproverForClient(opts.requesterId, opts.clientId)))
     const filter: Record<string, unknown> = { type: 'viatico', clientId: new Types.ObjectId(opts.clientId) }
 
-    if (isApprover) filter['viaticoApproverChain'] = new Types.ObjectId(opts.requesterId)
+    // `viaticoApproverChain` es un array de pasos (`{ approverIds: ObjectId[] }`),
+    // no un array de ObjectId — hay que filtrar por el subcampo.
+    if (isApprover) filter['viaticoApproverChain.approverIds'] = new Types.ObjectId(opts.requesterId)
     else if (!isAdmin) filter['userId'] = new Types.ObjectId(opts.requesterId)
 
     if (opts.status && opts.status !== 'all') filter['status'] = opts.status
