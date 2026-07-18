@@ -958,6 +958,7 @@ export class ExpenseReportService implements OnModuleInit {
         populate: { path: 'costCenterId', select: 'code name' },
       })
       .populate('viaticoApproverChain.approverIds', 'name email')
+      .populate('rendicionApproverChain.approverIds', 'name email')
       .exec()
 
     if (!report) {
@@ -1093,7 +1094,7 @@ export class ExpenseReportService implements OnModuleInit {
     const dto = updateExpenseReportDto
     const existing = await this.expenseReportModel
       .findById(id)
-      .select('status isDirecta type clientId projectId userId expenseIds')
+      .select('status isDirecta type clientId projectId userId expenseIds rendicionApproverChain rendicionApprovalLevel rendicionRequiredLevels')
       .lean()
       .exec()
     if (!existing) {
@@ -1155,6 +1156,16 @@ export class ExpenseReportService implements OnModuleInit {
     }
     if (dto.status === 'pending_accounting') {
       await this.validateBeforeFinalApproval(id)
+      // La rendición pasa a Contabilidad SOLO cuando su cadena de aprobadores de
+      // centro de costo (N1/N2…) a nivel de reporte está completa. Ese avance lo
+      // realiza `approveRendicion` (el último aprobador). Un intento directo por
+      // aquí con la cadena aún incompleta se rechaza (evita saltarse aprobadores).
+      const reportChain = (existing as any).rendicionApproverChain as ChainStep[] | undefined
+      if (reportChain !== undefined && !isChainFullyApproved(reportChain)) {
+        throw new BadRequestException(
+          'La rendición aún no fue aprobada por todos los aprobadores del centro de costo (N1/N2). Debe aprobarse por cada aprobador antes de pasar a Contabilidad.'
+        )
+      }
     }
     if (dto.status === 'approved' && existing.status !== 'pending_accounting') {
       throw new BadRequestException(
@@ -1191,6 +1202,30 @@ export class ExpenseReportService implements OnModuleInit {
             ownerId,
             reportClientId
           )
+          // Cadena de aprobación de la RENDICIÓN a nivel de reporte (viático):
+          // los aprobadores del centro de costo (N1/N2…) deben completarla antes
+          // de que la rendición pase a Contabilidad. Reusa `buildRendicionChain`
+          // tal cual — misma lógica (asignado/apoyo/escalamiento/omisión) que la
+          // cadena por comprobante. Se (re)construye en cada envío/reenvío,
+          // reseteando cualquier aprobación previa a nivel de reporte.
+          const reportProjectId = (existing as any).projectId?.toString()
+          if ((existing as any).type === 'viatico' && reportProjectId) {
+            try {
+              const reportChain = await this.buildReportRendicionChain(
+                ownerId,
+                reportClientId,
+                reportProjectId
+              )
+              $set.rendicionApproverChain = reportChain
+              $set.rendicionRequiredLevels = reportChain.length
+              $set.rendicionApprovalLevel = 0
+              $set.rendicionApprovalHistory = []
+            } catch (err: unknown) {
+              this.logger.error(
+                `No se pudo construir la cadena de rendición del reporte ${id}: ${err instanceof Error ? err.message : String(err)}`
+              )
+            }
+          }
         }
         $set.status = 'submitted'
       } else {
@@ -3776,6 +3811,39 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
+   * Arma la cadena de aprobación de la RENDICIÓN a nivel de reporte (regla 1.4,
+   * fase post-pago del viático). Reusa `buildRendicionChain` tal cual, con el
+   * centro de costo del reporte como "seleccionado" — misma lógica de
+   * asignado/apoyo/escalamiento/omisión que la cadena por comprobante, sin
+   * generalizar nada. Para el centro de prueba (2 niveles) devuelve [N1, N2].
+   */
+  private async buildReportRendicionChain(
+    ownerUserId: string,
+    clientId: string,
+    reportProjectId: string
+  ): Promise<ChainStep[]> {
+    const profile = await this.userService.findTransactionalProfile(ownerUserId)
+    const assignedProjectIds = profile?.projectIds ?? []
+    const primaryProjectId = profile?.primaryProjectId
+    const idsToLoad = [
+      ...new Set(
+        [...assignedProjectIds, reportProjectId].filter((x): x is string => !!x)
+      ),
+    ]
+    const projects = await this.projectService.findManyByIds(idsToLoad, clientId)
+    const projectById = new Map<string, ChainProject>(
+      projects.map(p => [String(p._id), p as unknown as ChainProject])
+    )
+    return buildRendicionChain({
+      assignedProjectIds,
+      primaryProjectId,
+      selectedProjectId: reportProjectId,
+      creatorId: ownerUserId,
+      projectById,
+    })
+  }
+
+  /**
    * Construye la cadena de aprobación por documento (regla 1.4) de los
    * comprobantes indicados que **todavía no tengan una** (`approverChain ===
    * undefined`). No se usa ya únicamente al enviar la rendición completa: se
@@ -4061,6 +4129,160 @@ export class ExpenseReportService implements OnModuleInit {
       this.notifyViaticoCoordinator(report as ExpenseReportDocument, report.userId.toString(), report.clientId.toString()).catch(() => {})
     }
 
+    return this.findOne(id) as Promise<ExpenseReportDocument>
+  }
+
+  /**
+   * Aprueba UN paso de la cadena de aprobación de la RENDICIÓN a nivel de
+   * reporte (regla 1.4, fase post-pago del viático). Aprobación en paralelo
+   * entre niveles: cualquier aprobador de un paso aún pendiente puede actuar
+   * (N2 puede aprobar antes que N1), o Superadmin. Cuando TODOS los pasos quedan
+   * aprobados, la rendición pasa a Contabilidad (`pending_accounting`). Espejo
+   * de `approveViatico`.
+   */
+  async approveRendicion(
+    id: string,
+    opts: { approvedBy: string; notes?: string },
+    actorId: string,
+    actorRole: string
+  ): Promise<ExpenseReportDocument> {
+    const report = await this.expenseReportModel.findById(id)
+    if (!report) throw new NotFoundException(`Rendición ${id} no encontrada`)
+    if (report.status !== 'submitted') {
+      throw new BadRequestException(
+        `La rendición no está enviada, no se puede aprobar (estado actual: ${report.status}).`
+      )
+    }
+    const chain = report.rendicionApproverChain ?? []
+    if (chain.length === 0) {
+      throw new BadRequestException(
+        'Esta rendición no tiene una cadena de aprobación a nivel de reporte.'
+      )
+    }
+    const stepIndex = findActionableChainStep({ chain, actorId, actorRole })
+    if (stepIndex === -1) {
+      throw new ForbiddenException(
+        'No te corresponde aprobar esta rendición en este momento'
+      )
+    }
+
+    const step = chain[stepIndex]
+    const approvalLevel = report.rendicionApprovalLevel ?? 0
+    ;(report.rendicionApprovalHistory ?? []).push({
+      level: step.level,
+      approvedBy: opts.approvedBy,
+      action: 'approved',
+      notes: opts.notes,
+      date: new Date(),
+    })
+    chain[stepIndex] = {
+      ...plainChainStep(step),
+      approved: true,
+      approvedBy: new Types.ObjectId(actorId),
+      approvedAt: new Date(),
+    }
+    report.rendicionApproverChain = chain
+    const nextLevel = approvalLevel + 1
+    report.rendicionApprovalLevel = nextLevel
+    const isComplete = isChainFullyApproved(chain)
+
+    if (isComplete) {
+      // Todos los aprobadores del centro de costo terminaron → la rendición pasa
+      // al gate de Contabilidad (igual que el clic único anterior, pero ahora
+      // exige la cadena completa antes de llegar aquí).
+      report.status = 'pending_accounting'
+      report.coordinatorApprovedAt = new Date()
+      report.coordinatorApprovedBy = new Types.ObjectId(actorId)
+      await report.save()
+      const fresh = (await this.findOne(id)) as ExpenseReportDocument
+      await this.notifyAccountingReportPendingApproval(id, fresh).catch(() => {})
+      this.notificationsService
+        .create({
+          userId: report.userId.toString(),
+          title: 'Rendición aprobada',
+          message:
+            'Tu rendición fue aprobada por los aprobadores del centro de costo y está pendiente de la aprobación final de Contabilidad.',
+          type: 'info',
+          actionUrl: `/mis-rendiciones/${id}/detalle`,
+        })
+        .catch(() => {})
+      return fresh
+    }
+
+    await report.save()
+    this.notificationsService
+      .create({
+        userId: report.userId.toString(),
+        title: 'Rendición en revisión',
+        message: `Tu rendición fue aprobada por uno de sus aprobadores (nivel ${nextLevel} de ${report.rendicionRequiredLevels ?? chain.length}) y está pendiente de los demás.`,
+        type: 'info',
+        actionUrl: `/mis-rendiciones/${id}/detalle`,
+      })
+      .catch(() => {})
+    return this.findOne(id) as Promise<ExpenseReportDocument>
+  }
+
+  /**
+   * Rechaza la RENDICIÓN a nivel de reporte. Aprobación en paralelo: cualquier
+   * aprobador de un paso aún pendiente puede rechazar todo el reporte (o
+   * Admin/Contabilidad/Superadmin si no hay cadena). Espejo de `rejectByCoord`.
+   */
+  async rejectRendicion(
+    id: string,
+    opts: { rejectedBy: string; rejectionReason: string },
+    actorId: string,
+    actorRole: string
+  ): Promise<ExpenseReportDocument> {
+    if (!opts.rejectionReason?.trim()) {
+      throw new BadRequestException('El motivo de rechazo es obligatorio.')
+    }
+    const report = await this.expenseReportModel.findById(id)
+    if (!report) throw new NotFoundException(`Rendición ${id} no encontrada`)
+    if (report.status !== 'submitted') {
+      throw new BadRequestException(
+        `La rendición no está enviada, no se puede rechazar (estado actual: ${report.status}).`
+      )
+    }
+    const chain = report.rendicionApproverChain ?? []
+    const isAdminOverride = [
+      ROLES.SUPER_ADMIN,
+      ROLES.ADMIN,
+      ROLES.CONTABILIDAD,
+    ].includes(actorRole as any)
+    let rejectedAtLevel = (report.rendicionApprovalLevel ?? 0) + 1
+    if (chain.length > 0) {
+      const stepIndex = findActionableChainStep({ chain, actorId, actorRole })
+      if (stepIndex === -1) {
+        throw new ForbiddenException(
+          'No te corresponde rechazar esta rendición en este momento'
+        )
+      }
+      rejectedAtLevel = chain[stepIndex].level
+    } else if (!isAdminOverride) {
+      throw new ForbiddenException(
+        'No te corresponde rechazar esta rendición en este momento'
+      )
+    }
+    ;(report.rendicionApprovalHistory ?? []).push({
+      level: rejectedAtLevel,
+      approvedBy: opts.rejectedBy,
+      action: 'rejected',
+      notes: opts.rejectionReason.trim(),
+      date: new Date(),
+    })
+    report.status = 'rejected'
+    report.rejectionReason = opts.rejectionReason.trim()
+    report.rejectedByRole = 'coordinador'
+    await report.save()
+    this.notificationsService
+      .create({
+        userId: report.userId.toString(),
+        title: 'Rendición observada',
+        message: `Tu rendición fue rechazada por un aprobador: ${opts.rejectionReason.slice(0, 80)}`,
+        type: 'error',
+        actionUrl: `/mis-rendiciones/${id}/detalle`,
+      })
+      .catch(() => {})
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
