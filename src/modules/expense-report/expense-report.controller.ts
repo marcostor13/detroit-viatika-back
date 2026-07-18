@@ -784,6 +784,51 @@ export class ExpenseReportController {
   }
 
   /**
+   * Aprobación de la RENDICIÓN a nivel de reporte (regla 1.4): aprueba UN paso
+   * de la cadena de aprobadores del centro de costo (N1/N2…). Cualquier
+   * aprobador de un paso pendiente puede actuar (o Superadmin), por eso no se
+   * restringe por @Roles — el servicio valida el turno vía la cadena.
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Patch(':id/rendicion/approve')
+  async approveRendicion(
+    @Param('id') id: string,
+    @Body() body: { notes?: string },
+    @Request() req: any
+  ) {
+    const actorId = String(req.user._id || req.user.sub)
+    const actorRole = req.user?.roles?.[0] ?? ''
+    const result = await this.expenseReportService.approveRendicion(
+      id,
+      { approvedBy: actorId, notes: body.notes },
+      actorId,
+      actorRole
+    )
+    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'approve_rendicion', module: 'rendiciones', entityId: id, clientId: req.user.clientId })
+    return result
+  }
+
+  /** Rechazar la RENDICIÓN a nivel de reporte. El servicio valida el turno (aprobador del paso pendiente) o Admin/Contabilidad si no hay cadena. */
+  @UseGuards(AuthGuard('jwt'))
+  @Patch(':id/rendicion/reject')
+  async rejectRendicion(
+    @Param('id') id: string,
+    @Body() body: { rejectionReason: string },
+    @Request() req: any
+  ) {
+    const actorId = String(req.user._id || req.user.sub)
+    const actorRole = req.user?.roles?.[0] ?? ''
+    const result = await this.expenseReportService.rejectRendicion(
+      id,
+      { rejectedBy: actorId, rejectionReason: body.rejectionReason },
+      actorId,
+      actorRole
+    )
+    await this.auditLogService.log({ userId: req.user._id || req.user.sub, userName: req.user.name || req.user.email || 'Usuario', action: 'reject_rendicion', module: 'rendiciones', entityId: id, details: body.rejectionReason, clientId: req.user.clientId })
+    return result
+  }
+
+  /**
    * @removed :id/directa/approve y :id/directa/reject — la aprobación de
    * rendición directa ya no es a nivel de reporte. Usa los mismos endpoints
    * por comprobante que la rendición normal: PATCH invoice/:id/approve-coord

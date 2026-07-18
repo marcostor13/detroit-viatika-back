@@ -84,6 +84,7 @@ export class ProjectController {
   @Roles(
     ROLES.SUPER_ADMIN,
     ROLES.ADMIN,
+    ROLES.COORDINADOR,
     ROLES.COLABORADOR,
     ROLES.CONTABILIDAD,
     ROLES.TESORERIA

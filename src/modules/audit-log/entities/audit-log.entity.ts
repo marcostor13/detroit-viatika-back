@@ -15,6 +15,8 @@ export type AuditAction =
   | 'create_rendicion_directa_deposito'
   | 'create_saldo_pago'
   | 'delete_rendicion'
+  | 'approve_rendicion'
+  | 'reject_rendicion'
   | 'update_rendicion_status'
   | 'reopen_rendicion'
   | 'register_reimbursement_payment'
