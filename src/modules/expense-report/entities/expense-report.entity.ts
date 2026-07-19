@@ -448,6 +448,7 @@ export class ExpenseReport {
       depositDate: { type: String, required: true },
       bankOrigin: { type: String },
       operationNumber: { type: String },
+      amountReturned: { type: Number },
       scannedAmount: { type: Number },
       operationDate: { type: String },
       operationTime: { type: String },
@@ -463,6 +464,8 @@ export class ExpenseReport {
     depositDate: string
     bankOrigin?: string
     operationNumber?: string
+    /** Monto devuelto ingresado manualmente por el colaborador. */
+    amountReturned?: number
     /** Datos extraídos del comprobante por OCR/visión (informativos). */
     scannedAmount?: number
     operationDate?: string

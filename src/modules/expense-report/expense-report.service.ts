@@ -973,6 +973,32 @@ export class ExpenseReportService implements OnModuleInit {
         (normalized as unknown as { isCajaChica?: boolean }).isCajaChica === true
           ? await this.isLockedByFinalizedCajaChica(id)
           : false
+
+    // N° de rendición para viáticos (VD-63): los viáticos no tienen `codigo`
+    // (solo las directas). Se numeran por la posición del viático entre los del
+    // mismo colaborador, ordenados por fecha de creación. Aquí devolvemos solo la
+    // posición estable; el front arma "INICIALES-00N" con el nombre que muestra.
+    const meta = normalized as unknown as {
+      type?: string
+      userId?: { _id?: unknown }
+      clientId?: unknown
+      createdAt?: Date
+      viaticoPosition?: number
+    }
+    if (meta.type === 'viatico') {
+      const ownerRef = meta.userId as { _id?: unknown } | unknown
+      const ownerId =
+        ownerRef && typeof ownerRef === 'object' && '_id' in ownerRef
+          ? (ownerRef as { _id?: unknown })._id
+          : ownerRef
+      const earlier = await this.expenseReportModel.countDocuments({
+        type: 'viatico',
+        clientId: meta.clientId,
+        userId: ownerId,
+        createdAt: { $lt: meta.createdAt },
+      })
+      meta.viaticoPosition = earlier + 1
+    }
     return normalized
   }
 
@@ -3227,6 +3253,7 @@ export class ExpenseReportService implements OnModuleInit {
       depositDate: string
       bankOrigin?: string
       operationNumber?: string
+      amountReturned?: number
       fileUrl: string
       fileName?: string
       scannedAmount?: number
@@ -3309,6 +3336,7 @@ export class ExpenseReportService implements OnModuleInit {
       depositDate: dto.depositDate,
       bankOrigin: dto.bankOrigin,
       operationNumber: dto.operationNumber,
+      amountReturned: dto.amountReturned,
       scannedAmount: dto.scannedAmount,
       operationDate: dto.operationDate,
       operationTime: dto.operationTime,
