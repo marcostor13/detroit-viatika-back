@@ -3253,6 +3253,7 @@ export class ExpenseReportService implements OnModuleInit {
       depositDate: string
       bankOrigin?: string
       operationNumber?: string
+      amountReturned?: number
       fileUrl: string
       fileName?: string
       scannedAmount?: number
@@ -3335,6 +3336,7 @@ export class ExpenseReportService implements OnModuleInit {
       depositDate: dto.depositDate,
       bankOrigin: dto.bankOrigin,
       operationNumber: dto.operationNumber,
+      amountReturned: dto.amountReturned,
       scannedAmount: dto.scannedAmount,
       operationDate: dto.operationDate,
       operationTime: dto.operationTime,
