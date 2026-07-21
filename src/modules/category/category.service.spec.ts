@@ -43,10 +43,14 @@ const mockParent = {
 }
 
 const makeExec = (resolvedValue: any) => ({
+  collation: jest.fn().mockReturnThis(),
+  sort: jest.fn().mockReturnThis(),
   exec: jest.fn().mockResolvedValue(resolvedValue),
 })
 
 const makeChainable = (resolvedValue: any) => ({
+  collation: jest.fn().mockReturnThis(),
+  sort: jest.fn().mockReturnThis(),
   skip: jest.fn().mockReturnThis(),
   limit: jest.fn().mockReturnThis(),
   exec: jest.fn().mockResolvedValue(resolvedValue),

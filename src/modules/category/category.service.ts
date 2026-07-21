@@ -14,6 +14,13 @@ import {
 import { CreateCategoryDto } from './dto/create-category.dto'
 import { UpdateCategoryDto } from './dto/update-category.dto'
 
+/**
+ * Collation para ordenar nombres de categoría alfabéticamente en español.
+ * `strength: 1` ignora tildes y mayúsculas, de modo que "Útiles" y "alimentación"
+ * caen donde un humano los espera y no al final por su byte UTF-8.
+ */
+const CATEGORY_NAME_COLLATION = { locale: 'es', strength: 1 } as const
+
 export interface IPaginatedResult<T> {
   data: T[]
   total: number
@@ -94,8 +101,13 @@ export class CategoryService {
       }
 
       const total = await this.categoryModel.countDocuments(filter).exec()
+      // Orden alfabético con collation español: sin tildes ni mayúsculas de por
+      // medio. Además estabiliza la paginación (skip/limit sin sort no garantiza
+      // un orden consistente entre páginas en MongoDB).
       const docs = await this.categoryModel
         .find(filter)
+        .collation(CATEGORY_NAME_COLLATION)
+        .sort({ name: 1 })
         .skip(skip)
         .limit(limit)
         .exec()
@@ -143,7 +155,11 @@ export class CategoryService {
         }
       }
 
-      return await this.categoryModel.find(filter).exec()
+      return await this.categoryModel
+        .find(filter)
+        .collation(CATEGORY_NAME_COLLATION)
+        .sort({ name: 1 })
+        .exec()
     } catch (error) {
       this.logger.error(
         `Error al obtener categorías (flat): ${error.message}`,
