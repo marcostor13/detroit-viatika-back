@@ -1261,3 +1261,73 @@ describe('ExpenseReportService — addExpenseToReport (reconstrucción de cadena
     ).toContain(reportWithChain.toString())
   })
 })
+
+describe('ExpenseReportService — findExpensesPaginated (búsqueda por RUC, VD-65)', () => {
+  let service: ExpenseReportService
+  let mockExpenseReportModel: Record<string, jest.Mock>
+  let mockExpenseModel: Record<string, jest.Mock>
+
+  const reportId = new Types.ObjectId().toString()
+  const expenseId = new Types.ObjectId().toString()
+
+  beforeEach(async () => {
+    jest.clearAllMocks()
+
+    mockExpenseReportModel = {
+      findById: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({ expenseIds: [expenseId] }),
+        }),
+      }),
+    }
+    mockExpenseModel = {
+      find: jest.fn().mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      }),
+    }
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExpenseReportService,
+        { provide: getModelToken(ExpenseReport.name), useValue: mockExpenseReportModel },
+        { provide: getModelToken(Expense.name), useValue: mockExpenseModel },
+        { provide: getModelToken(CajaChicaReport.name), useValue: { countDocuments: jest.fn() } },
+        { provide: EmailService, useValue: {} },
+        { provide: NotificationsService, useValue: { create: jest.fn() } },
+        { provide: UserService, useValue: {} },
+        { provide: AdvanceService, useValue: {} },
+        { provide: UploadService, useValue: {} },
+        { provide: ProjectService, useValue: {} },
+        { provide: CategoryService, useValue: {} },
+      ],
+    }).compile()
+
+    service = module.get<ExpenseReportService>(ExpenseReportService)
+  })
+
+  it('filtra por rucEmisor dentro del JSON data, no por concepto', async () => {
+    await service.findExpensesPaginated(reportId, { page: 1, limit: 10, search: '20123456789' })
+
+    const filter = mockExpenseModel.find.mock.calls[0][0] as {
+      $and?: Array<Record<string, any>>
+    }
+    expect(filter.$and).toBeDefined()
+    const clause = filter.$and![0]
+    // Apunta al campo data con un regex anclado a la clave rucEmisor.
+    expect(clause['data'].$regex).toContain('rucEmisor')
+    expect(clause['data'].$regex).toContain('20123456789')
+    // Ya no debe buscar por description ni por los campos de concepto/movilidad.
+    expect(clause['description']).toBeUndefined()
+    expect(clause['$or']).toBeUndefined()
+  })
+
+  it('no agrega filtro de búsqueda cuando el término está vacío', async () => {
+    await service.findExpensesPaginated(reportId, { page: 1, limit: 10, search: '   ' })
+
+    const filter = mockExpenseModel.find.mock.calls[0][0] as {
+      $and?: Array<Record<string, any>>
+    }
+    expect(filter.$and).toBeUndefined()
+  })
+})
