@@ -424,3 +424,97 @@ describe('ExpenseService — aprobación por comprobante (regla 1.4, en paralelo
     })
   })
 })
+
+describe('ExpenseService — assertCanMutateExpense (VD-69: N1/N2 no editan ni eliminan)', () => {
+  let service: ExpenseService
+  let mockExpenseModel: {
+    findOne: jest.Mock
+    findByIdAndUpdate: jest.Mock
+    findOneAndDelete: jest.Mock
+  }
+
+  const clientId = new Types.ObjectId().toHexString()
+  const expenseId = new Types.ObjectId().toHexString()
+  const ownerId = new Types.ObjectId().toHexString()
+  const approverId = new Types.ObjectId().toHexString()
+
+  /** Comprobante sin rendición asociada: aísla la validación de propiedad. */
+  function loneExpense(overrides: Record<string, unknown> = {}) {
+    const expense = {
+      _id: expenseId,
+      clientId,
+      createdBy: ownerId,
+      status: 'pending',
+      ...overrides,
+    }
+    mockExpenseModel.findOne.mockReturnValue({
+      populate: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(expense),
+    })
+    return expense
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks()
+    mockExpenseModel = {
+      findOne: jest.fn(),
+      findByIdAndUpdate: jest.fn(),
+      findOneAndDelete: jest
+        .fn()
+        .mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }),
+    }
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExpenseService,
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('sk-test') } },
+        { provide: getModelToken(Expense.name), useValue: mockExpenseModel },
+        { provide: getModelToken(Client.name), useValue: {} },
+        { provide: EmailService, useValue: {} },
+        { provide: ProjectService, useValue: {} },
+        { provide: UserService, useValue: {} },
+        { provide: SunatConfigService, useValue: {} },
+        { provide: HttpService, useValue: {} },
+        { provide: UploadService, useValue: {} },
+        { provide: ExpenseReportService, useValue: {} },
+        { provide: NotificationsService, useValue: { create: jest.fn() } },
+        { provide: CategoryService, useValue: {} },
+      ],
+    }).compile()
+
+    service = module.get<ExpenseService>(ExpenseService)
+  })
+
+  it('un Coordinador (perfil del aprobador N1/N2) NO puede eliminar un comprobante ajeno', async () => {
+    loneExpense()
+    const approver = { userId: approverId, roleName: ROLES.COORDINADOR, clientId }
+
+    await expect(service.remove(expenseId, approver)).rejects.toThrow(ForbiddenException)
+    expect(mockExpenseModel.findOneAndDelete).not.toHaveBeenCalled()
+  })
+
+  it('un Coordinador NO puede editar un comprobante ajeno', async () => {
+    loneExpense()
+    const approver = { userId: approverId, roleName: ROLES.COORDINADOR, clientId }
+
+    await expect(
+      service.update(expenseId, {} as never, approver)
+    ).rejects.toThrow(ForbiddenException)
+  })
+
+  it('el creador sí puede eliminar su propio comprobante', async () => {
+    loneExpense()
+    const owner = { userId: ownerId, roleName: ROLES.COORDINADOR, clientId }
+
+    await service.remove(expenseId, owner)
+    expect(mockExpenseModel.findOneAndDelete).toHaveBeenCalled()
+  })
+
+  it('Contabilidad conserva el permiso sobre comprobantes ajenos', async () => {
+    loneExpense()
+    const conta = { userId: approverId, roleName: ROLES.CONTABILIDAD, clientId }
+
+    await service.remove(expenseId, conta)
+    expect(mockExpenseModel.findOneAndDelete).toHaveBeenCalled()
+  })
+})

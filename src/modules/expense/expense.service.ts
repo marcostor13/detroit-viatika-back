@@ -165,12 +165,40 @@ export class ExpenseService {
     }
   }
 
+  /**
+   * Roles con permiso transversal para corregir comprobantes ajenos.
+   * Contabilidad los corrige como parte de su revisión; Admin/Superadmin operan
+   * soporte. Cualquier otro rol solo puede tocar los suyos (ver
+   * `assertCanMutateExpense`).
+   */
+  private static readonly EXPENSE_MUTATION_PRIVILEGED_ROLES: string[] = [
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.CONTABILIDAD,
+  ]
+
   private async assertCanMutateExpense(
     expense: Expense,
     actor: ExpenseActorContext
   ): Promise<void> {
     this.assertCanReadExpense(expense, actor)
-    if (actor.roleName !== ROLES.COLABORADOR) return
+    // VD-69: los aprobadores N1/N2 no pueden editar ni eliminar comprobantes.
+    // El aprobador no tiene un rol propio (es quien figure en la cadena del
+    // centro de costo) y su perfil habitual es Coordinador, así que en vez de
+    // vetar un rol se exige ser el creador a todo el que no sea
+    // Contabilidad/Admin. No se controla vía @Roles porque el alias
+    // Coordinador → Administrador de roles.guard.ts lo haría inútil.
+    if (
+      ExpenseService.EXPENSE_MUTATION_PRIVILEGED_ROLES.includes(actor.roleName)
+    ) {
+      return
+    }
+    const ownerId = String(expense.createdBy || '').trim()
+    if (!ownerId || ownerId !== actor.userId) {
+      throw new ForbiddenException(
+        'Solo puedes modificar tus propios comprobantes.'
+      )
+    }
     const status = expense.status || 'pending'
     if (status === 'approved') {
       throw new ForbiddenException(
