@@ -328,8 +328,12 @@ export class ExpenseService {
   }
 
   private determineCodComp(tipo?: string): string {
-    if (tipo === 'Factura') return '01'
-    if (tipo === 'Boleta') return '03'
+    // Case-insensitive y tolerante a variantes (p. ej. "Boleta Electrónica",
+    // "FACTURA"): el OCR/usuario puede enviar texto libre y un tipo mal
+    // detectado hace que SUNAT valide con el codComp equivocado (VD-70).
+    const t = (tipo ?? '').trim().toLowerCase()
+    if (t.includes('boleta')) return '03'
+    if (t.includes('factura')) return '01'
     return '01'
   }
 

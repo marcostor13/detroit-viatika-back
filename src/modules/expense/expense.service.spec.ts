@@ -357,6 +357,27 @@ describe('ExpenseService — aprobación por comprobante (regla 1.4, en paralelo
     service = module.get<ExpenseService>(ExpenseService)
   })
 
+  describe('determineCodComp (VD-70: tipo de comprobante → codComp SUNAT)', () => {
+    const codComp = (tipo?: string): string => (service as any).determineCodComp(tipo)
+
+    it('Factura → 01, Boleta → 03', () => {
+      expect(codComp('Factura')).toBe('01')
+      expect(codComp('Boleta')).toBe('03')
+    })
+
+    it('es case-insensitive y tolera variantes como "Boleta Electrónica"', () => {
+      expect(codComp('BOLETA')).toBe('03')
+      expect(codComp('boleta electrónica')).toBe('03')
+      expect(codComp('  factura  ')).toBe('01')
+    })
+
+    it('cae a Factura (01) cuando el tipo es desconocido o vacío', () => {
+      expect(codComp(undefined)).toBe('01')
+      expect(codComp('')).toBe('01')
+      expect(codComp('Ticket')).toBe('01')
+    })
+  })
+
   describe('approveByCoord', () => {
     it('deja que N2 apruebe antes que N1 (cualquier orden)', async () => {
       const expense = baseExpense()
