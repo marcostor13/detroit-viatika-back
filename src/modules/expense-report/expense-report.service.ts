@@ -804,22 +804,13 @@ export class ExpenseReportService implements OnModuleInit {
       filter['status'] = opts.status
     }
     if (opts.search?.trim()) {
-      // El "concepto" se guarda en distintos campos según el tipo de
-      // comprobante (description plano, JSON dentro de description/data, o
-      // mobilityRows[].gestion/origen/destino), por lo que el search debe
-      // cubrir todos esos lugares.
+      // VD-65: el buscador de comprobantes filtra por RUC del emisor (antes
+      // buscaba por "concepto" en múltiples campos). El RUC vive dentro del JSON
+      // `data`, persistido como string, en el campo `rucEmisor`; se busca el
+      // término dentro de ese valor para admitir coincidencias parciales.
       const term = opts.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const rx = { $regex: term, $options: 'i' }
       and.push({
-        $or: [
-          { description: rx },
-          { data: rx },
-          { 'mobilityRows.gestion': rx },
-          { 'mobilityRows.concepto': rx },
-          { 'mobilityRows.origen': rx },
-          { 'mobilityRows.destino': rx },
-          { 'mobilityRows.clienteProveedor': rx },
-        ],
+        data: { $regex: `"rucEmisor"\\s*:\\s*"[^"]*${term}`, $options: 'i' },
       })
     }
     if (and.length) filter['$and'] = and

@@ -48,7 +48,8 @@ export class ExpenseController {
   /**
    * Escanea un comprobante de depósito (imagen o PDF, por URL) y extrae monto, fecha,
    * hora, n° de operación y titular. Lo usan tanto Contabilidad (depósito de rendición
-   * directa, reembolso) como el Colaborador/Coordinador (comprobante de devolución de saldo).
+   * directa, reembolso) como el Colaborador/Coordinador (comprobante de devolución de saldo)
+   * y Tesorería (comprobante de pago de reembolso/viático).
    */
   @Post('scan-deposit-amount')
   @Roles(
@@ -56,7 +57,8 @@ export class ExpenseController {
     ROLES.SUPER_ADMIN,
     ROLES.ADMIN,
     ROLES.COLABORADOR,
-    ROLES.COORDINADOR
+    ROLES.COORDINADOR,
+    ROLES.TESORERIA
   )
   @UseGuards(JwtAuthGuard, RolesGuard)
   async scanDepositAmount(@Body() body: { url?: string; mimeType?: string }) {
@@ -66,26 +68,25 @@ export class ExpenseController {
     return this.expenseService.extractDepositInfo(body.url, body.mimeType)
   }
 
+  // VD-70 Parte B: el escaneo solo hace OCR + SUNAT; NO sube el archivo ni crea
+  // el gasto. La imagen llega como multipart y se analiza en memoria. El gasto
+  // se crea recién al confirmar (POST invoice).
   @Post('analyze-image')
   @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  async analyzeImage(@Body() body: CreateExpenseDto, @Request() req) {
+  @UseInterceptors(FileInterceptor('file'))
+  async analyzeImage(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: CreateExpenseDto,
+    @Request() req
+  ) {
     const clientId = body.clientId || req.user?.clientId
     if (!clientId) {
       throw new Error('No se pudo obtener la empresa del usuario ni del body')
     }
     body.clientId = clientId
     body.userId = req.user?.sub || req.user?._id || body.userId
-    const result = await this.expenseService.analyzeImageWithUrl(body)
-    this.auditLogService.log({
-      userId: req.user?._id || req.user?.sub,
-      userName: req.user?.name || req.user?.email || 'Usuario',
-      action: 'create_invoice',
-      module: 'facturas',
-      entityId: (result as any)?._id?.toString(),
-      clientId,
-    })
-    return result
+    return this.expenseService.scanInvoiceImage(body, file)
   }
 
   @Post('analize-pdf')
@@ -103,7 +104,21 @@ export class ExpenseController {
     }
     body.clientId = clientId
     body.userId = req.user?.sub || req.user?._id || body.userId
-    const result = await this.expenseService.analyzePdf(body, file)
+    return this.expenseService.scanInvoicePdf(body, file)
+  }
+
+  /** VD-70 Parte B: crea la factura al confirmar (tras el escaneo OCR). */
+  @Post('invoice')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async createInvoice(@Body() body: CreateExpenseDto, @Request() req) {
+    const clientId = body.clientId || req.user?.clientId
+    if (!clientId) {
+      throw new Error('No se pudo obtener la empresa del usuario ni del body')
+    }
+    body.clientId = clientId
+    body.userId = req.user?.sub || req.user?._id || body.userId
+    const result = await this.expenseService.createInvoiceFromScan(body)
     this.auditLogService.log({
       userId: req.user?._id || req.user?.sub,
       userName: req.user?.name || req.user?.email || 'Usuario',
@@ -113,6 +128,30 @@ export class ExpenseController {
       clientId,
     })
     return result
+  }
+
+  /** VD-70 Parte B: revalida con SUNAT sin gasto persistido (panel post-OCR). */
+  @Post('scan/validate-sunat')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async validateSunatStateless(
+    @Body()
+    body: {
+      rucEmisor?: string
+      serie?: string
+      correlativo?: string
+      fechaEmision?: string
+      montoTotal?: number
+      tipoComprobante?: string
+      clientId?: string
+    },
+    @Request() req
+  ) {
+    const clientId = body.clientId || req.user?.clientId
+    if (!clientId) {
+      throw new Error('No se pudo obtener la empresa del usuario ni del body')
+    }
+    return this.expenseService.validateSunatStateless(body, clientId)
   }
 
   @Post('mobility-sheet')

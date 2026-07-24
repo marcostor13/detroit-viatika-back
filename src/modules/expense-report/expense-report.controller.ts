@@ -500,16 +500,18 @@ export class ExpenseReportController {
   // ─── Fase 8 — Cierre Definitivo ────────────────────────────────────────────
 
   /** Valida condiciones de cierre sin cerrar. */
+  // VD-66/VD-49: el cierre de la rendición es responsabilidad de Tesorería
+  // (antes Contabilidad). SuperAdmin se mantiene como override global.
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
+  @Roles(ROLES.SUPER_ADMIN, ROLES.TESORERIA)
   @Get(':id/close/validate')
   validateClosure(@Param('id') id: string) {
     return this.expenseReportService.validateClosureConditions(id)
   }
 
-  /** Cierra definitivamente la rendición. */
+  /** Cierra definitivamente la rendición. Tesorería (VD-66/VD-49). */
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(ROLES.SUPER_ADMIN, ROLES.CONTABILIDAD)
+  @Roles(ROLES.SUPER_ADMIN, ROLES.TESORERIA)
   @Patch(':id/close')
   async close(@Param('id') id: string, @Request() req: any) {
     const closedBy = req.user._id || req.user.sub
