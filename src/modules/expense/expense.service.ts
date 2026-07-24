@@ -552,6 +552,27 @@ export class ExpenseService {
     }
     let expenseStatus = 'pending'
 
+    // SOLO PRUEBAS: si SUNAT_MOCK_STATUS está definido, se simula la respuesta de
+    // SUNAT sin llamar al servicio real (p. ej. SUNAT_MOCK_STATUS=VALIDO_ACEPTADO
+    // para probar el camino válido de VD-70). Vacío/ausente => comportamiento
+    // normal. Se ignora en producción por seguridad (si la env var se filtra a
+    // prod, no debe saltarse la validación real). Ver docs/cambios-temporales-pruebas.md.
+    const mockStatus = this.configService.get<string>('SUNAT_MOCK_STATUS')
+    const isProd = this.configService.get<string>('NODE_ENV') === 'production'
+    if (mockStatus && !isProd) {
+      this.logger.warn(
+        `[SUNAT MOCK] Validación simulada como ${mockStatus} (SUNAT_MOCK_STATUS activo — solo pruebas)`
+      )
+      return {
+        validation: {
+          status: mockStatus,
+          details: 'Respuesta simulada (SUNAT_MOCK_STATUS)',
+          message: `Validación SUNAT simulada: ${mockStatus}`,
+        },
+        expenseStatus: mockStatus,
+      }
+    }
+
     if (data.rucEmisor && data.serie && data.correlativo && companyRuc) {
       try {
         const sunatApiUrl = `https://api.sunat.gob.pe/v1/contribuyente/contribuyentes/${companyRuc}/validarcomprobante`
