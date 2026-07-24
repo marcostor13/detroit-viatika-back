@@ -48,7 +48,8 @@ export class ExpenseController {
   /**
    * Escanea un comprobante de depósito (imagen o PDF, por URL) y extrae monto, fecha,
    * hora, n° de operación y titular. Lo usan tanto Contabilidad (depósito de rendición
-   * directa, reembolso) como el Colaborador/Coordinador (comprobante de devolución de saldo).
+   * directa, reembolso) como el Colaborador/Coordinador (comprobante de devolución de saldo)
+   * y Tesorería (comprobante de pago de reembolso/viático).
    */
   @Post('scan-deposit-amount')
   @Roles(
@@ -56,7 +57,8 @@ export class ExpenseController {
     ROLES.SUPER_ADMIN,
     ROLES.ADMIN,
     ROLES.COLABORADOR,
-    ROLES.COORDINADOR
+    ROLES.COORDINADOR,
+    ROLES.TESORERIA
   )
   @UseGuards(JwtAuthGuard, RolesGuard)
   async scanDepositAmount(@Body() body: { url?: string; mimeType?: string }) {
