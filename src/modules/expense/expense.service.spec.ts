@@ -376,6 +376,13 @@ describe('ExpenseService — aprobación por comprobante (regla 1.4, en paralelo
       expect(codComp('')).toBe('01')
       expect(codComp('Ticket')).toBe('01')
     })
+
+    it('mapea nota de crédito (07) y débito (08) — catálogo listo aunque el form no las exponga aún', () => {
+      expect(codComp('Nota de Crédito')).toBe('07')
+      expect(codComp('NOTA DE CREDITO ELECTRONICA')).toBe('07')
+      expect(codComp('Nota de Débito')).toBe('08')
+      expect(codComp('nota de debito')).toBe('08')
+    })
   })
 
   describe('approveByCoord', () => {

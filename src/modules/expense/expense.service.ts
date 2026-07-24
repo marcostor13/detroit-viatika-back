@@ -328,10 +328,15 @@ export class ExpenseService {
   }
 
   private determineCodComp(tipo?: string): string {
-    // Case-insensitive y tolerante a variantes (p. ej. "Boleta Electrónica",
-    // "FACTURA"): el OCR/usuario puede enviar texto libre y un tipo mal
-    // detectado hace que SUNAT valide con el codComp equivocado (VD-70).
+    // Catálogo SUNAT (cat. 01) de tipo de comprobante → codComp. Se mantiene
+    // completo aunque el formulario hoy solo exponga Factura/Boleta, para que
+    // habilitar más tipos sea trivial (agregar la opción en el selector, sin
+    // tocar backend). Case-insensitive y tolerante a variantes (p. ej. "Boleta
+    // Electrónica", "FACTURA"): un tipo mal detectado haría que SUNAT valide con
+    // el codComp equivocado (VD-70).
     const t = (tipo ?? '').trim().toLowerCase()
+    if (t.includes('crédito') || t.includes('credito')) return '07' // Nota de crédito
+    if (t.includes('débito') || t.includes('debito')) return '08' // Nota de débito
     if (t.includes('boleta')) return '03'
     if (t.includes('factura')) return '01'
     return '01'
