@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -67,7 +68,10 @@ export class CategoryService {
     const clientIdObject = new Types.ObjectId(createCategoryDto.clientId)
     try {
       if (!createCategoryDto.key && createCategoryDto.name) {
-        createCategoryDto.key = this.generateKey(createCategoryDto.name)
+        createCategoryDto.key = await this.generateUniqueKey(
+          createCategoryDto.name,
+          clientIdObject
+        )
       }
 
       const newCategory = new this.categoryModel({
@@ -76,6 +80,11 @@ export class CategoryService {
       })
       return await newCategory.save()
     } catch (error) {
+      if (error?.code === 11000) {
+        throw new ConflictException(
+          'Ya existe una categoría con esa clave. Cambia el nombre o la clave.'
+        )
+      }
       this.logger.error(
         `Error al crear categoría: ${error.message}`,
         error.stack
@@ -222,7 +231,11 @@ export class CategoryService {
         !updateCategoryDto.key &&
         updateCategoryDto.name !== (await this.findOne(id, clientId)).name
       ) {
-        updateCategoryDto.key = this.generateKey(updateCategoryDto.name)
+        updateCategoryDto.key = await this.generateUniqueKey(
+          updateCategoryDto.name,
+          clientIdObject,
+          id
+        )
       }
 
       const updatedCategory = await this.categoryModel
@@ -239,6 +252,12 @@ export class CategoryService {
 
       return updatedCategory
     } catch (error) {
+      if (error instanceof NotFoundException) throw error
+      if (error?.code === 11000) {
+        throw new ConflictException(
+          'Ya existe una categoría con esa clave. Cambia el nombre o la clave.'
+        )
+      }
       this.logger.error(
         `Error al actualizar categoría: ${error.message}`,
         error.stack
@@ -293,7 +312,10 @@ export class CategoryService {
       }
 
       try {
-        const key = this.generateKey(row.name)
+        const key = await this.generateUniqueKey(
+          row.name.trim(),
+          clientIdObject
+        )
         const newCategory = await this.categoryModel.create({
           name: row.name.trim(),
           key,
@@ -347,5 +369,37 @@ export class CategoryService {
       .replace(/[^a-z0-9]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')
+  }
+
+  /**
+   * Genera un `key` único por cliente a partir del nombre. El nombre puede
+   * repetirse legítimamente —p. ej. dos "Planilla de movilidad" con distinta
+   * cuenta: una de Servicios (91x) y otra de Comercial (92x)— pero el índice
+   * { key, clientId } es único, así que se añade un sufijo -2, -3… cuando el
+   * slug base ya está tomado. Antes esto reventaba con un E11000 crudo
+   * (Internal Server Error) al crear la segunda.
+   */
+  private async generateUniqueKey(
+    name: string,
+    clientId: Types.ObjectId,
+    excludeId?: string
+  ): Promise<string> {
+    const base = this.generateKey(name)
+    if (!base) return base
+    // base solo contiene [a-z0-9-], por lo que es seguro en el regex.
+    const filter: Record<string, unknown> = {
+      clientId,
+      key: { $regex: `^${base}(-\\d+)?$` },
+    }
+    if (excludeId) filter._id = { $ne: new Types.ObjectId(excludeId) }
+    const taken = new Set(
+      (await this.categoryModel.find(filter).select('key').lean().exec())
+        .map(d => (d as { key?: string }).key)
+        .filter((k): k is string => !!k)
+    )
+    if (!taken.has(base)) return base
+    let n = 2
+    while (taken.has(`${base}-${n}`)) n++
+    return `${base}-${n}`
   }
 }

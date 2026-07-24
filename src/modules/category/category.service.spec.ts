@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { getModelToken } from '@nestjs/mongoose'
-import { NotFoundException } from '@nestjs/common'
+import { ConflictException, NotFoundException } from '@nestjs/common'
 import { Types } from 'mongoose'
 import { CategoryService } from './category.service'
 import { Category } from './entities/category.entity'
@@ -45,12 +45,16 @@ const mockParent = {
 const makeExec = (resolvedValue: any) => ({
   collation: jest.fn().mockReturnThis(),
   sort: jest.fn().mockReturnThis(),
+  select: jest.fn().mockReturnThis(),
+  lean: jest.fn().mockReturnThis(),
   exec: jest.fn().mockResolvedValue(resolvedValue),
 })
 
 const makeChainable = (resolvedValue: any) => ({
   collation: jest.fn().mockReturnThis(),
   sort: jest.fn().mockReturnThis(),
+  select: jest.fn().mockReturnThis(),
+  lean: jest.fn().mockReturnThis(),
   skip: jest.fn().mockReturnThis(),
   limit: jest.fn().mockReturnThis(),
   exec: jest.fn().mockResolvedValue(resolvedValue),
@@ -78,6 +82,8 @@ describe('CategoryService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks()
+    // Default: sin colisiones de key (generateUniqueKey consulta las tomadas).
+    MockModel.find.mockReturnValue(makeChainable([]))
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CategoryService,
@@ -127,6 +133,38 @@ describe('CategoryService', () => {
       const result = await service.create({ name: 'Alimentación', clientId })
       expect(mockSave).toHaveBeenCalled()
       expect(result).toEqual(mockCategory)
+    })
+
+    it('añade sufijo -2 cuando el slug ya existe (dos "Planilla de movilidad" con distinta cuenta)', async () => {
+      MockModel.find.mockReturnValue(
+        makeChainable([{ key: 'planilla-de-movilidad' }])
+      )
+      mockSave.mockResolvedValue(mockCategory)
+      await service.create({ name: 'Planilla de movilidad', clientId })
+      expect(MockModel).toHaveBeenCalledWith(
+        expect.objectContaining({ key: 'planilla-de-movilidad-2' })
+      )
+    })
+
+    it('salta al -3 cuando el base y el -2 ya están tomados', async () => {
+      MockModel.find.mockReturnValue(
+        makeChainable([
+          { key: 'planilla-de-movilidad' },
+          { key: 'planilla-de-movilidad-2' },
+        ])
+      )
+      mockSave.mockResolvedValue(mockCategory)
+      await service.create({ name: 'Planilla de movilidad', clientId })
+      expect(MockModel).toHaveBeenCalledWith(
+        expect.objectContaining({ key: 'planilla-de-movilidad-3' })
+      )
+    })
+
+    it('mapea el error de clave duplicada (E11000) a ConflictException', async () => {
+      mockSave.mockRejectedValue({ code: 11000 })
+      await expect(
+        service.create({ name: 'Alimentación', clientId })
+      ).rejects.toBeInstanceOf(ConflictException)
     })
   })
 
