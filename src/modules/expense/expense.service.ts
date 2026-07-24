@@ -64,7 +64,7 @@ interface ExtractedInvoiceData {
   [key: string]: unknown
 }
 
-interface SunatValidationMeta {
+export interface SunatValidationMeta {
   status: string
   details: unknown
   message: string
@@ -978,84 +978,92 @@ export class ExpenseService {
     }
   }
 
-  async analyzeImageWithUrl(body: CreateExpenseDto): Promise<Expense> {
-    // Si la caja chica de la rendición ya fue finalizada por Contabilidad, no se
-    // permiten más gastos. Se valida antes del análisis para no gastar la llamada
-    // a OpenAI en un comprobante que será rechazado.
+  /**
+   * OCR + validación SUNAT de una extracción, SIN persistir ni subir nada
+   * (VD-70 Parte B). Devuelve el mismo shape que consume el panel post-OCR del
+   * frontend: `data` (JSON con OCR + sunatValidation), `total` y `status`.
+   */
+  private async runOcrScan(
+    extraction: ExtractedInvoiceData,
+    clientId: string
+  ): Promise<{ data: string; total: number; status: string }> {
+    await this.validateDuplicateInvoiceIfAny(extraction, clientId)
+    // findOne lanza si la empresa no tiene config SUNAT; para el escaneo se
+    // tolera (queda como PENDING) en vez de romper el análisis.
+    const configSunat = await this.sunatConfigService
+      .findOne(clientId)
+      .catch(() => null)
+    const { validation, expenseStatus } = await this.validateWithSunatIfPossible(
+      extraction,
+      clientId,
+      configSunat?.ruc
+    )
+    const normalizedFecha = this.normalizeFechaEmisionValue(
+      extraction.fechaEmision
+    )
+    const dataPayload = {
+      ...extraction,
+      fechaEmision: normalizedFecha ?? extraction.fechaEmision,
+      sunatValidation: validation,
+    }
+    return {
+      data: JSON.stringify(dataPayload),
+      total: Number(extraction.montoTotal ?? 0),
+      status: expenseStatus,
+    }
+  }
+
+  /**
+   * Escanea (OCR + SUNAT) una imagen de factura SIN subirla a storage ni crear
+   * el gasto (VD-70 Parte B). El archivo llega en memoria y se envía a OpenAI
+   * como data URL base64.
+   */
+  async scanInvoiceImage(
+    body: CreateExpenseDto,
+    file: Express.Multer.File
+  ): Promise<{ data: string; total: number; status: string }> {
+    if (!file || !file.buffer) {
+      throw new HttpException('Imagen no provista', HttpStatus.BAD_REQUEST)
+    }
     await this.expenseReportService.assertReportNotLockedByCajaChica(
       body.expenseReportId
     )
-    const configSunat = await this.sunatConfigService.findOne(body.clientId)
-    const prompt = PROMPT1
     try {
+      const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`
       const completion = await this.openai.chat.completions.create({
         model: this.visionModel,
-        messages: this.buildVisionMessages(prompt, body.imageUrl!),
+        messages: this.buildVisionMessages(PROMPT1, dataUrl),
         temperature: 0,
         max_completion_tokens: 8192,
       })
-
       const extraction = this.parseOpenAiJsonContent(
         completion.choices[0]?.message?.content
       )
-
-      await this.validateDuplicateInvoiceIfAny(extraction, body.clientId)
-
-      const { validation, expenseStatus } =
-        await this.validateWithSunatIfPossible(
-          extraction,
-          body.clientId,
-          configSunat?.ruc
-        )
-
-      const expense = await this.createExpenseDocument(
-        body,
-        extraction,
-        validation,
-        expenseStatus
-      )
-
-      if (body.userId) {
-        await this.expenseReportService.buildChainForNewExpense(
-          expense._id.toString(),
-          body.userId,
-          body.clientId
-        )
-      }
-
-      if (body.expenseReportId) {
-        await this.expenseReportService.addExpenseToReport(
-          body.expenseReportId,
-          expense._id.toString()
-        )
-      }
-
-      return expense
+      return await this.runOcrScan(extraction, body.clientId)
     } catch (error) {
-      if (error instanceof HttpException) {
-        throw error
-      }
-
+      if (error instanceof HttpException) throw error
       this.logger.error('OpenAI API Error Response:', error)
       throw new HttpException(
-        'Error al analizar la imagen desde la URL con OpenAI.',
+        'Error al analizar la imagen con OpenAI.',
         HttpStatus.INTERNAL_SERVER_ERROR
       )
     }
   }
 
-  async analyzePdf(
+  /**
+   * Escanea (OCR + SUNAT) un PDF de factura SIN subirlo a storage ni crear el
+   * gasto (VD-70 Parte B).
+   */
+  async scanInvoicePdf(
     body: CreateExpenseDto,
     file: Express.Multer.File
-  ): Promise<Expense> {
+  ): Promise<{ data: string; total: number; status: string }> {
     if (!file || !file.buffer) {
       throw new HttpException('Archivo PDF no provisto', HttpStatus.BAD_REQUEST)
     }
-    // Caja chica finalizada: no se permiten más gastos.
     await this.expenseReportService.assertReportNotLockedByCajaChica(
       body.expenseReportId
     )
-
     try {
       const pdfModule = await import('pdf-parse')
       const pdfParse: (data: Buffer) => Promise<{ text: string }> =
@@ -1064,9 +1072,6 @@ export class ExpenseService {
       const textFromPdf = parsed.text || ''
 
       const prompt = PROMPT1
-      // Si el PDF trae capa de texto se envía el texto (más barato); si es un
-      // escaneo/imagen sin texto, se manda el PDF completo al modelo de visión
-      // para que lea la imagen dentro del PDF (VD-50).
       const hasText = textFromPdf.trim().length >= this.PDF_MIN_TEXT_LENGTH
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
         hasText
@@ -1087,51 +1092,10 @@ export class ExpenseService {
         temperature: 0,
         max_completion_tokens: 8192,
       })
-
       const extraction = this.parseOpenAiJsonContent(
         completion.choices[0]?.message?.content
       )
-
-      await this.validateDuplicateInvoiceIfAny(extraction, body.clientId)
-
-      // Subir el PDF y setear la URL como file/imageUrl del gasto
-      const uploadedUrl = await this.uploadExpensePdfAndGetUrl(
-        file,
-        body.clientId
-      )
-      body.imageUrl = uploadedUrl
-
-      const configSunat = await this.sunatConfigService.findOne(body.clientId)
-      const { validation, expenseStatus } =
-        await this.validateWithSunatIfPossible(
-          extraction,
-          body.clientId,
-          configSunat?.ruc
-        )
-
-      const expense = await this.createExpenseDocument(
-        body,
-        extraction,
-        validation,
-        expenseStatus
-      )
-
-      if (body.userId) {
-        await this.expenseReportService.buildChainForNewExpense(
-          expense._id.toString(),
-          body.userId,
-          body.clientId
-        )
-      }
-
-      if (body.expenseReportId) {
-        await this.expenseReportService.addExpenseToReport(
-          body.expenseReportId,
-          expense._id.toString()
-        )
-      }
-
-      return expense
+      return await this.runOcrScan(extraction, body.clientId)
     } catch (error) {
       if (error instanceof HttpException) throw error
       this.logger.error('Error al analizar PDF:', error)
@@ -1140,6 +1104,88 @@ export class ExpenseService {
         HttpStatus.INTERNAL_SERVER_ERROR
       )
     }
+  }
+
+  /**
+   * Valida datos de comprobante contra SUNAT sin un gasto persistido (VD-70
+   * Parte B): lo usa el botón "Revalidar SUNAT" del panel post-OCR, donde el
+   * gasto aún no existe.
+   */
+  async validateSunatStateless(
+    data: {
+      rucEmisor?: string
+      serie?: string
+      correlativo?: string
+      fechaEmision?: string
+      montoTotal?: number
+      tipoComprobante?: string
+    },
+    clientId: string
+  ): Promise<SunatValidationMeta> {
+    const configSunat = await this.sunatConfigService
+      .findOne(clientId)
+      .catch(() => null)
+    const { validation } = await this.validateWithSunatIfPossible(
+      data as ExtractedInvoiceData,
+      clientId,
+      configSunat?.ruc
+    )
+    return validation
+  }
+
+  /**
+   * Crea el gasto de factura al CONFIRMAR (VD-70 Parte B): antes se creaba
+   * durante el escaneo y quedaba huérfano si el usuario cancelaba. El frontend
+   * envía en `body.data` el JSON final (OCR editado + sunatValidation) y en
+   * `body.imageUrl` la URL del archivo ya subido en este paso. Reutiliza
+   * createExpenseDocument para conservar plazo/límite de categoría, y arma la
+   * cadena + engancha a la rendición como antes.
+   */
+  async createInvoiceFromScan(body: CreateExpenseDto): Promise<Expense> {
+    await this.expenseReportService.assertReportNotLockedByCajaChica(
+      body.expenseReportId
+    )
+    let parsed: any = {}
+    try {
+      parsed = body.data ? JSON.parse(body.data) : {}
+    } catch {
+      parsed = {}
+    }
+    const validation: SunatValidationMeta = parsed.sunatValidation ?? {
+      status: 'PENDING',
+      details: null,
+      message: 'Validación pendiente',
+    }
+    const extraction: ExtractedInvoiceData = {
+      ...parsed,
+      montoTotal: Number(body.total ?? parsed.montoTotal ?? 0),
+      fechaEmision: body.fechaEmision ?? parsed.fechaEmision,
+      comentario: body.comentario ?? parsed.comentario,
+      placaVehiculo: body.placaVehiculo ?? parsed.placaVehiculo,
+    }
+    const status = body.status || validation.status || 'pending'
+
+    const expense = await this.createExpenseDocument(
+      body,
+      extraction,
+      validation,
+      status
+    )
+
+    if (body.userId) {
+      await this.expenseReportService.buildChainForNewExpense(
+        expense._id.toString(),
+        body.userId,
+        body.clientId
+      )
+    }
+    if (body.expenseReportId) {
+      await this.expenseReportService.addExpenseToReport(
+        body.expenseReportId,
+        expense._id.toString()
+      )
+    }
+    return expense
   }
 
   async createMobilitySheet(body: CreateExpenseDto): Promise<Expense> {
