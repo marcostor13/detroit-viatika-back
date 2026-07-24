@@ -39,17 +39,31 @@ import { Client, ClientSchema } from '../client/entities/client.entity'
           defaults: {
             from: user,
           },
-          template: {
-            dir: (() => {
-              const dist = join(process.cwd(), 'dist/modules/email/templates')
-              const src = join(process.cwd(), 'src/modules/email/templates')
-              return fs.existsSync(dist) ? dist : src
-            })(),
-            adapter: new HandlebarsAdapter(),
-            options: {
-              strict: true,
-            },
-          },
+          template: (() => {
+            const dist = join(process.cwd(), 'dist/modules/email/templates')
+            const src = join(process.cwd(), 'src/modules/email/templates')
+            const dir = fs.existsSync(dist) ? dist : src
+            return {
+              dir,
+              adapter: new HandlebarsAdapter({
+                // Helper de comparación usado por plantillas de factura
+                // (`{{#if (eq status "APPROVED")}}`). Sin registrarlo, esas
+                // plantillas fallaban al renderizar.
+                eq: (a: unknown, b: unknown) => a === b,
+              }),
+              options: {
+                strict: true,
+              },
+              // Header/footer compartidos (VD-81): una sola línea de diseño
+              // para todos los correos. Ver templates/partials/*.hbs.
+              partials: {
+                dir: join(dir, 'partials'),
+                options: {
+                  strict: true,
+                },
+              },
+            }
+          })(),
         }
       },
     }),

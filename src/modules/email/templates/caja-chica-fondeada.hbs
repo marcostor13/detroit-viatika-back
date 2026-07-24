@@ -1,14 +1,10 @@
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><title>Caja Chica Fondeada</title></head>
-<body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:0 auto">
-  <img src="{{logoUrl}}" alt="Viatika" style="height:40px;margin:20px 0">
-  <h2 style="color:#276749">Caja Chica Activa</h2>
-  <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
-  <p>Tu caja chica ha sido fondeada y esta <strong>activa</strong>. Ya puedes registrar gastos.</p>
-  <table style="width:100%;border-collapse:collapse;margin:16px 0">
-    <tr><td style="padding:8px;background:#f7f7f7;font-weight:bold">Codigo</td><td style="padding:8px">{{code}}</td></tr>
-    <tr><td style="padding:8px;background:#f7f7f7;font-weight:bold">Monto disponible</td><td style="padding:8px">S/ {{fundAmount}}</td></tr>
-  </table>
-</body>
-</html>
+{{> email-header}}
+      <span class="badge">Caja chica activa</span>
+      <h1 class="title">Caja chica activa</h1>
+      <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
+      <p>Su caja chica ha sido fondeada y está <strong>activa</strong>. Ya puede registrar gastos.</p>
+      <div class="box">
+        <div class="row"><strong>Código:</strong> {{code}}</div>
+        <div class="row"><strong>Monto disponible:</strong> S/ {{fundAmount}}</div>
+      </div>
+{{> email-footer}}
