@@ -152,7 +152,13 @@ export class CategoryController {
   }
 
   @Get(':clientId/flat')
-  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR, ROLES.CONTABILIDAD)
+  @Roles(
+    ROLES.SUPER_ADMIN,
+    ROLES.ADMIN,
+    ROLES.COLABORADOR,
+    ROLES.CONTABILIDAD,
+    ROLES.TESORERIA
+  )
   async findAllFlat(@Param('clientId') clientId: string, @Request() req: any) {
     const filter = await this.resolveAllowedCategoryIds(req, clientId)
     return this.categoryService.findAllFlat(clientId, filter)
