@@ -4414,7 +4414,9 @@ export class ExpenseReportService implements OnModuleInit {
    * completa" (antes se requería una segunda ronda de aprobadores + contabilidad).
    * Lo llama `ExpenseService.approveByCoord` tras aprobar cada comprobante.
    * Idempotente: solo actúa si el reporte sigue en `submitted`, hay al menos un
-   * comprobante activo (no rechazado) y TODOS están aprobados por su cadena.
+   * comprobante, NINGUNO está observado (rechazado) y TODOS están aprobados por
+   * su cadena. Si queda un comprobante rechazado, la rendición espera a que el
+   * colaborador lo corrija (no avanza a Contabilidad con observaciones pendientes).
    */
   async advanceToAccountingIfAllExpensesApproved(
     reportId: string
@@ -4442,6 +4444,15 @@ export class ExpenseReportService implements OnModuleInit {
         }[]
       >()
       .exec()
+
+    // No avanzar a Contabilidad mientras haya un comprobante observado sin
+    // corregir: la rendición debe completar su revisión de aprobadores primero
+    // (el rechazo de un aprobador es por comprobante y la deja en `submitted`;
+    // el colaborador corrige y se re-aprueba antes de pasar a Contabilidad).
+    const hasRejected = expenses.some(
+      e => String(e.status ?? '').toLowerCase() === 'rejected'
+    )
+    if (hasRejected) return
 
     const active = expenses.filter(e => e.status !== 'rejected')
     if (active.length === 0) return
