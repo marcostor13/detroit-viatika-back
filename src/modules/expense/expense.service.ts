@@ -2730,7 +2730,7 @@ export class ExpenseService {
     this.notificationsService
       .create({
         userId: String(expense.createdBy),
-        title: 'Comprobante revisado por Coordinador',
+        title: 'Comprobante revisado por un aprobador',
         message: isComplete
           ? 'Tu comprobante fue aprobado por los aprobadores de centro de costo.'
           : `Tu comprobante fue aprobado por uno de sus aprobadores de centro de costo (nivel ${step.level}). Falta la aprobación de los demás niveles pendientes.`,
@@ -2798,8 +2798,8 @@ export class ExpenseService {
     this.notificationsService
       .create({
         userId: String(expense.createdBy),
-        title: 'Comprobante observado por Coordinador',
-        message: `Tu comprobante fue rechazado por el coordinador: ${reason.slice(0, 80)}`,
+        title: 'Comprobante observado por un aprobador',
+        message: `Tu comprobante fue rechazado por un aprobador: ${reason.slice(0, 80)}`,
         type: 'error',
         actionUrl: `/mis-rendiciones/${this.expenseReportIdString(expense)}/detalle`,
       })
