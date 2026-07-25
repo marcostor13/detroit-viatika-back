@@ -565,3 +565,74 @@ describe('ExpenseService — assertCanMutateExpense (VD-69: N1/N2 no editan ni e
     expect(mockExpenseModel.findOneAndDelete).toHaveBeenCalled()
   })
 })
+
+describe('ExpenseService — resolveMovilidadCategoryId (VD-89: planilla en directa)', () => {
+  let service: ExpenseService
+  const clientId = new Types.ObjectId().toHexString()
+  const userId = new Types.ObjectId().toHexString()
+
+  const movA = { _id: new Types.ObjectId(), name: 'Planilla de movilidad' }
+  const movB = { _id: new Types.ObjectId(), name: 'Planilla de movilidad COM' }
+  const otra = { _id: new Types.ObjectId(), name: 'Capacitación' }
+
+  const categoryService = { findAllFlat: jest.fn() }
+  const userService = { findOne: jest.fn() }
+
+  async function build(): Promise<ExpenseService> {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExpenseService,
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('sk-test') },
+        },
+        { provide: getModelToken(Expense.name), useValue: {} },
+        { provide: getModelToken(Client.name), useValue: {} },
+        { provide: EmailService, useValue: {} },
+        { provide: ProjectService, useValue: {} },
+        { provide: UserService, useValue: userService },
+        { provide: SunatConfigService, useValue: {} },
+        { provide: HttpService, useValue: {} },
+        { provide: UploadService, useValue: {} },
+        { provide: ExpenseReportService, useValue: {} },
+        { provide: NotificationsService, useValue: {} },
+        { provide: CategoryService, useValue: categoryService },
+      ],
+    }).compile()
+    return module.get<ExpenseService>(ExpenseService)
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks()
+    service = await build()
+  })
+
+  const resolve = (uid?: string) =>
+    (service as any).resolveMovilidadCategoryId(uid, clientId) as Promise<string>
+
+  it('devuelve la única categoría de movilidad asignada al colaborador', async () => {
+    categoryService.findAllFlat.mockResolvedValue([movA, movB, otra])
+    userService.findOne.mockResolvedValue({
+      permissions: { categoryIds: [String(movB._id)] },
+    })
+    await expect(resolve(userId)).resolves.toBe(String(movB._id))
+  })
+
+  it('cae a la única del cliente cuando el colaborador no tiene categorías asignadas', async () => {
+    categoryService.findAllFlat.mockResolvedValue([movA, otra])
+    userService.findOne.mockResolvedValue({ permissions: { categoryIds: [] } })
+    await expect(resolve(userId)).resolves.toBe(String(movA._id))
+  })
+
+  it('devuelve vacío si hay varias de movilidad y el colaborador no las restringe (ambiguo)', async () => {
+    categoryService.findAllFlat.mockResolvedValue([movA, movB, otra])
+    userService.findOne.mockResolvedValue({ permissions: { categoryIds: [] } })
+    await expect(resolve(userId)).resolves.toBe('')
+  })
+
+  it('devuelve vacío si el cliente no tiene categorías de movilidad', async () => {
+    categoryService.findAllFlat.mockResolvedValue([otra])
+    userService.findOne.mockResolvedValue({ permissions: { categoryIds: [] } })
+    await expect(resolve(userId)).resolves.toBe('')
+  })
+})

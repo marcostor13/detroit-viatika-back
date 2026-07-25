@@ -1191,6 +1191,38 @@ export class ExpenseService {
     return expense
   }
 
+  /**
+   * VD-89: resuelve la categoría "Planilla de movilidad" del colaborador cuando
+   * el formulario no la envía (rendición directa). Devuelve el id solo si es
+   * inequívoca: la única categoría de planilla de movilidad asignada al
+   * colaborador; si no tiene categorías asignadas, la única del cliente. Cadena
+   * vacía si hay 0 o más de una (ambigua) para que el caller lance el error.
+   */
+  private async resolveMovilidadCategoryId(
+    userId: string | undefined,
+    clientId: string
+  ): Promise<string> {
+    const clientCats = await this.categoryService.findAllFlat(clientId)
+    const movilidad = clientCats.filter(c =>
+      /planilla de movilidad/i.test(c.name)
+    )
+    if (movilidad.length === 0) return ''
+    let candidates = movilidad
+    if (userId) {
+      const user = await this.userService.findOne(userId)
+      const assigned = (
+        ((user?.permissions as any)?.categoryIds ?? []) as unknown[]
+      ).map(String)
+      if (assigned.length > 0) {
+        const restricted = movilidad.filter(c =>
+          assigned.includes(String((c as any)._id))
+        )
+        if (restricted.length > 0) candidates = restricted
+      }
+    }
+    return candidates.length === 1 ? String((candidates[0] as any)._id) : ''
+  }
+
   async createMobilitySheet(body: CreateExpenseDto): Promise<Expense> {
     if (!body.clientId) {
       throw new HttpException('clientId es requerido', HttpStatus.BAD_REQUEST)
@@ -1218,6 +1250,15 @@ export class ExpenseService {
     // sola si solo tiene una, o le pide elegir si tiene más de una). El backend
     // valida que exista, pertenezca al cliente y sea efectivamente una categoría
     // de planilla de movilidad.
+    // VD-89: en rendición directa el formulario no envía la categoría (el gasto
+    // hereda el centro de costo/OT de la rendición). Si no llega, la resolvemos
+    // automáticamente cuando es inequívoca para el colaborador.
+    if (!body.categoryId) {
+      body.categoryId = await this.resolveMovilidadCategoryId(
+        body.userId,
+        body.clientId
+      )
+    }
     if (!body.categoryId) {
       throw new HttpException(
         'No tienes asignada ninguna categoría de Planilla de movilidad. Contacta a un administrador para que te asigne una.',
