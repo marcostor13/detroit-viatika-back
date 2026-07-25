@@ -291,6 +291,28 @@ describe('Rendición approval flow (e2e)', () => {
     expect((await getReport(happy.reportId)).status).toBe('approved')
   })
 
+  it('aprobar la rendición completa marca los comprobantes aprobados (sin aprobarlos uno por uno)', async () => {
+    const { reportId, expenseIds } = await createSubmittedReport()
+    await fullyApproveCoord(expenseIds[0])
+    await fullyApproveCoord(expenseIds[1])
+    expect((await getReport(reportId)).status).toBe('pending_accounting')
+
+    // Contabilidad aprueba la RENDICIÓN completa SIN aprobar cada comprobante.
+    await http()
+      .patch(`/api/expense-report/${reportId}`)
+      .set('Authorization', `Bearer ${contabilidadToken}`)
+      .send({ status: 'approved' })
+      .expect(200)
+
+    expect((await getReport(reportId)).status).toBe('approved')
+    // Los comprobantes NO quedan "Pendiente Contabilidad": quedan aprobados.
+    for (const id of expenseIds) {
+      const exp = await getExpense(id)
+      expect(exp.status).toBe('approved')
+      expect(exp.contabilidadStatus).toBe('approved')
+    }
+  })
+
   // ── 2) Rechazo de APROBADOR (por comprobante) ────────────────────────
 
   it('rechazo de aprobador: la rendición sigue en submitted y NO auto-avanza', async () => {

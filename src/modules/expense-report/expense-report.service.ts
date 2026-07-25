@@ -1459,6 +1459,21 @@ export class ExpenseReportService implements OnModuleInit {
       const owner = fullyUpdatedReport.userId as any
       const ownerId = owner?._id ? String(owner._id) : String(owner)
 
+      // Contabilidad aprueba a nivel de RENDICIÓN, no gasto por gasto: al aprobar
+      // la rendición completa, sus comprobantes quedan aprobados por Contabilidad.
+      // Sin esto quedaban en "Pendiente Contabilidad" (con sus botones ✓/✗) aunque
+      // la rendición ya estaba aprobada, lo cual confundía a todos.
+      const contActor = (fullyUpdatedReport as any).contabilidadApprovedBy
+      const contActorId =
+        contActor && typeof contActor === 'object'
+          ? String(contActor._id)
+          : contActor
+            ? String(contActor)
+            : undefined
+      await this.markReportExpensesAccountingApproved(id, contActorId).catch(
+        () => {}
+      )
+
       const reportTitle = fullyUpdatedReport.title
       const budgetDisplay =
         await this.computeReportBudgetDisplay(fullyUpdatedReport)
@@ -4551,6 +4566,39 @@ export class ExpenseReportService implements OnModuleInit {
     report.rejectionReason = reason.trim()
     ;(report as any).rejectedByRole = 'contabilidad'
     await report.save()
+  }
+
+  /**
+   * Al aprobar la RENDICIÓN completa, Contabilidad aprueba de una todos sus
+   * comprobantes (contabilidad aprueba a nivel de rendición, no gasto por gasto).
+   * Marca los comprobantes NO rechazados como aprobados por Contabilidad para que
+   * dejen de mostrarse "Pendiente Contabilidad" (y desaparezcan sus botones ✓/✗)
+   * una vez aprobada la rendición. Los rechazados no deberían existir aquí
+   * (assertNoRejectedExpenses lo garantiza), pero se excluyen por seguridad.
+   */
+  private async markReportExpensesAccountingApproved(
+    reportId: string,
+    actorId?: string
+  ): Promise<void> {
+    const report = await this.expenseReportModel
+      .findById(reportId)
+      .select('expenseIds')
+      .lean()
+      .exec()
+    const ids = ((report as any)?.expenseIds ?? []).map((x: any) =>
+      x && typeof x === 'object' && '_id' in x ? x._id : x
+    )
+    if (!ids.length) return
+    const set: Record<string, unknown> = {
+      contabilidadStatus: 'approved',
+      contabilidadApprovedAt: new Date(),
+      status: 'approved',
+    }
+    if (actorId) set.contabilidadApprovedBy = new Types.ObjectId(actorId)
+    await this.expenseModel.updateMany(
+      { _id: { $in: ids }, status: { $ne: 'rejected' } },
+      { $set: set }
+    )
   }
 
   /**
