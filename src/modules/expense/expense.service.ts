@@ -171,10 +171,13 @@ export class ExpenseService {
    * soporte. Cualquier otro rol solo puede tocar los suyos (ver
    * `assertCanMutateExpense`).
    */
+  // VD-69: ni los aprobadores N1/N2 ni Contabilidad pueden editar/eliminar el
+  // comprobante de otro. Solo quedan los roles de sistema (SUPER_ADMIN/ADMIN)
+  // como escotilla de soporte; no tienen botón en la UI. Contabilidad se
+  // limita a aprobar o rechazar el comprobante, nunca a mutarlo.
   private static readonly EXPENSE_MUTATION_PRIVILEGED_ROLES: string[] = [
     ROLES.SUPER_ADMIN,
     ROLES.ADMIN,
-    ROLES.CONTABILIDAD,
   ]
 
   private async assertCanMutateExpense(
@@ -182,12 +185,12 @@ export class ExpenseService {
     actor: ExpenseActorContext
   ): Promise<void> {
     this.assertCanReadExpense(expense, actor)
-    // VD-69: los aprobadores N1/N2 no pueden editar ni eliminar comprobantes.
-    // El aprobador no tiene un rol propio (es quien figure en la cadena del
-    // centro de costo) y su perfil habitual es Coordinador, así que en vez de
-    // vetar un rol se exige ser el creador a todo el que no sea
-    // Contabilidad/Admin. No se controla vía @Roles porque el alias
-    // Coordinador → Administrador de roles.guard.ts lo haría inútil.
+    // VD-69: ni los aprobadores N1/N2 ni Contabilidad pueden editar/eliminar
+    // comprobantes. El aprobador no tiene un rol propio (es quien figure en la
+    // cadena del centro de costo) y su perfil habitual es Coordinador, así que
+    // en vez de vetar un rol se exige ser el creador a todo el que no sea un
+    // rol de sistema (SUPER_ADMIN/ADMIN). No se controla vía @Roles porque el
+    // alias Coordinador → Administrador de roles.guard.ts lo haría inútil.
     if (
       ExpenseService.EXPENSE_MUTATION_PRIVILEGED_ROLES.includes(actor.roleName)
     ) {

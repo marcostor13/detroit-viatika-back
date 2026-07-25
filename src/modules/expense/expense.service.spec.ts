@@ -538,11 +538,30 @@ describe('ExpenseService — assertCanMutateExpense (VD-69: N1/N2 no editan ni e
     expect(mockExpenseModel.findOneAndDelete).toHaveBeenCalled()
   })
 
-  it('Contabilidad conserva el permiso sobre comprobantes ajenos', async () => {
+  it('Contabilidad ya NO puede eliminar un comprobante ajeno (VD-69)', async () => {
     loneExpense()
     const conta = { userId: approverId, roleName: ROLES.CONTABILIDAD, clientId }
 
-    await service.remove(expenseId, conta)
+    await expect(service.remove(expenseId, conta)).rejects.toThrow(
+      ForbiddenException
+    )
+    expect(mockExpenseModel.findOneAndDelete).not.toHaveBeenCalled()
+  })
+
+  it('Contabilidad ya NO puede editar un comprobante ajeno (VD-69)', async () => {
+    loneExpense()
+    const conta = { userId: approverId, roleName: ROLES.CONTABILIDAD, clientId }
+
+    await expect(
+      service.update(expenseId, {} as never, conta)
+    ).rejects.toThrow(ForbiddenException)
+  })
+
+  it('un rol de sistema (Admin) conserva la escotilla sobre comprobantes ajenos', async () => {
+    loneExpense()
+    const admin = { userId: approverId, roleName: ROLES.ADMIN, clientId }
+
+    await service.remove(expenseId, admin)
     expect(mockExpenseModel.findOneAndDelete).toHaveBeenCalled()
   })
 })
