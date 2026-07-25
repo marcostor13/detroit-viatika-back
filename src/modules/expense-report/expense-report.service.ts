@@ -1085,6 +1085,19 @@ export class ExpenseReportService implements OnModuleInit {
     return normalized
   }
 
+  /**
+   * Nombre visible de la rendición para correos y notificaciones. Los viáticos
+   * (y algunos reportes) guardan el nombre en `description`, no en `title` — el
+   * header del app usa `description`. Sin este fallback, los correos mostraban el
+   * campo "Título:"/"Rendición:" vacío. Cae a description y luego a un genérico.
+   */
+  private resolveReportTitle(report: any): string {
+    const title = typeof report?.title === 'string' ? report.title.trim() : ''
+    const description =
+      typeof report?.description === 'string' ? report.description.trim() : ''
+    return title || description || 'Rendición'
+  }
+
   private normalizeReportExpenseDates(report: ExpenseReportDocument) {
     // Convertimos a POJO antes de tocar `expenseIds`: asignar POJOs sobre un
     // Document hace que Mongoose castee cada elemento de vuelta a ObjectId
@@ -1122,13 +1135,7 @@ export class ExpenseReportService implements OnModuleInit {
       const ownerId = ownerRef?._id ? String(ownerRef._id) : String(ownerRef)
       const collaboratorName =
         (typeof ownerRef === 'object' && ownerRef?.name) || 'Colaborador'
-      // Los viáticos (y otros reportes) guardan el nombre visible en
-      // `description`, no en `title` (el header del app usa `description`).
-      // Sin este fallback, el correo mostraba "Título:" vacío.
-      const reportTitle =
-        fullyUpdatedReport.title ||
-        fullyUpdatedReport.description ||
-        'Rendición'
+      const reportTitle = this.resolveReportTitle(fullyUpdatedReport)
       const budgetFormatted = (
         await this.computeReportBudgetDisplay(fullyUpdatedReport)
       ).toFixed(2)
@@ -1474,7 +1481,7 @@ export class ExpenseReportService implements OnModuleInit {
         () => {}
       )
 
-      const reportTitle = fullyUpdatedReport.title
+      const reportTitle = this.resolveReportTitle(fullyUpdatedReport)
       const budgetDisplay =
         await this.computeReportBudgetDisplay(fullyUpdatedReport)
       const budgetFormatted = budgetDisplay.toFixed(2)
@@ -1569,15 +1576,17 @@ export class ExpenseReportService implements OnModuleInit {
       let liquidated: {
         settlement?: { type?: string; difference?: number }
         title?: string
+        description?: string
         clientId?: any
       } | null = null
       try {
         liquidated = await this.expenseReportModel
           .findById(id)
-          .select('settlement title clientId')
+          .select('settlement title description clientId')
           .lean<{
             settlement?: { type?: string; difference?: number }
             title?: string
+            description?: string
             clientId?: any
           }>()
           .exec()
@@ -1654,7 +1663,8 @@ export class ExpenseReportService implements OnModuleInit {
                     liquidated?.clientId ?? fullyUpdatedReport.clientId
                   ),
                   recipientName: collaboratorName,
-                  reportTitle: liquidated?.title ?? reportTitle,
+                  reportTitle:
+                    liquidated?.title || liquidated?.description || reportTitle,
                   amountFormatted,
                   closedAt: this.emailService.formatDateDDMMYYYY(new Date()),
                   platformUrl,
@@ -1722,7 +1732,7 @@ export class ExpenseReportService implements OnModuleInit {
         const emailData = {
           clientId,
           collaboratorName: creatorName,
-          reportTitle: fullyUpdatedReport.title,
+          reportTitle: this.resolveReportTitle(fullyUpdatedReport),
           budgetFormatted,
           expenseCount,
           expenseTotalFormatted,
@@ -1869,7 +1879,7 @@ export class ExpenseReportService implements OnModuleInit {
           (typeof ownerRef === 'object' && ownerRef?.name) || 'Colaborador'
         const ownerEmail =
           (typeof ownerRef === 'object' && ownerRef?.email) || undefined
-        const reportTitle = fullyUpdatedReport.title
+        const reportTitle = this.resolveReportTitle(fullyUpdatedReport)
         const rejectionReason =
           (fullyUpdatedReport as any).rejectionReason || 'Ver detalle'
         // Distinguir quién rechazó según el estado previo del documento.
@@ -3111,7 +3121,7 @@ export class ExpenseReportService implements OnModuleInit {
     const baseData = {
       clientId: String(report.clientId),
       collaboratorName: owner.name || 'Colaborador',
-      reportTitle: report.title || 'Rendición',
+      reportTitle: this.resolveReportTitle(report),
       amountFormatted,
       transferDate,
       reference: pi?.reference || '—',
@@ -3333,7 +3343,7 @@ export class ExpenseReportService implements OnModuleInit {
         .sendRendicionCerrada(collaborator!.email, {
           clientId: clientIdStr,
           recipientName: collaborator!.name,
-          reportTitle: updated.title,
+          reportTitle: this.resolveReportTitle(updated),
           closedAt: closedAtStr,
         })
         .catch(() => { })
@@ -3355,7 +3365,7 @@ export class ExpenseReportService implements OnModuleInit {
           .sendRendicionDevolucionColaborador(collaborator!.email, {
             clientId,
             recipientName: collaborator!.name,
-            reportTitle: updated.title,
+            reportTitle: this.resolveReportTitle(updated),
             amountFormatted,
             closedAt: closedAtStr,
             platformUrl,
@@ -3391,7 +3401,7 @@ export class ExpenseReportService implements OnModuleInit {
             clientId,
             recipientName: u.name,
             reportLabel: updated.title,
-            reportTitle: updated.title,
+            reportTitle: this.resolveReportTitle(updated),
             collaboratorName: collaborator?.name || 'Colaborador',
             amountFormatted,
             detailUrl: platformUrl,
@@ -3530,7 +3540,7 @@ export class ExpenseReportService implements OnModuleInit {
         .sendRendicionCerrada(collaborator!.email, {
           clientId,
           recipientName: collaboratorName,
-          reportTitle: report.title,
+          reportTitle: this.resolveReportTitle(report),
           closedAt: this.emailService.formatDateDDMMYYYY(voucher.uploadedAt),
         })
         .catch(() => { })
@@ -3562,7 +3572,7 @@ export class ExpenseReportService implements OnModuleInit {
           clientId,
           recipientName: u.name,
           collaboratorName,
-          reportTitle: report.title,
+          reportTitle: this.resolveReportTitle(report),
           amountFormatted,
           depositDate: dto.depositDate,
           bankOrigin: dto.bankOrigin,
@@ -3702,7 +3712,7 @@ export class ExpenseReportService implements OnModuleInit {
             clientId: String(report.clientId),
             adminName: admin.name || 'Administrador',
             collaboratorName,
-            reportTitle: report.title,
+            reportTitle: this.resolveReportTitle(report),
             cancelReason: reason,
           })
         }
@@ -3779,7 +3789,7 @@ export class ExpenseReportService implements OnModuleInit {
       `/mis-rendiciones/${id}/detalle`
     )
     const clientIdStr = report.clientId.toString()
-    const reportTitle = updated.title
+    const reportTitle = this.resolveReportTitle(updated)
 
     this.notificationsService
       .create({
