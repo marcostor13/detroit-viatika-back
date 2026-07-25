@@ -344,6 +344,47 @@ export class ExpenseReportService implements OnModuleInit {
     return recipients
   }
 
+  /**
+   * Igual que `resolveReportApproverRecipients` pero para una SOLICITUD de
+   * viático: los aprobadores viven en `viaticoApproverChain` (cadena por centro
+   * de costo a nivel de reporte, no por comprobante). N-genérico.
+   */
+  private async resolveViaticoApproverRecipients(
+    report: { viaticoApproverChain?: { approverIds?: Types.ObjectId[] }[] },
+    opts: { excludeUserIds?: Array<string | undefined> } = {}
+  ): Promise<
+    Array<{ userId: string; email: string; name: string; emailEnabled: boolean }>
+  > {
+    const exclude = new Set(
+      (opts.excludeUserIds ?? []).filter(Boolean).map(x => String(x))
+    )
+    const approverIds = new Set<string>()
+    for (const step of report.viaticoApproverChain ?? []) {
+      for (const aid of step.approverIds ?? []) {
+        const id = String(aid)
+        if (!exclude.has(id)) approverIds.add(id)
+      }
+    }
+    const recipients: Array<{
+      userId: string
+      email: string
+      name: string
+      emailEnabled: boolean
+    }> = []
+    for (const userId of approverIds) {
+      const u = await this.userService.findEmailNameClient(userId)
+      if (!u) continue
+      const emailEnabled = await this.userService.isEmailEnabled(userId)
+      recipients.push({
+        userId,
+        email: u.email || '',
+        name: u.name,
+        emailEnabled,
+      })
+    }
+    return recipients
+  }
+
   private async validateBeforeSubmit(reportId: string): Promise<void> {
     const report = await this.expenseReportModel
       .findById(reportId)
@@ -4556,6 +4597,40 @@ export class ExpenseReportService implements OnModuleInit {
     report.rejectionReason = reason.trim()
     ;(report as any).rejectedByRole = 'contabilidad'
     await report.save()
+
+    // Rechazo de la rendición COMPLETA: Contabilidad observó un comprobante y
+    // devolvió toda la rendición → avisar al colaborador (in-app + correo).
+    try {
+      const ownerId = report.userId.toString()
+      this.notificationsService
+        .create({
+          userId: ownerId,
+          title: 'Rendición rechazada',
+          message: `Tu rendición fue rechazada por Contabilidad: ${reason.trim().slice(0, 80)}`,
+          type: 'error',
+          actionUrl: `/mis-rendiciones/${reportId}/detalle`,
+        })
+        .catch(() => { })
+      const owner = await this.userService.findEmailNameClient(ownerId)
+      const ownerEmailEnabled = await this.userService.isEmailEnabled(ownerId)
+      if (owner?.email && ownerEmailEnabled) {
+        await this.emailService.sendRendicionRechazadaColaborador(owner.email, {
+          clientId: report.clientId.toString(),
+          collaboratorName: owner.name,
+          reportTitle: this.resolveReportTitle(report),
+          rejectionReason: reason.trim(),
+          rejectedBy: 'Contabilidad',
+          platformUrl: this.emailService.buildAppUrl(
+            `/mis-rendiciones/${reportId}/detalle`
+          ),
+        })
+      }
+    } catch (err) {
+      console.error(
+        `[returnToCollaboratorOnAccountingRejection] Error correo rechazo ${reportId}:`,
+        err
+      )
+    }
   }
 
   /**
@@ -4652,6 +4727,36 @@ export class ExpenseReportService implements OnModuleInit {
         actionUrl: `/mis-rendiciones/${id}/detalle`,
       })
       .catch(() => {})
+
+    // Correo al colaborador SOLO cuando se rechaza la rendición COMPLETA (este
+    // path). El rechazo por comprobante (`rejectByCoord`) queda solo in-app para
+    // no spamear.
+    try {
+      const owner = await this.userService.findEmailNameClient(
+        report.userId.toString()
+      )
+      const ownerEmailEnabled = await this.userService.isEmailEnabled(
+        report.userId.toString()
+      )
+      if (owner?.email && ownerEmailEnabled) {
+        await this.emailService.sendRendicionRechazadaColaborador(owner.email, {
+          clientId: report.clientId.toString(),
+          collaboratorName: owner.name,
+          reportTitle: this.resolveReportTitle(report),
+          rejectionReason: opts.rejectionReason.trim(),
+          rejectedBy: 'los aprobadores',
+          platformUrl: this.emailService.buildAppUrl(
+            `/mis-rendiciones/${id}/detalle`
+          ),
+        })
+      }
+    } catch (err) {
+      console.error(
+        `[rejectRendicion] Error correo rechazo a colaborador ${id}:`,
+        err
+      )
+    }
+
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
@@ -5031,6 +5136,69 @@ export class ExpenseReportService implements OnModuleInit {
     if (report.status !== 'pending_l1') throw new BadRequestException('Solo se puede cancelar una solicitud en estado pendiente de aprobación.')
     report.status = 'cancelled'
     await report.save()
+
+    // Avisar a los APROBADORES del viático (cadena por centro de costo) que el
+    // colaborador canceló su solicitud — no al coordinador personal (obsoleto).
+    try {
+      const collaborator = await this.userService.findEmailNameClient(userId)
+      const collaboratorName = collaborator?.name || 'El colaborador'
+      let projectLabel = ''
+      if (report.projectId) {
+        try {
+          const p = await this.projectService.findOne(
+            report.projectId.toString(),
+            report.clientId.toString()
+          )
+          projectLabel = `[${p.code} - ${p.name}]`
+        } catch { /* etiqueta vacía */ }
+      }
+      const startStr =
+        report.viaticoStartDate instanceof Date
+          ? report.viaticoStartDate.toISOString().slice(0, 10)
+          : String(report.viaticoStartDate ?? '').slice(0, 10)
+      const endStr =
+        report.viaticoEndDate instanceof Date
+          ? report.viaticoEndDate.toISOString().slice(0, 10)
+          : String(report.viaticoEndDate ?? '').slice(0, 10)
+      const totalFormatted = this.viaticoFormatMoney(report.viaticoAmount ?? 0)
+      const plainSummary = `${collaboratorName} canceló su solicitud de viáticos${projectLabel ? ' ' + projectLabel : ''}.`
+
+      const approvers = await this.resolveViaticoApproverRecipients(report, {
+        excludeUserIds: [userId],
+      })
+      const sentCancel = new Set<string>()
+      for (const a of approvers) {
+        await this.notificationsService
+          .create({
+            userId: a.userId,
+            title: 'Solicitud de viáticos cancelada',
+            message: plainSummary,
+            type: 'warning',
+            actionUrl: '/viaticos',
+          })
+          .catch(() => { })
+
+        if (!a.emailEnabled || !a.email) continue
+        const key = a.email.trim().toLowerCase()
+        if (sentCancel.has(key)) continue
+        sentCancel.add(key)
+        await this.emailService.sendViaticoCancelacion(a.email, {
+          clientId: report.clientId.toString(),
+          coordinatorName: a.name,
+          collaboratorName,
+          place: report.viaticoPlace ?? '',
+          startDate: startStr,
+          endDate: endStr,
+          totalFormatted,
+          projectLabel,
+          plainSummary,
+          platformUrl: this.emailService.buildAppUrl('/viaticos'),
+        })
+      }
+    } catch (err) {
+      console.error(`[cancelViatico] Error notificando aprobadores ${id}:`, err)
+    }
+
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
