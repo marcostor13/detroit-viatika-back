@@ -1,13 +1,12 @@
 {{> email-header}}
 
       <div class="alert">Saldo a devolver: S/ {{amountFormatted}}</div>
-      <h1 class="heading">Devolución de saldo — Rendición cerrada</h1>
+      <h1 class="heading">Devolución de saldo pendiente</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
-      <p>Tu rendición <strong>{{reportTitle}}</strong> ha sido cerrada definitivamente. Según la liquidación, el monto del anticipo supera los gastos reales, por lo que debes devolver el saldo a favor de la empresa.</p>
+      <p>Tu rendición <strong>{{reportTitle}}</strong> fue aprobada. Según la liquidación, el monto del anticipo supera los gastos reales, por lo que debes devolver el saldo a favor de la empresa.</p>
       <div class="details">
         <p><strong>Rendición:</strong> {{reportTitle}}</p>
         <p><strong>Monto a devolver:</strong> S/ {{amountFormatted}}</p>
-        <p><strong>Fecha de cierre:</strong> {{closedAt}}</p>
       </div>
       <p>Por favor, realiza la transferencia a la cuenta bancaria de la empresa y adjunta el comprobante de depósito en la plataforma.</p>
       <div class="btn-container">

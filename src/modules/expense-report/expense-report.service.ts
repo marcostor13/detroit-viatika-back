@@ -3356,34 +3356,14 @@ export class ExpenseReportService implements OnModuleInit {
       `/mis-rendiciones/${id}/detalle`
     )
 
-    // Solo enviar correos de devolución / reembolso si hay un monto real (>= 0.01).
-    // Evita los correos con "S/ 0.00" cuando el settlement persistido quedó stale.
-    if (settlement?.type === 'devolucion' && settlementDiffAbs >= 0.01) {
-      const amountFormatted = settlementDiffAbs.toFixed(2)
-      if (collaboratorEmailEnabled) {
-        this.emailService
-          .sendRendicionDevolucionColaborador(collaborator!.email, {
-            clientId,
-            recipientName: collaborator!.name,
-            reportTitle: this.resolveReportTitle(updated),
-            amountFormatted,
-            closedAt: closedAtStr,
-            platformUrl,
-          })
-          .catch(() => { })
-      }
-      if (collaborator) {
-        this.notificationsService
-          .create({
-            userId: updated.userId.toString(),
-            title: 'Devolución de saldo pendiente',
-            message: `Tu rendición "${updated.title}" fue cerrada. Tienes un saldo de S/ ${amountFormatted} a devolver a la empresa. Por favor, adjunta el comprobante de depósito.`,
-            type: 'warning',
-            actionUrl: `/mis-rendiciones/${id}/detalle`,
-          })
-          .catch(() => { })
-      }
-    } else if (settlement?.type === 'reembolso' && settlementDiffAbs >= 0.01) {
+    // Al cerrar, al colaborador solo le llega el correo de "rendición cerrada"
+    // (arriba). El pedido de devolución ("debes devolver el saldo, adjunta el
+    // comprobante") ya se envió al APROBAR la rendición (rama `approved`), que es
+    // cuando el colaborador debe depositar y cargar el comprobante. Repetirlo
+    // aquí llegaba junto al de cierre y era contradictorio (pedía devolver en una
+    // rendición ya cerrada y, normalmente, ya devuelta).
+    // Solo enviar correos de reembolso si hay un monto real (>= 0.01).
+    if (settlement?.type === 'reembolso' && settlementDiffAbs >= 0.01) {
       const amountFormatted = settlementDiffAbs.toFixed(2)
       // Reembolso al colaborador: lo EJECUTA Tesorería (VD-37); Contabilidad
       // recibe copia informativa. Ambos con correo + in-app (dedup por correo).
