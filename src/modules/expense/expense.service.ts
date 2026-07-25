@@ -2738,6 +2738,16 @@ export class ExpenseService {
         actionUrl: `/mis-rendiciones/${this.expenseReportIdString(expense)}/detalle`,
       })
       .catch(() => {})
+
+    // VD-87: si con este comprobante quedaron aprobados TODOS los gastos de la
+    // rendición, pasa directo a Contabilidad y se le envía el correo — sin un
+    // segundo paso de "aprobar la rendición completa".
+    const reportIdStr = this.expenseReportIdString(expense)
+    if (isComplete && reportIdStr) {
+      await this.expenseReportService
+        .advanceToAccountingIfAllExpensesApproved(reportIdStr)
+        .catch(() => {})
+    }
     return updated
   }
 

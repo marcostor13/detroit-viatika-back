@@ -340,6 +340,7 @@ describe('ExpenseReportService — Fase 8 (cierre definitivo)', () => {
       .fn()
       .mockResolvedValue({ name: 'Colaborador', email: 'c@test.com' }),
     findAccountingRecipientsWithIds: jest.fn().mockResolvedValue([]),
+    findTesoreriaRecipientsWithIds: jest.fn().mockResolvedValue([]),
     isEmailEnabled: jest.fn().mockResolvedValue(true),
   }
 
