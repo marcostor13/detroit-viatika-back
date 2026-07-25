@@ -2875,11 +2875,31 @@ export class ExpenseService {
       )
       .exec()
     if (!updated) throw new NotFoundException(`Expense ${id} no encontrado`)
+
+    // Contabilidad observó un comprobante en su aprobación final: se devuelve TODA
+    // la rendición al colaborador y se resetean los demás comprobantes a estado
+    // normal (editables y re-aprobables). Sin esto, los comprobantes ya aprobados
+    // quedarían bloqueados y la rendición no se podría corregir.
+    const reportId = this.expenseReportIdString(expense)
+    if (reportId) {
+      try {
+        await this.expenseReportService.returnToCollaboratorOnAccountingRejection(
+          reportId,
+          id,
+          reason
+        )
+      } catch (err) {
+        this.logger.warn(
+          `[rejectByContabilidad] No se pudo devolver la rendición ${reportId}: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    }
+
     this.notificationsService
       .create({
         userId: String(expense.createdBy),
-        title: 'Comprobante observado por Contabilidad',
-        message: `Tu comprobante fue rechazado por contabilidad: ${reason.slice(0, 80)}`,
+        title: 'Rendición devuelta por Contabilidad',
+        message: `Contabilidad observó un comprobante y devolvió tu rendición para corrección: ${reason.slice(0, 80)}`,
         type: 'error',
         actionUrl: `/mis-rendiciones/${this.expenseReportIdString(expense)}/detalle`,
       })

@@ -421,6 +421,32 @@ export class ExpenseReportService implements OnModuleInit {
   }
 
   /**
+   * Guard enfocado para la aprobación final de Contabilidad: bloquea si algún
+   * comprobante quedó observado (rejected). A diferencia de
+   * `validateBeforeFinalApproval`, NO exige comprobantes ni cadena completa —
+   * solo impide aprobar una rendición que contiene un comprobante sin corregir.
+   */
+  private async assertNoRejectedExpenses(reportId: string): Promise<void> {
+    const report = await this.expenseReportModel
+      .findById(reportId)
+      .populate('expenseIds')
+      .select('expenseIds')
+      .lean()
+      .exec()
+    const expenses = Array.isArray((report as any)?.expenseIds)
+      ? (report as any).expenseIds
+      : []
+    const hasRejected = expenses.some(
+      (e: any) => String(e?.status || '').toLowerCase() === 'rejected'
+    )
+    if (hasRejected) {
+      throw new BadRequestException(
+        'Existen comprobantes observados. La rendición fue devuelta al colaborador para corrección; no puede aprobarse.'
+      )
+    }
+  }
+
+  /**
    * Genera un código autoincremental único por empresa de forma atómica
    * usando una colección `counters` (a prueba de concurrencia). Ej: RD-0001.
    */
@@ -1260,6 +1286,15 @@ export class ExpenseReportService implements OnModuleInit {
       throw new BadRequestException(
         'Solo se puede aprobar una rendicion pendiente de contabilidad.'
       )
+    }
+    // No aprobar la rendición completa si quedó algún comprobante observado.
+    // En el flujo normal, rechazar un comprobante por Contabilidad ya devuelve la
+    // rendición a 'rejected' (returnToCollaboratorOnAccountingRejection). Este
+    // guard cubre además el caso en que un aprobador rechazó un comprobante con
+    // `rejectByCoord`: el auto-avance a `pending_accounting` ignora los rechazados,
+    // así que la rendición podría llegar aquí con uno observado sin corregir.
+    if (dto.status === 'approved') {
+      await this.assertNoRejectedExpenses(id)
     }
     // Un viático con pago parcial SÍ puede aprobarse aunque quede saldo del anticipo
     // sin depositar: la liquidación reconcilia con lo realmente pagado
@@ -4434,6 +4469,77 @@ export class ExpenseReportService implements OnModuleInit {
     await this.notifyAccountingReportPendingApproval(reportId, fresh).catch(
       () => {}
     )
+  }
+
+  /**
+   * Contabilidad observó un comprobante en su aprobación final: se devuelve TODA
+   * la rendición al colaborador (`rejected`) y se resetean los comprobantes a
+   * estado normal para que pueda corregirlos y se re-aprueben desde cero.
+   *
+   * Por qué el reset total: un comprobante `approved` queda bloqueado de por vida
+   * para el colaborador (ver `ExpenseService.assertCanEdit`), y uno con aprobación
+   * parcial tampoco es editable mientras la rendición esté en revisión. Sin
+   * resetear, el colaborador no podría corregir la rendición devuelta. El
+   * comprobante observado conserva su estado `rejected` + motivo para que sepa
+   * cuál corregir. Lo llama `ExpenseService.rejectByContabilidad`.
+   */
+  async returnToCollaboratorOnAccountingRejection(
+    reportId: string,
+    rejectedExpenseId: string,
+    reason: string
+  ): Promise<void> {
+    const report = await this.expenseReportModel.findById(reportId)
+    if (!report) return
+    // Solo aplica mientras la rendición está en revisión (contabilidad, o por si
+    // acaso aprobadores). En otros estados no se toca.
+    if (
+      report.status !== 'pending_accounting' &&
+      report.status !== 'submitted'
+    ) {
+      return
+    }
+
+    const expenseIds = (report.expenseIds ?? []).map((x: any) =>
+      x && typeof x === 'object' && '_id' in x ? String(x._id) : String(x)
+    )
+    const expenses = await this.expenseModel
+      .find({ _id: { $in: expenseIds } })
+      .select('approverChain')
+      .lean<{ _id: Types.ObjectId; approverChain?: ChainStep[] }[]>()
+      .exec()
+
+    for (const e of expenses) {
+      const isRejected = String(e._id) === String(rejectedExpenseId)
+      // Reset de la cadena de aprobadores en TODOS: cualquier edición posterior
+      // debe re-aprobarse sobre el dato corregido (sin dejar aprobaciones stale).
+      const clearedChain = (e.approverChain ?? []).map(step => ({
+        ...plainChainStep(step),
+        approved: false,
+        approvedBy: undefined,
+        approvedAt: undefined,
+      }))
+      const set: Record<string, unknown> = {
+        approverChain: clearedChain,
+        approvalLevel: 0,
+      }
+      if (!isRejected) {
+        // Los demás vuelven a 'pending' (editables y re-aprobables desde cero).
+        set.contabilidadStatus = 'pending'
+        set.contabilidadApprovedBy = undefined
+        set.contabilidadApprovedAt = undefined
+        set.contabilidadRejectionReason = ''
+        set.status = 'pending'
+        set.rejectionReason = ''
+        set.rejectedBy = ''
+      }
+      // El observado conserva contabilidadStatus='rejected'/status='rejected' + motivo.
+      await this.expenseModel.updateOne({ _id: e._id }, { $set: set })
+    }
+
+    report.status = 'rejected'
+    report.rejectionReason = reason.trim()
+    ;(report as any).rejectedByRole = 'contabilidad'
+    await report.save()
   }
 
   /**
