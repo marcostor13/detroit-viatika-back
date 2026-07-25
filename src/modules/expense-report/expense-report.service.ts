@@ -1826,7 +1826,7 @@ export class ExpenseReportService implements OnModuleInit {
         const rejectedByContabilidad = existing.status === 'pending_accounting'
         const rejectedByLabel = rejectedByContabilidad
           ? 'Contabilidad'
-          : 'el Coordinador'
+          : 'los aprobadores'
         const platformUrl = this.emailService.buildAppUrl(
           `/mis-rendiciones/${id}/detalle`
         )
