@@ -1382,7 +1382,9 @@ export class ExpenseService {
     }
 
     const subTipo = body.subTipo || 'OT'
-    const isDJ = subTipo === 'DJ'
+    // VD-83: la Declaración Jurada al extranjero (DJE) se comporta como una DJ
+    // (requiere firma, sin documento con RUC), solo cambia el tipo registrado.
+    const isDJ = subTipo === 'DJ' || subTipo === 'DJE'
 
     // RUC Emisor obligatorio para los sub-tipos con documento físico (TK, BV, RC)
     if (['TK', 'BV', 'RC'].includes(subTipo) && !body.rucEmisor?.trim()) {
