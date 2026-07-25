@@ -232,11 +232,20 @@ describe('ExpenseReportService — Fase 5 (envío y aprobación final)', () => {
           }),
         }
       }
-      const chain: { populate: jest.Mock; exec: jest.Mock } = {
+      const chain: {
+        populate: jest.Mock
+        select: jest.Mock
+        lean: jest.Mock
+        exec: jest.Mock
+      } = {
         populate: jest.fn(),
+        select: jest.fn(),
+        lean: jest.fn(),
         exec: jest.fn(),
       }
       chain.populate.mockReturnValue(chain)
+      chain.select.mockReturnValue(chain)
+      chain.lean.mockReturnValue(chain)
       chain.exec.mockResolvedValue({
         ...fullReportDoc(),
         expenseIds: [],
@@ -249,6 +258,116 @@ describe('ExpenseReportService — Fase 5 (envío y aprobación final)', () => {
 
     expect(mockExpenseReportModel.findByIdAndUpdate).toHaveBeenCalled()
     expect(mockEmailService.sendRendicionFullyApprovedEmail).toHaveBeenCalled()
+  })
+
+  it('update(approved): rechaza si hay un comprobante observado', async () => {
+    // Contabilidad no puede aprobar la rendición completa si quedó un comprobante
+    // rechazado (assertNoRejectedExpenses). Cubre el caso de un rechazo por
+    // aprobador que igual dejó avanzar la rendición a pending_accounting.
+    mockFindByIdSequence({
+      existingStatus: 'pending_accounting',
+      submitPopulateResult: {
+        expenseIds: [{ _id: expenseId1, status: 'rejected' }],
+      },
+    })
+
+    await expect(
+      service.update(reportId, { status: 'approved' })
+    ).rejects.toThrow(/observados|devuelta al colaborador/)
+    expect(mockExpenseReportModel.findByIdAndUpdate).not.toHaveBeenCalled()
+  })
+
+  it('returnToCollaboratorOnAccountingRejection: devuelve la rendición y resetea los demás comprobantes', async () => {
+    const reportDoc: {
+      status: string
+      expenseIds: { _id: string }[]
+      userId: string
+      rejectionReason: string
+      rejectedByRole?: string
+      save: jest.Mock
+    } = {
+      status: 'pending_accounting',
+      expenseIds: [{ _id: expenseId1 }, { _id: expenseId2 }],
+      userId,
+      rejectionReason: '',
+      save: jest.fn().mockResolvedValue(undefined),
+    }
+    mockExpenseReportModel.findById.mockReturnValue(reportDoc)
+
+    const updateOne = jest.fn().mockResolvedValue({})
+    // Inyecta el mock de expenseModel sobre la instancia (el provider lo da como {}).
+    ;(service as unknown as { expenseModel: Record<string, jest.Mock> }).expenseModel = {
+      find: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([
+              { _id: expenseId1, approverChain: [{ level: 1, approved: true }] },
+              { _id: expenseId2, approverChain: [{ level: 1, approved: true }] },
+            ]),
+          }),
+        }),
+      }),
+      updateOne,
+    }
+
+    // expenseId1 es el comprobante observado por Contabilidad.
+    await service.returnToCollaboratorOnAccountingRejection(
+      reportId,
+      expenseId1,
+      'monto incorrecto'
+    )
+
+    // La rendición vuelve al colaborador.
+    expect(reportDoc.status).toBe('rejected')
+    expect(reportDoc.rejectedByRole).toBe('contabilidad')
+    expect(reportDoc.save).toHaveBeenCalled()
+
+    const calls = updateOne.mock.calls
+    const otherSet = calls.find(
+      c => String(c[0]._id) === String(expenseId2)
+    )![1].$set
+    const rejectedSet = calls.find(
+      c => String(c[0]._id) === String(expenseId1)
+    )![1].$set
+    // El comprobante NO observado vuelve a 'pending' (editable y re-aprobable).
+    expect(otherSet.status).toBe('pending')
+    expect(otherSet.contabilidadStatus).toBe('pending')
+    expect(otherSet.approvalLevel).toBe(0)
+    // El observado conserva su estado 'rejected' (solo se resetea su cadena).
+    expect(rejectedSet.status).toBeUndefined()
+    expect(rejectedSet.approvalLevel).toBe(0)
+  })
+
+  it('advanceToAccountingIfAllExpensesApproved: NO avanza si hay un comprobante observado', async () => {
+    const reportObj: { status: string; expenseIds: string[]; userId: string; save: jest.Mock } = {
+      status: 'submitted',
+      expenseIds: [expenseId1, expenseId2],
+      userId,
+      save: jest.fn().mockResolvedValue(undefined),
+    }
+    mockExpenseReportModel.findById.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue(reportObj),
+      }),
+    })
+    ;(service as unknown as { expenseModel: Record<string, jest.Mock> }).expenseModel = {
+      find: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([
+              { _id: expenseId1, status: 'approved', approverChain: [{ level: 1 }], approvalLevel: 1, requiredLevels: 1 },
+              { _id: expenseId2, status: 'rejected', approverChain: [{ level: 1 }], approvalLevel: 0, requiredLevels: 1 },
+            ]),
+          }),
+        }),
+      }),
+    }
+
+    await service.advanceToAccountingIfAllExpensesApproved(reportId)
+
+    // Queda en 'submitted' hasta que se corrija el comprobante observado.
+    expect(reportObj.status).toBe('submitted')
+    expect(reportObj.save).not.toHaveBeenCalled()
   })
 
   describe('registerAffidavit — Fase 5 declaración jurada', () => {
@@ -340,6 +459,7 @@ describe('ExpenseReportService — Fase 8 (cierre definitivo)', () => {
       .fn()
       .mockResolvedValue({ name: 'Colaborador', email: 'c@test.com' }),
     findAccountingRecipientsWithIds: jest.fn().mockResolvedValue([]),
+    findTesoreriaRecipientsWithIds: jest.fn().mockResolvedValue([]),
     isEmailEnabled: jest.fn().mockResolvedValue(true),
   }
 

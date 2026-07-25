@@ -171,10 +171,13 @@ export class ExpenseService {
    * soporte. Cualquier otro rol solo puede tocar los suyos (ver
    * `assertCanMutateExpense`).
    */
+  // VD-69: ni los aprobadores N1/N2 ni Contabilidad pueden editar/eliminar el
+  // comprobante de otro. Solo quedan los roles de sistema (SUPER_ADMIN/ADMIN)
+  // como escotilla de soporte; no tienen botón en la UI. Contabilidad se
+  // limita a aprobar o rechazar el comprobante, nunca a mutarlo.
   private static readonly EXPENSE_MUTATION_PRIVILEGED_ROLES: string[] = [
     ROLES.SUPER_ADMIN,
     ROLES.ADMIN,
-    ROLES.CONTABILIDAD,
   ]
 
   private async assertCanMutateExpense(
@@ -182,12 +185,12 @@ export class ExpenseService {
     actor: ExpenseActorContext
   ): Promise<void> {
     this.assertCanReadExpense(expense, actor)
-    // VD-69: los aprobadores N1/N2 no pueden editar ni eliminar comprobantes.
-    // El aprobador no tiene un rol propio (es quien figure en la cadena del
-    // centro de costo) y su perfil habitual es Coordinador, así que en vez de
-    // vetar un rol se exige ser el creador a todo el que no sea
-    // Contabilidad/Admin. No se controla vía @Roles porque el alias
-    // Coordinador → Administrador de roles.guard.ts lo haría inútil.
+    // VD-69: ni los aprobadores N1/N2 ni Contabilidad pueden editar/eliminar
+    // comprobantes. El aprobador no tiene un rol propio (es quien figure en la
+    // cadena del centro de costo) y su perfil habitual es Coordinador, así que
+    // en vez de vetar un rol se exige ser el creador a todo el que no sea un
+    // rol de sistema (SUPER_ADMIN/ADMIN). No se controla vía @Roles porque el
+    // alias Coordinador → Administrador de roles.guard.ts lo haría inútil.
     if (
       ExpenseService.EXPENSE_MUTATION_PRIVILEGED_ROLES.includes(actor.roleName)
     ) {
@@ -1188,6 +1191,38 @@ export class ExpenseService {
     return expense
   }
 
+  /**
+   * VD-89: resuelve la categoría "Planilla de movilidad" del colaborador cuando
+   * el formulario no la envía (rendición directa). Devuelve el id solo si es
+   * inequívoca: la única categoría de planilla de movilidad asignada al
+   * colaborador; si no tiene categorías asignadas, la única del cliente. Cadena
+   * vacía si hay 0 o más de una (ambigua) para que el caller lance el error.
+   */
+  private async resolveMovilidadCategoryId(
+    userId: string | undefined,
+    clientId: string
+  ): Promise<string> {
+    const clientCats = await this.categoryService.findAllFlat(clientId)
+    const movilidad = clientCats.filter(c =>
+      /planilla de movilidad/i.test(c.name)
+    )
+    if (movilidad.length === 0) return ''
+    let candidates = movilidad
+    if (userId) {
+      const user = await this.userService.findOne(userId)
+      const assigned = (
+        ((user?.permissions as any)?.categoryIds ?? []) as unknown[]
+      ).map(String)
+      if (assigned.length > 0) {
+        const restricted = movilidad.filter(c =>
+          assigned.includes(String((c as any)._id))
+        )
+        if (restricted.length > 0) candidates = restricted
+      }
+    }
+    return candidates.length === 1 ? String((candidates[0] as any)._id) : ''
+  }
+
   async createMobilitySheet(body: CreateExpenseDto): Promise<Expense> {
     if (!body.clientId) {
       throw new HttpException('clientId es requerido', HttpStatus.BAD_REQUEST)
@@ -1215,6 +1250,15 @@ export class ExpenseService {
     // sola si solo tiene una, o le pide elegir si tiene más de una). El backend
     // valida que exista, pertenezca al cliente y sea efectivamente una categoría
     // de planilla de movilidad.
+    // VD-89: en rendición directa el formulario no envía la categoría (el gasto
+    // hereda el centro de costo/OT de la rendición). Si no llega, la resolvemos
+    // automáticamente cuando es inequívoca para el colaborador.
+    if (!body.categoryId) {
+      body.categoryId = await this.resolveMovilidadCategoryId(
+        body.userId,
+        body.clientId
+      )
+    }
     if (!body.categoryId) {
       throw new HttpException(
         'No tienes asignada ninguna categoría de Planilla de movilidad. Contacta a un administrador para que te asigne una.',
@@ -1338,7 +1382,9 @@ export class ExpenseService {
     }
 
     const subTipo = body.subTipo || 'OT'
-    const isDJ = subTipo === 'DJ'
+    // VD-83: la Declaración Jurada al extranjero (DJE) se comporta como una DJ
+    // (requiere firma, sin documento con RUC), solo cambia el tipo registrado.
+    const isDJ = subTipo === 'DJ' || subTipo === 'DJE'
 
     // RUC Emisor obligatorio para los sub-tipos con documento físico (TK, BV, RC)
     if (['TK', 'BV', 'RC'].includes(subTipo) && !body.rucEmisor?.trim()) {
@@ -2730,7 +2776,7 @@ export class ExpenseService {
     this.notificationsService
       .create({
         userId: String(expense.createdBy),
-        title: 'Comprobante revisado por Coordinador',
+        title: 'Comprobante revisado por un aprobador',
         message: isComplete
           ? 'Tu comprobante fue aprobado por los aprobadores de centro de costo.'
           : `Tu comprobante fue aprobado por uno de sus aprobadores de centro de costo (nivel ${step.level}). Falta la aprobación de los demás niveles pendientes.`,
@@ -2738,6 +2784,16 @@ export class ExpenseService {
         actionUrl: `/mis-rendiciones/${this.expenseReportIdString(expense)}/detalle`,
       })
       .catch(() => {})
+
+    // VD-87: si con este comprobante quedaron aprobados TODOS los gastos de la
+    // rendición, pasa directo a Contabilidad y se le envía el correo — sin un
+    // segundo paso de "aprobar la rendición completa".
+    const reportIdStr = this.expenseReportIdString(expense)
+    if (isComplete && reportIdStr) {
+      await this.expenseReportService
+        .advanceToAccountingIfAllExpensesApproved(reportIdStr)
+        .catch(() => {})
+    }
     return updated
   }
 
@@ -2788,8 +2844,8 @@ export class ExpenseService {
     this.notificationsService
       .create({
         userId: String(expense.createdBy),
-        title: 'Comprobante observado por Coordinador',
-        message: `Tu comprobante fue rechazado por el coordinador: ${reason.slice(0, 80)}`,
+        title: 'Comprobante observado por un aprobador',
+        message: `Tu comprobante fue rechazado por un aprobador: ${reason.slice(0, 80)}`,
         type: 'error',
         actionUrl: `/mis-rendiciones/${this.expenseReportIdString(expense)}/detalle`,
       })
@@ -2865,11 +2921,31 @@ export class ExpenseService {
       )
       .exec()
     if (!updated) throw new NotFoundException(`Expense ${id} no encontrado`)
+
+    // Contabilidad observó un comprobante en su aprobación final: se devuelve TODA
+    // la rendición al colaborador y se resetean los demás comprobantes a estado
+    // normal (editables y re-aprobables). Sin esto, los comprobantes ya aprobados
+    // quedarían bloqueados y la rendición no se podría corregir.
+    const reportId = this.expenseReportIdString(expense)
+    if (reportId) {
+      try {
+        await this.expenseReportService.returnToCollaboratorOnAccountingRejection(
+          reportId,
+          id,
+          reason
+        )
+      } catch (err) {
+        this.logger.warn(
+          `[rejectByContabilidad] No se pudo devolver la rendición ${reportId}: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    }
+
     this.notificationsService
       .create({
         userId: String(expense.createdBy),
-        title: 'Comprobante observado por Contabilidad',
-        message: `Tu comprobante fue rechazado por contabilidad: ${reason.slice(0, 80)}`,
+        title: 'Rendición devuelta por Contabilidad',
+        message: `Contabilidad observó un comprobante y devolvió tu rendición para corrección: ${reason.slice(0, 80)}`,
         type: 'error',
         actionUrl: `/mis-rendiciones/${this.expenseReportIdString(expense)}/detalle`,
       })

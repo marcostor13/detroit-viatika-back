@@ -6,7 +6,7 @@
     "deleteOutDir": true,
     "assets": [
       { "include": "docs/asientos/*.xlsm", "outDir": "./dist" },
-      { "include": "modules/email/templates/*.hbs", "outDir": "./dist" }
+      { "include": "modules/email/templates/**/*.hbs", "outDir": "./dist" }
     ]
   }
 }

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Viatika · Detroit</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333333; line-height: 1.6; background-color: #f4f7f6; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .header { background-color: #f8fafc; padding: 20px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+    .logo { max-width: 180px; height: auto; }
+    .content { padding: 30px; }
+    .heading, .title { color: #1e293b; font-size: 22px; margin: 0 0 16px; }
+    .subheading { color: #1e293b; font-size: 16px; font-weight: 700; margin: 18px 0 8px; }
+    .muted { color: #64748b; font-size: 14px; margin: 0 0 18px; }
+    p { margin: 0 0 12px; }
+    .label { font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+    .quick-list { margin: 0; padding-left: 18px; }
+    .quick-list li { margin: 6px 0; }
+    .box, .details { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    .box-title { font-size: 13px; font-weight: 700; color: #374151; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .row, .detail-item { margin: 6px 0; font-size: 14px; }
+    .detail-label { font-weight: 700; color: #1e293b; }
+    .badge { display: inline-block; background: #dcfce7; color: #166534; border-radius: 6px; padding: 3px 10px; font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .badge-info { background: #e0f2fe; color: #075985; }
+    .amount { font-size: 22px; font-weight: 800; color: #0ea5e9; margin: 4px 0 12px; }
+    .no-account { color: #94a3b8; font-style: italic; }
+    .btn-container { text-align: center; margin-top: 24px; }
+    .btn, .cta { display: inline-block; background-color: #0ea5e9; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; }
+    table.data { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+    table.data th, table.data td { text-align: left; padding: 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    table.data th { background: #f8fafc; color: #374151; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+    table.data td.num { text-align: right; font-weight: 700; white-space: nowrap; }
+    table.data tr.total td { border-top: 2px solid #cbd5e1; border-bottom: none; font-weight: 700; color: #1e293b; }
+    .tag { display: inline-block; background: #eef2ff; color: #4338ca; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .tag-desc { color: #64748b; font-size: 13px; margin-top: 4px; }
+    /* Aliases de compatibilidad (VD-81): clases heredadas → mismo look canónico. */
+    .info-box, .alert-box, .urgent-box, .obs-box, .reason { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    .alert-box, .urgent-box { border-left: 4px solid #f59e0b; }
+    .alert, .urgent { color: #b45309; font-weight: 700; }
+    .report-list { list-style: none; margin: 0; padding: 0; }
+    .report-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
+    .report-title { font-weight: 700; color: #1e293b; }
+    .report-collab, .report-deadline { font-size: 13px; color: #64748b; }
+    .meta-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+    .meta-table td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+    .meta-row td { padding: 6px 8px; }
+    /* Aliases Familia D (facturas/proveedor/auth) → mismo look canónico. */
+    .details-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    .button { display: inline-block; background-color: #0ea5e9; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; }
+    .button-container { text-align: center; margin-top: 24px; }
+    .status-badge, .approval-badge, .success-badge, .payment-badge { display: inline-block; background: #dcfce7; color: #166534; border-radius: 6px; padding: 3px 10px; font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+    .rejection-badge { display: inline-block; background: #fee2e2; color: #991b1b; border-radius: 6px; padding: 3px 10px; font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+    .approved { background: #dcfce7 !important; color: #166534 !important; }
+    .rejected { background: #fee2e2 !important; color: #991b1b !important; }
+    .rejection-reason { background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    .code-container { text-align: center; margin: 24px 0; }
+    .code { display: inline-block; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #1e293b; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 24px; }
+    .footer { text-align: center; font-size: 12px; color: #94a3b8; padding: 20px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="{{logoUrl}}" alt="Detroit" class="logo" />
+    </div>
+    <div class="content">

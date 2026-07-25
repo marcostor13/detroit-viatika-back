@@ -9,6 +9,15 @@ const LEGACY_PROD_APP_HOST = 'app.viatica.tecdidata.com'
 const CURRENT_PROD_APP_HOST = 'app.viatika.tecdidata.com'
 const CLIENT_LOGO_CACHE_TTL_MS = 60_000
 
+/**
+ * Logo por defecto de los correos cuando la empresa NO tiene `client.logo`
+ * configurado (VD-81). Es el logo de Detroit (`logo_header.png`), servido por
+ * el frontend de Detroit — NO el `/logo.svg` genérico (que renderiza el logo de
+ * "tema"). Se puede sobrescribir por entorno con `APP_LOGO_URL`.
+ */
+const DEFAULT_EMAIL_LOGO_URL =
+  'https://detroit-viatika.netlify.app/logo_header.png'
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name)
@@ -43,6 +52,15 @@ export class EmailService {
         if (typeof v === 'string') {
           ctx[k] = this.normalizeIsoDatesInText(v)
         }
+      }
+      // Defaults para el header/footer compartido (VD-81): garantiza que
+      // `logoUrl` y `year` existan siempre, para no romper el modo strict de
+      // Handlebars aunque un método olvide pasarlos.
+      if (ctx.logoUrl === undefined || ctx.logoUrl === null || ctx.logoUrl === '') {
+        ctx.logoUrl = this.getLogoUrl()
+      }
+      if (ctx.year === undefined || ctx.year === null) {
+        ctx.year = new Date().getFullYear()
       }
     }
     await this.mailerService.sendMail(options)
@@ -96,7 +114,9 @@ export class EmailService {
   getLogoUrl(): string {
     const logo = process.env.APP_LOGO_URL?.trim()
     if (logo) return logo
-    return this.buildAppUrl('/logo.svg')
+    // Fallback de marca: logo de Detroit (VD-81). Antes usaba `/logo.svg`, que
+    // en el dominio compartido sirve el logo de "tema".
+    return DEFAULT_EMAIL_LOGO_URL
   }
 
   /** Extrae `clientId` de un objeto `data` arbitrario sin forzar todas las firmas a tiparlo. */

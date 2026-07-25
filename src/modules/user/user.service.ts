@@ -802,6 +802,49 @@ export class UserService {
     return out
   }
 
+  /**
+   * Usuarios con rol Tesorería (scoped + globales), con `_id` para poder crear
+   * notificaciones in-app además de correo. Espejo de
+   * `findAccountingRecipientsWithIds`. Tesorería es quien ejecuta reembolsos
+   * (VD-37), por eso necesita recibir el aviso de reembolso pendiente.
+   */
+  async findTesoreriaRecipientsWithIds(
+    clientId: string
+  ): Promise<{ _id: string; email: string; name: string }[]> {
+    const tesoreriaRole = await this.roleService.getByName('Tesoreria')
+    if (!tesoreriaRole) return []
+
+    const scopedUsers = await this.userModel
+      .find({
+        clientId: new Types.ObjectId(clientId),
+        isActive: true,
+        emailNotificationsEnabled: true,
+        roleId: (tesoreriaRole as any)._id,
+      })
+      .select('_id email name')
+      .exec()
+
+    const globalUsers = await this.userModel
+      .find({
+        clientId: null,
+        roleId: (tesoreriaRole as any)._id,
+        isActive: true,
+        emailNotificationsEnabled: true,
+      })
+      .select('_id email name')
+      .exec()
+
+    const seen = new Set<string>()
+    const out: { _id: string; email: string; name: string }[] = []
+    for (const u of [...scopedUsers, ...globalUsers]) {
+      const em = u.email?.trim().toLowerCase()
+      if (!em || seen.has(em)) continue
+      seen.add(em)
+      out.push({ _id: String((u as any)._id), email: u.email, name: u.name })
+    }
+    return out
+  }
+
   async changeOwnPassword(userId: string, newPassword: string): Promise<void> {
     const hashed = await bcrypt.hash(newPassword, 10)
     await this.userModel

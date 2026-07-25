@@ -1845,8 +1845,13 @@ export class AdvanceService implements OnModuleInit {
     amountReimburse: number
   ): Promise<void> {
     const clientId = String(report.clientId)
-    const recipients =
+    // Reembolso al colaborador: lo EJECUTA Tesorería (VD-37); Contabilidad
+    // recibe copia informativa.
+    const tesoreria =
+      await this.userService.findTesoreriaNotifyRecipients(clientId)
+    const contabilidad =
       await this.userService.findViaticoAccountingNotifyRecipients(clientId)
+    const recipients = [...tesoreria, ...contabilidad]
 
     const owner = report.userId as { name?: string; email?: string }
     const collaboratorName = owner?.name || 'Colaborador'
@@ -1859,8 +1864,12 @@ export class AdvanceService implements OnModuleInit {
     const reportTitle = report.title || 'Rendición'
     const reportLabel = reportTitle
 
+    const seenReembolso = new Set<string>()
     for (const r of recipients) {
       if (!r.email?.trim()) continue
+      const key = r.email.trim().toLowerCase()
+      if (seenReembolso.has(key)) continue
+      seenReembolso.add(key)
       await this.emailService.sendRendicionReembolsoContabilidad(r.email, {
         clientId,
         recipientName: r.name || 'Estimado/a',
