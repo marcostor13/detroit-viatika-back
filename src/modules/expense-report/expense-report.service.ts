@@ -4189,24 +4189,24 @@ export class ExpenseReportService implements OnModuleInit {
     }
 
     // Cualquiera de los aprobadores de cualquier paso pendiente puede actuar — se notifica a todos.
-    for (const coordId of approverIds) {
-      const coordinator = await this.userService.findEmailNameClient(coordId.toString())
-      if (!coordinator || !collaborator) {
-        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Coordinador o colaborador no encontrado' } } })
+    for (const approverId of approverIds) {
+      const approver = await this.userService.findEmailNameClient(approverId.toString())
+      if (!approver || !collaborator) {
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: approverId, status: 'skipped', sentAt: new Date(), errorMessage: 'Aprobador o colaborador no encontrado' } } })
         continue
       }
-      if (coordinator.clientId && collaborator.clientId && coordinator.clientId.toString() !== collaborator.clientId.toString()) {
-        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Coordinador de distinta empresa' } } })
+      if (approver.clientId && collaborator.clientId && approver.clientId.toString() !== collaborator.clientId.toString()) {
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: approverId, status: 'skipped', sentAt: new Date(), errorMessage: 'Aprobador de distinta empresa' } } })
         continue
       }
 
       try {
-        await this.notificationsService.create({ userId: coordId.toString(), title: 'Nueva solicitud de viáticos pendiente', message: `${collaborator.name} solicitó viáticos — ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)}. Ingresa a Aprobaciones para revisar.`, type: 'info', actionUrl: '/viaticos', metadata: { reportId, collaboratorUserId, event: 'viatico_submitted' } })
+        await this.notificationsService.create({ userId: approverId.toString(), title: 'Nueva solicitud de viáticos pendiente', message: `${collaborator.name} solicitó viáticos — ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoFormatMoney(report.viaticoAmount ?? 0)}. Ingresa a Aprobaciones para revisar.`, type: 'info', actionUrl: '/viaticos', metadata: { reportId, collaboratorUserId, event: 'viatico_submitted' } })
       } catch (err: unknown) { this.logger.error(`In-app notif viático ${reportId}: ${err instanceof Error ? err.message : String(err)}`) }
 
-      const coordEmailEnabled = await this.userService.isEmailEnabled(coordId.toString())
-      if (!coordEmailEnabled) {
-        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'skipped', sentAt: new Date(), errorMessage: 'Notificaciones por correo deshabilitadas' } } })
+      const approverEmailEnabled = await this.userService.isEmailEnabled(approverId.toString())
+      if (!approverEmailEnabled) {
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: approverId, status: 'skipped', sentAt: new Date(), errorMessage: 'Notificaciones por correo deshabilitadas' } } })
         continue
       }
 
@@ -4215,18 +4215,18 @@ export class ExpenseReportService implements OnModuleInit {
         const projectLabel = `[${project.code} - ${project.name}]`
         const startStr = report.viaticoStartDate instanceof Date ? report.viaticoStartDate.toISOString().slice(0, 10) : String(report.viaticoStartDate ?? '').slice(0, 10)
         const endStr = report.viaticoEndDate instanceof Date ? report.viaticoEndDate.toISOString().slice(0, 10) : String(report.viaticoEndDate ?? '').slice(0, 10)
-        await this.emailService.sendViaticoSolicitudToCoordinator(coordinator.email, {
-          clientId, coordinatorName: coordinator.name, collaboratorName: collaborator.name,
+        await this.emailService.sendViaticoSolicitudToCoordinator(approver.email, {
+          clientId, coordinatorName: approver.name, collaboratorName: collaborator.name,
           place: report.viaticoPlace ?? '', startDate: startStr, endDate: endStr,
           totalFormatted: this.viaticoFormatMoney(report.viaticoAmount ?? 0),
           currencySymbol: this.viaticoMoneySymbol(report.viaticoMoneda),
           projectLabel, platformUrl: this.emailService.buildAppUrl('/viaticos'),
         })
-        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'sent', sentAt: new Date() } } })
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: approverId, status: 'sent', sentAt: new Date() } } })
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
-        this.logger.error(`Correo coordinador viático ${reportId}: ${msg}`)
-        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: coordId, status: 'failed', sentAt: new Date(), errorMessage: msg } } })
+        this.logger.error(`Correo aprobador viático ${reportId}: ${msg}`)
+        await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoCoordinatorNotification: { recipientUserId: approverId, status: 'failed', sentAt: new Date(), errorMessage: msg } } })
       }
     }
   }
