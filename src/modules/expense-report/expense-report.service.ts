@@ -1096,7 +1096,13 @@ export class ExpenseReportService implements OnModuleInit {
       const ownerId = ownerRef?._id ? String(ownerRef._id) : String(ownerRef)
       const collaboratorName =
         (typeof ownerRef === 'object' && ownerRef?.name) || 'Colaborador'
-      const reportTitle = fullyUpdatedReport.title
+      // Los viáticos (y otros reportes) guardan el nombre visible en
+      // `description`, no en `title` (el header del app usa `description`).
+      // Sin este fallback, el correo mostraba "Título:" vacío.
+      const reportTitle =
+        fullyUpdatedReport.title ||
+        fullyUpdatedReport.description ||
+        'Rendición'
       const budgetFormatted = (
         await this.computeReportBudgetDisplay(fullyUpdatedReport)
       ).toFixed(2)
@@ -1127,8 +1133,8 @@ export class ExpenseReportService implements OnModuleInit {
       for (const u of accountingUsers) {
         await this.notificationsService.create({
           userId: u._id,
-          title: 'Rendición aprobada por Coordinador',
-          message: `La rendición "${reportTitle}" fue aprobada por el coordinador y está lista para tu aprobación final.`,
+          title: 'Rendición aprobada por los aprobadores',
+          message: `La rendición "${reportTitle}" fue aprobada por los aprobadores y está lista para tu aprobación final.`,
           type: 'info',
           actionUrl: `/mis-rendiciones/${id}/detalle`,
         })
@@ -1160,8 +1166,8 @@ export class ExpenseReportService implements OnModuleInit {
 
       await this.notificationsService.create({
         userId: ownerId,
-        title: 'Tu rendición fue aprobada por el Coordinador',
-        message: `Tu rendición "${reportTitle}" fue aprobada por el coordinador. Contabilidad realizará la revisión final.`,
+        title: 'Tu rendición fue aprobada por los aprobadores',
+        message: `Tu rendición "${reportTitle}" fue aprobada por los aprobadores. Contabilidad realizará la revisión final.`,
         type: 'success',
         actionUrl: `/mis-rendiciones/${id}/detalle`,
       })
