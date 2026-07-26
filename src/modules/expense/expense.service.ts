@@ -1373,8 +1373,9 @@ export class ExpenseService {
         HttpStatus.BAD_REQUEST
       )
     }
-    // El adjunto (comprobante) es obligatorio para todos los sub-tipos de otros gastos
-    if (!body.imageUrl) {
+    // El adjunto (comprobante) es obligatorio salvo AL (Alimentación sin
+    // documentación), que por definición no lleva comprobante (VD-91).
+    if ((body.subTipo || 'OT') !== 'AL' && !body.imageUrl) {
       throw new HttpException(
         'Se requiere adjuntar el comprobante',
         HttpStatus.BAD_REQUEST
@@ -1382,9 +1383,10 @@ export class ExpenseService {
     }
 
     const subTipo = body.subTipo || 'OT'
-    // VD-83: la Declaración Jurada al extranjero (DJE) se comporta como una DJ
-    // (requiere firma, sin documento con RUC), solo cambia el tipo registrado.
-    const isDJ = subTipo === 'DJ' || subTipo === 'DJE'
+    // VD-83/VD-91: DJE (DJ al extranjero) y AL (Alimentación sin documentación)
+    // se comportan como una DJ (requieren firma y declaración jurada, sin
+    // documento con RUC); AL además va sin adjunto.
+    const requiereDeclaracion = ['AL', 'DJ', 'DJE'].includes(subTipo)
 
     // RUC Emisor obligatorio para los sub-tipos con documento físico (TK, BV, RC)
     if (['TK', 'BV', 'RC'].includes(subTipo) && !body.rucEmisor?.trim()) {
@@ -1394,8 +1396,8 @@ export class ExpenseService {
       )
     }
 
-    // Solo la DJ requiere firma y aceptación del checkbox
-    if (isDJ) {
+    // DJ/DJE y AL requieren firma y aceptación del checkbox de declaración jurada
+    if (requiereDeclaracion) {
       if (!body.declaracionJurada) {
         throw new HttpException(
           'Se requiere firmar la declaración jurada',
@@ -1431,8 +1433,8 @@ export class ExpenseService {
       description: body.data,
       expenseType: 'otros_gastos',
       subTipo,
-      declaracionJurada: isDJ ? true : false,
-      declaracionJuradaFirmante: isDJ
+      declaracionJurada: requiereDeclaracion,
+      declaracionJuradaFirmante: requiereDeclaracion
         ? body.declaracionJuradaFirmante
         : undefined,
       file: body.imageUrl || undefined,
@@ -1447,8 +1449,8 @@ export class ExpenseService {
       data: JSON.stringify({
         type: 'otros_gastos',
         subTipo,
-        declaracionJurada: isDJ,
-        firmante: isDJ ? body.declaracionJuradaFirmante : undefined,
+        declaracionJurada: requiereDeclaracion,
+        firmante: requiereDeclaracion ? body.declaracionJuradaFirmante : undefined,
         description: body.data,
         serie: body.serie || undefined,
         correlativo: body.correlativo || undefined,

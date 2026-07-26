@@ -28,6 +28,16 @@ class UpdateBankAccountDto {
   accountType?: 'ahorros' | 'corriente'
 }
 
+class UpdateOtrosGastosOpcionalesDto {
+  @IsBoolean()
+  @IsOptional()
+  recibosDiversos?: boolean
+
+  @IsBoolean()
+  @IsOptional()
+  djExtranjero?: boolean
+}
+
 export class UpdatePermissionsDto {
   @IsArray()
   @IsOptional()
@@ -59,6 +69,12 @@ export class UpdatePermissionsDto {
   @IsMongoId()
   @IsOptional()
   primaryProjectId?: string
+
+  /** Sub-tipos opcionales de Otros Gastos habilitados por usuario (VD-91). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UpdateOtrosGastosOpcionalesDto)
+  otrosGastosOpcionales?: UpdateOtrosGastosOpcionalesDto
 }
 
 export class UpdateUserDto {

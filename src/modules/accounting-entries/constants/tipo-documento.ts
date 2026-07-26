@@ -11,6 +11,7 @@
  * | 12     | TK    | Ticket                  |
  * | 00     | RC    | Recibos diversos        |
  * | 00     | DJ    | Declaración Jurada      |
+ * | 00     | AL    | Alimentación sin doc.   |
  * | 00     | OT    | Otros                   |
  */
 export const TIPO_DOCUMENTO = {
@@ -47,7 +48,7 @@ export function resolveCodTipDoc(
     case 'otros_gastos': {
       const sub = (expense.subTipo || '').toUpperCase()
       if (sub === 'TK') return TIPO_DOCUMENTO.TK
-      // RC / DJ / OT comparten el código 00.
+      // AL / RC / DJ / DJE / OT comparten el código 00 (sin comprobante).
       return TIPO_DOCUMENTO.OT
     }
     default: {

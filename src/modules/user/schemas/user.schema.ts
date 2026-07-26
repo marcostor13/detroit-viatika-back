@@ -25,6 +25,15 @@ export interface UserPermissions {
   projectIds: string[]
   /** Centro de costo principal explícito. Debe estar contenido en `projectIds`. */
   primaryProjectId?: string
+  /**
+   * Sub-tipos opcionales de "Otros Gastos" habilitados para este colaborador
+   * (VD-91). Por defecto ambos habilitados; el admin puede ocultarlos por
+   * usuario desde Permisos. Ausente/undefined = habilitado.
+   */
+  otrosGastosOpcionales?: {
+    recibosDiversos: boolean
+    djExtranjero: boolean
+  }
 }
 
 export interface UserDocument extends Document {
@@ -124,6 +133,15 @@ export class User {
       categoryIds: { type: [String], default: [] },
       projectIds: { type: [String], default: [] },
       primaryProjectId: { type: String, required: false },
+      // VD-91: sub-tipos opcionales de Otros Gastos habilitados por usuario.
+      otrosGastosOpcionales: {
+        type: {
+          recibosDiversos: { type: Boolean, default: true },
+          djExtranjero: { type: Boolean, default: true },
+          _id: false,
+        },
+        required: false,
+      },
       _id: false,
     },
     default: () => ({
