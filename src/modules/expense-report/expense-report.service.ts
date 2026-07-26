@@ -1069,7 +1069,9 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('contabilidadApprovedBy', 'name email signature')
       // Contabilidad que aprobó la SOLICITUD del viático (regla 1.3) — distinto de
       // contabilidadApprovedBy, que es de la RENDICIÓN (regla 1.4, posterior al pago).
-      .populate('viaticoSolicitudContabilidadApprovedBy', 'name email')
+      // Firma incluida para el recuadro "V°B° Recepción dinero" del PDF Solicitud
+      // de Fondos (ADF-FOR-003, VD-90).
+      .populate('viaticoSolicitudContabilidadApprovedBy', 'name email signature')
       .populate('projectId', 'name')
       .populate({
         path: 'viaticoOrdenTrabajoId',
