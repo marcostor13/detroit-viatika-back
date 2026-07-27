@@ -1527,7 +1527,6 @@ export class ExpenseReportService implements OnModuleInit {
       const reportTitle = this.resolveReportTitle(fullyUpdatedReport)
       const budgetDisplay =
         await this.computeReportBudgetDisplay(fullyUpdatedReport)
-      const budgetFormatted = budgetDisplay.toFixed(2)
       const platformUrl = this.emailService.buildAppUrl(
         `/mis-rendiciones/${id}/detalle`
       )
@@ -1557,45 +1556,11 @@ export class ExpenseReportService implements OnModuleInit {
           actionUrl: `/mis-rendiciones/${id}/detalle`,
         })
 
-        // Avisar a los APROBADORES del centro de costo (Aprobador 1, 2, … N),
-        // no al coordinador personal (obsoleto). Solo en el flujo normal.
-        if (!isDirecta) {
-          try {
-            const approvers = await this.resolveReportApproverRecipients(id, {
-              excludeUserIds: [ownerId],
-            })
-            const sentApproved = new Set<string>()
-            for (const a of approvers) {
-              await this.notificationsService.create({
-                userId: a.userId,
-                title: 'Rendición aprobada por Contabilidad',
-                message: `La rendición "${reportTitle}" fue aprobada por contabilidad.`,
-                type: 'info',
-                actionUrl: `/mis-rendiciones/${id}/detalle`,
-              })
-              if (!a.emailEnabled || !a.email) continue
-              const key = a.email.trim().toLowerCase()
-              if (sentApproved.has(key)) continue
-              sentApproved.add(key)
-              await this.emailService.sendRendicionAprobadaCoordinador(
-                a.email,
-                {
-                  clientId: String(fullyUpdatedReport.clientId),
-                  coordinatorName: a.name,
-                  collaboratorName,
-                  reportTitle,
-                  budgetFormatted,
-                  platformUrl,
-                }
-              )
-            }
-          } catch (mailErr) {
-            console.error(
-              `[approved] Error correo/notif rendición aprobada a aprobadores ${id}:`,
-              mailErr
-            )
-          }
-        }
+        // VD-95: la cadena de aprobadores (Aprobador 1, 2, … N) YA NO recibe
+        // aviso cuando Contabilidad aprueba —ni correo ni campana—. Ellos ya
+        // hicieron su parte; a partir de la aprobación de Contabilidad el hilo
+        // es entre Contabilidad y el colaborador. Se eliminó con esto el correo
+        // "Rendición aprobada por Contabilidad" y su plantilla.
       } catch (error) {
         console.error(
           'Error enviando notificaciones de rendición aprobada por contabilidad',
@@ -3408,14 +3373,14 @@ export class ExpenseReportService implements OnModuleInit {
     // Solo enviar correos de reembolso si hay un monto real (>= 0.01).
     if (settlement?.type === 'reembolso' && settlementDiffAbs >= 0.01) {
       const amountFormatted = settlementDiffAbs.toFixed(2)
-      // Reembolso al colaborador: lo EJECUTA Tesorería (VD-37); Contabilidad
-      // recibe copia informativa. Ambos con correo + in-app (dedup por correo).
+      // Reembolso al colaborador: lo EJECUTA Tesorería (VD-37) y solo a ella le
+      // llega el aviso (correo + in-app). VD-94: Contabilidad ya no recibe la
+      // copia informativa que había agregado VD-88 —lo que ejecuta Tesorería es
+      // asunto de Tesorería—. Se mantiene el dedup por correo.
       const tesoreriaUsers =
         await this.userService.findTesoreriaRecipientsWithIds(clientId)
-      const accountingUsers =
-        await this.userService.findAccountingRecipientsWithIds(clientId)
       const sentReembolso = new Set<string>()
-      for (const u of [...tesoreriaUsers, ...accountingUsers]) {
+      for (const u of tesoreriaUsers) {
         const key = u.email.trim().toLowerCase()
         if (sentReembolso.has(key)) continue
         sentReembolso.add(key)
@@ -3578,15 +3543,14 @@ export class ExpenseReportService implements OnModuleInit {
       })
       .catch(() => { })
 
-    // VD-88 bug 2: la devolución la verifica TESORERÍA (misma sección de Pagos
-    // que los reembolsos, VD-37); Contabilidad recibe copia informativa. Ambos
-    // con correo + in-app (dedup por correo).
+    // La devolución la verifica TESORERÍA (misma sección de Pagos que los
+    // reembolsos, VD-37) y solo a ella le llega el aviso (correo + in-app).
+    // VD-94: Contabilidad ya no recibe la copia informativa que había agregado
+    // VD-88. Se mantiene el dedup por correo.
     const tesoreriaUsers =
       await this.userService.findTesoreriaRecipientsWithIds(clientId)
-    const accountingUsers =
-      await this.userService.findAccountingRecipientsWithIds(clientId)
     const sentDevolucion = new Set<string>()
-    for (const u of [...tesoreriaUsers, ...accountingUsers]) {
+    for (const u of tesoreriaUsers) {
       const key = u.email.trim().toLowerCase()
       if (sentDevolucion.has(key)) continue
       sentDevolucion.add(key)
