@@ -1010,44 +1010,6 @@ export class EmailService {
     }
   }
 
-  /** Notifica al Coordinador que la rendición que aprobó fue aprobada por Contabilidad. */
-  async sendRendicionAprobadaCoordinador(
-    email: string,
-    data: {
-      clientId?: string
-      coordinatorName: string
-      collaboratorName: string
-      reportTitle: string
-      budgetFormatted: string
-      platformUrl?: string
-    }
-  ) {
-    try {
-      const { platformUrl, ...rest } = data
-      const reportTitle = this.normalizeIsoDatesInText(data.reportTitle)
-      await this.send({
-        to: email,
-        subject: `Rendición aprobada por Contabilidad — ${reportTitle}`,
-        template: './rendicion-aprobada-coordinador',
-        context: {
-          logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
-          year: new Date().getFullYear(),
-          ...rest,
-          reportTitle,
-          platformUrl: this.resolvePlatformHref(platformUrl),
-        },
-      })
-      this.logger.debug(
-        `Correo rendición aprobada al coordinador enviado a ${email}`
-      )
-    } catch (error) {
-      this.logger.error(
-        `Error rendición aprobada coordinador a ${email}:`,
-        error
-      )
-    }
-  }
-
   /** Notifica a Tesorería que una rendición fue aprobada y requiere pago al colaborador. */
   async sendRendicionAprobadaTesoreria(
     email: string,
