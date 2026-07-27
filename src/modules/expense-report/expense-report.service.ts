@@ -4869,18 +4869,11 @@ export class ExpenseReportService implements OnModuleInit {
         await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoBudgetCommitmentRecorded: true } })
       } catch (err: unknown) { this.logger.error(`Compromiso presupuestal viático ${(report as any)._id}: ${err instanceof Error ? err.message : String(err)}`) }
     }
-    try {
-      const recipients = await this.userService.findViaticoAccountingNotifyRecipients(report.clientId.toString())
-      const detalle = await this.buildViaticoDetalleRapido(report)
-      for (const r of recipients) {
-        await this.emailService.sendViaticoAprobacionContabilidad(r.email, {
-          clientId: report.clientId.toString(), recipientName: r.name, urgent: false, urgentBanner: '', emailTitle: 'Solicitud de viáticos aprobada',
-          intro: 'La solicitud de viáticos fue aprobada y queda lista para su desembolso.',
-          ...detalle,
-          platformUrl: this.emailService.buildAppUrl('/tesoreria'),
-        }).catch(() => {})
-      }
-    } catch (err: unknown) { this.logger.error(`Notificación contabilidad viático ${(report as any)._id}: ${err instanceof Error ? err.message : String(err)}`) }
+    // A Contabilidad NO se le avisa aquí: este método solo corre desde
+    // `approveViaticoContabilidad`, es decir, justo después de que Contabilidad
+    // aprobó la solicitud. Enviarle un «Solicitud de viáticos aprobada» sería
+    // notificarle su propia acción. El aviso accionable es el de Tesorería, que
+    // va a continuación.
 
     // Notificar a tesorería con datos de pago del colaborador
     try {
