@@ -1,18 +1,21 @@
 {{> email-header}}
-      <h1 class="title">Factura Aprobada</h1>
-<p>Estimado/a,</p>
-          <p>Le informamos que la siguiente factura ha sido aprobada:</p>
-          <div class='details-card'>
-            <ul>
-              <li><strong>Proveedor:</strong> {{providerName}}</li>
-              <li><strong>Número de Factura:</strong> {{invoiceNumber}}</li>
-              <li><strong>Fecha:</strong> {{date}}</li>
-              <li><strong>Tipo:</strong> {{type}}</li>
-            </ul>
-          </div>
-          <div class='approval-badge'>
-            <p><strong>Aprobada por:</strong> {{approvedBy}}</p>
-            <p>La factura ha sido procesada correctamente.</p>
-          </div>
-          <p>Esta factura continuará su proceso según los flujos establecidos.</p>
+      <span class="badge">Factura aprobada</span>
+      <h1 class="title">Factura aprobada</h1>
+      <p>Estimado/a,</p>
+      <p>Le informamos que la siguiente factura ha sido <strong>aprobada</strong> y procesada correctamente.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Proveedor:</strong> {{providerName}}</div>
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha:</strong> {{date}}</div>
+        <div class="row"><strong>Tipo:</strong> {{type}}</div>
+        <div class="row"><strong>Aprobada por:</strong> {{approvedBy}}</div>
+      </div>
+
+      <p>Esta factura continuará su proceso según los flujos establecidos.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

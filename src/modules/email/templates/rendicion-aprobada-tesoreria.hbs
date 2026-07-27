@@ -1,33 +1,30 @@
 {{> email-header}}
       <span class="badge">Aprobada por Contabilidad</span>
       <h1 class="title">Rendición pendiente de pago</h1>
-      <p class="muted">La siguiente rendición fue aprobada y requiere procesamiento de pago al colaborador.</p>
+      <p>Estimado/a,</p>
+      <p>La siguiente rendición fue aprobada y requiere procesamiento de pago al colaborador.</p>
 
+      <p class="label">Detalles rápidos:</p>
       <div class="box">
-        <p class="box-title">Datos de la rendición</p>
         <div class="row"><strong>Rendición:</strong> {{reportTitle}}</div>
         <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
         {{#if collaboratorDni}}<div class="row"><strong>DNI:</strong> {{collaboratorDni}}</div>{{/if}}
-        <div class="row"><strong>Monto aprobado:</strong></div>
-        <div class="amount">S/ {{budgetFormatted}}</div>
+        <div class="row"><strong>Monto aprobado:</strong> {{currencySymbol}} {{budgetFormatted}}</div>
       </div>
 
-      {{#if hasBankAccount}}
+      <p class="label">Datos bancarios para depósito:</p>
       <div class="box">
-        <p class="box-title">Datos bancarios para depósito</p>
+        {{#if hasBankAccount}}
         <div class="row"><strong>Banco:</strong> {{bankName}}</div>
         <div class="row"><strong>Tipo de cuenta:</strong> {{accountType}}</div>
         <div class="row"><strong>N° de cuenta:</strong> {{accountNumber}}</div>
         {{#if cci}}<div class="row"><strong>CCI:</strong> {{cci}}</div>{{/if}}
-      </div>
-      {{else}}
-      <div class="box">
-        <p class="box-title">Datos bancarios para depósito</p>
+        {{else}}
         <p class="no-account">El colaborador no tiene datos bancarios registrados en la plataforma.</p>
+        {{/if}}
       </div>
-      {{/if}}
 
       <div class="btn-container">
-        <a href="{{platformUrl}}" class="btn">Ver rendición en la plataforma</a>
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

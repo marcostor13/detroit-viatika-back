@@ -1,25 +1,28 @@
 {{> email-header}}
-      <h1 class="title">Acta de Aceptación Subida</h1>
-<p>Hola,</p>
-                <p>Se ha subido exitosamente el acta de aceptación para la factura:</p>
-                <div class='details-card'>
-                    <ul>
-                        <li><strong>Proveedor:</strong> {{providerName}}</li>
-                        <li><strong>Número de Factura:</strong> {{invoiceNumber}}</li>
-                        <li><strong>Fecha:</strong> {{date}}</li>
-                        {{#if showAdditionalInfo}}
-                        <li><strong>Tipo:</strong> {{type}}</li>
-                        <li><strong>Monto Total:</strong> {{montoTotalFormatted}}</li>
-                        {{#if category}}<li><strong>Categoría:</strong> {{category}}</li>{{/if}}
-                        {{#if projectName}}<li><strong>Proyecto:</strong> {{projectName}}</li>{{/if}}
-                        {{#if razonSocial}}<li><strong>Razón Social del Emisor:</strong> {{razonSocial}}</li>{{/if}}
-                        {{#if direccionEmisor}}<li><strong>Dirección del Emisor:</strong> {{direccionEmisor}}</li>{{/if}}
-                        {{#if status}}<li><strong>Estado:</strong> {{status}}</li>{{/if}}
-                        {{/if}}
-                    </ul>
-                </div>
-                <p>Puedes revisar el estado de la factura en el sistema.</p>
-                <div class='button-container'>
-                    <a href='#' class='button'>Ver Factura</a>
-                </div>
+      <span class="badge">Acta subida</span>
+      <h1 class="title">Acta de aceptación subida</h1>
+      <p>Estimado/a,</p>
+      <p>Se ha subido correctamente el acta de aceptación para la siguiente factura.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Proveedor:</strong> {{providerName}}</div>
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha:</strong> {{date}}</div>
+        {{#if showAdditionalInfo}}
+        <div class="row"><strong>Tipo:</strong> {{type}}</div>
+        <div class="row"><strong>Monto total:</strong> {{montoTotalFormatted}}</div>
+        {{#if category}}<div class="row"><strong>Categoría:</strong> {{category}}</div>{{/if}}
+        {{#if projectName}}<div class="row"><strong>Proyecto:</strong> {{projectName}}</div>{{/if}}
+        {{#if razonSocial}}<div class="row"><strong>Razón social del emisor:</strong> {{razonSocial}}</div>{{/if}}
+        {{#if direccionEmisor}}<div class="row"><strong>Dirección del emisor:</strong> {{direccionEmisor}}</div>{{/if}}
+        {{#if status}}<div class="row"><strong>Estado:</strong> {{status}}</div>{{/if}}
+        {{/if}}
+      </div>
+
+      <p>Puede revisar el estado de la factura en la plataforma.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

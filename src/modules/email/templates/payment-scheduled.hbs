@@ -1,13 +1,16 @@
 {{> email-header}}
-      <h1 class="title">Pago Programado</h1>
-<p>Hola,</p>
-                <p>Se ha programado el pago de su factura:</p>
-                <div class='details-card'>
-                    <p><strong>Número de Factura:</strong> {{invoiceNumber}}</p>
-                    <p><strong>Fecha de Pago:</strong> {{paymentDate}}</p>
-                </div>
-                <div class='payment-badge'>
-                    <p>El pago será procesado en la fecha indicada.</p>
-                </div>
-                <p>Si tienes alguna pregunta, no dudes en contactarnos.</p>
+      <span class="badge badge-info">Pago programado</span>
+      <h1 class="title">Pago programado</h1>
+      <p>Estimado/a,</p>
+      <p>Se ha programado el pago de su factura. El pago será procesado en la fecha indicada.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha de pago:</strong> {{paymentDate}}</div>
+      </div>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

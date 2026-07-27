@@ -3,10 +3,17 @@
       <h1 class="title">Devolución de saldo pendiente</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
       <p>Al liquidar su anticipo, se determinó que existe un <strong>saldo a favor de la empresa</strong> que debe ser devuelto.</p>
+
+      <p class="label">Detalles rápidos:</p>
       <div class="box">
+        <div class="row"><strong>N° de anticipo:</strong> {{advanceId}}</div>
         <div class="row"><strong>Monto a devolver:</strong> {{currencySymbol}} {{amountDue}}</div>
         <div class="row"><strong>Fecha límite:</strong> {{dueDate}}</div>
-        <div class="row"><strong>N° Anticipo:</strong> {{advanceId}}</div>
       </div>
+
       <p>Por favor realice la transferencia a la cuenta de la empresa y cargue el comprobante en la plataforma antes de la fecha límite.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

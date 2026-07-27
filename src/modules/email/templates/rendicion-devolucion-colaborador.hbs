@@ -1,15 +1,18 @@
 {{> email-header}}
-
-      <div class="alert">Saldo a devolver: S/ {{amountFormatted}}</div>
-      <h1 class="heading">Devolución de saldo pendiente</h1>
+      <span class="badge badge-danger">Devolución pendiente</span>
+      <h1 class="title">Devolución de saldo pendiente</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
-      <p>Tu rendición <strong>{{reportTitle}}</strong> fue aprobada. Según la liquidación, el monto del anticipo supera los gastos reales, por lo que debes devolver el saldo a favor de la empresa.</p>
-      <div class="details">
-        <p><strong>Rendición:</strong> {{reportTitle}}</p>
-        <p><strong>Monto a devolver:</strong> S/ {{amountFormatted}}</p>
+      <p>Su rendición <strong>{{reportTitle}}</strong> fue aprobada. Según la liquidación, el monto del anticipo supera los gastos reales, por lo que debe devolver el saldo a favor de la empresa.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Rendición:</strong> {{reportTitle}}</div>
+        <div class="row"><strong>Monto a devolver:</strong> {{currencySymbol}} {{amountFormatted}}</div>
       </div>
-      <p>Por favor, realiza la transferencia a la cuenta bancaria de la empresa y adjunta el comprobante de depósito en la plataforma.</p>
+
+      <p>Por favor, realice la transferencia a la cuenta bancaria de la empresa y adjunte el comprobante de depósito en la plataforma.</p>
+
       <div class="btn-container">
-        <a href="{{platformUrl}}" class="btn">Adjuntar comprobante de devolución</a>
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

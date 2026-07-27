@@ -1,29 +1,31 @@
 {{> email-header}}
-
-      <h1 class="heading">Rendiciones pendientes de aprobacion contable</h1>
+      <span class="badge badge-info">Recordatorio</span>
+      <h1 class="title">Rendiciones pendientes de aprobación contable</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
-      <p>Las siguientes rendiciones ya fueron aprobadas por coordinacion y estan esperando <strong>tu aprobacion final</strong>:</p>
+      <p>Las siguientes rendiciones ya fueron aprobadas por los aprobadores y están esperando su <strong>aprobación final</strong>.</p>
 
-      <div class="info-box">
-        <p><strong>{{pendingCount}} rendicion(es)</strong> pendiente(s) de aprobacion contable.</p>
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Rendiciones pendientes:</strong> {{pendingCount}}</div>
       </div>
 
-      <ul class="report-list">
+      <p class="label">Rendiciones por aprobar:</p>
+      <table class="data">
+        <tr>
+          <th>Colaborador</th>
+          <th>Rendición</th>
+          <th>Vence</th>
+        </tr>
         {{#each reports}}
-        <li class="report-item">
-          <div class="report-collab">{{this.collaboratorName}}</div>
-          <div class="report-title">{{this.title}}</div>
-          {{#if this.endDateFormatted}}
-          <div class="report-deadline">Vence: {{this.endDateFormatted}}</div>
-          {{/if}}
-        </li>
+        <tr>
+          <td>{{this.collaboratorName}}</td>
+          <td>{{this.title}}</td>
+          <td>{{#if this.endDateFormatted}}{{this.endDateFormatted}}{{else}}—{{/if}}</td>
+        </tr>
         {{/each}}
-      </ul>
+      </table>
 
       <div class="btn-container">
         <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
-    </div>
-    <div class="footer">
-      &copy; {{year}} Viatika. Este es un recordatorio automatico.
 {{> email-footer}}

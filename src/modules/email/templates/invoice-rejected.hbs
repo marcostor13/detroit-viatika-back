@@ -1,21 +1,22 @@
 {{> email-header}}
-      <h1 class="title">Factura Rechazada</h1>
-<p>Estimado/a,</p>
-                <p>Le informamos que la siguiente factura ha sido rechazada:</p>
-                <div class='details-card'>
-                    <ul>
-                        <li><strong>Proveedor:</strong> {{providerName}}</li>
-                        <li><strong>Número de Factura:</strong> {{invoiceNumber}}</li>
-                        <li><strong>Fecha:</strong> {{date}}</li>
-                        <li><strong>Tipo:</strong> {{type}}</li>
-                    </ul>
-                </div>
-                <div class='rejection-badge'>
-                    <p><strong>Rechazada por:</strong> {{rejectedBy}}</p>
-                </div>
-                <div class='rejection-reason'>
-                    <strong>Motivo del Rechazo:</strong>
-                    <p>{{rejectionReason}}</p>
-                </div>
-                <p>Por favor, tome las acciones necesarias para corregir la situación.</p>
+      <span class="badge badge-danger">Factura rechazada</span>
+      <h1 class="title">Factura rechazada</h1>
+      <p>Estimado/a,</p>
+      <p>Le informamos que la siguiente factura ha sido <strong>rechazada</strong>.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Proveedor:</strong> {{providerName}}</div>
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha:</strong> {{date}}</div>
+        <div class="row"><strong>Tipo:</strong> {{type}}</div>
+        <div class="row"><strong>Rechazada por:</strong> {{rejectedBy}}</div>
+        <div class="row"><strong>Motivo:</strong> {{rejectionReason}}</div>
+      </div>
+
+      <p>Por favor, tome las acciones necesarias para corregir la situación.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

@@ -4762,17 +4762,65 @@ export class ExpenseReportService implements OnModuleInit {
     return this.findOne(id) as Promise<ExpenseReportDocument>
   }
 
+  /**
+   * Campos del bloque «Detalles rápidos» de los correos de viático, para que
+   * Contabilidad/Tesorería reciban el mismo detalle (centro de costo, lugar,
+   * fechas, monto) que el aprobador — antes solo se les mandaba una frase
+   * suelta en `detailBody` y el correo salía sin datos.
+   */
+  private async buildViaticoDetalleRapido(
+    report: ExpenseReportDocument
+  ): Promise<{
+    collaboratorName: string
+    place: string
+    startDate: string
+    endDate: string
+    totalFormatted: string
+    currencySymbol: string
+    projectLabel: string
+  }> {
+    const collaborator = await this.userService.findEmailNameClient(
+      report.userId.toString()
+    )
+    let projectLabel = ''
+    if (report.projectId) {
+      try {
+        const project = await this.projectService.findOne(
+          report.projectId.toString(),
+          report.clientId.toString()
+        )
+        if (project) projectLabel = `${project.code} - ${project.name}`
+      } catch {
+        // Centro de costo borrado o inaccesible: el correo sale sin la fila.
+      }
+    }
+    const toIsoDay = (v: unknown): string =>
+      v instanceof Date
+        ? v.toISOString().slice(0, 10)
+        : String(v ?? '').slice(0, 10)
+    return {
+      collaboratorName: collaborator?.name ?? '',
+      place: report.viaticoPlace ?? '',
+      startDate: toIsoDay(report.viaticoStartDate),
+      endDate: toIsoDay(report.viaticoEndDate),
+      totalFormatted: this.viaticoFormatMoney(report.viaticoAmount ?? 0),
+      currencySymbol: this.viaticoMoneySymbol(report.viaticoMoneda),
+      projectLabel,
+    }
+  }
+
   /** Notifica a Contabilidad que un viático terminó su cadena de centro de costo y espera su aprobación final. */
   private async notifyContabilidadPendingApproval(report: ExpenseReportDocument): Promise<void> {
     try {
       const recipients = await this.userService.findViaticoAccountingNotifyRecipients(report.clientId.toString())
-      const collaborator = await this.userService.findEmailNameClient(report.userId.toString())
+      const detalle = await this.buildViaticoDetalleRapido(report)
       for (const r of recipients) {
         await this.emailService.sendViaticoAprobacionContabilidad(r.email, {
           clientId: report.clientId.toString(), recipientName: r.name, urgent: false, urgentBanner: '',
           emailTitle: 'Solicitud de viáticos pendiente de tu aprobación',
-          detailBody: `<p>Viático por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoEscapeHtml(this.viaticoFormatMoney(report.viaticoAmount ?? 0))} de ${this.viaticoEscapeHtml(collaborator?.name ?? '')} fue aprobado por los centros de costo correspondientes. Requiere tu aprobación final antes de quedar lista para pago.</p>`,
-          projectLabel: '', platformUrl: this.emailService.buildAppUrl('/viaticos'),
+          intro: 'La solicitud fue aprobada por los centros de costo correspondientes y requiere tu aprobación final antes de quedar lista para pago.',
+          ...detalle,
+          platformUrl: this.emailService.buildAppUrl('/viaticos'),
         }).catch(() => {})
       }
     } catch (err: unknown) {
@@ -4821,17 +4869,11 @@ export class ExpenseReportService implements OnModuleInit {
         await this.expenseReportModel.updateOne({ _id: (report as any)._id }, { $set: { viaticoBudgetCommitmentRecorded: true } })
       } catch (err: unknown) { this.logger.error(`Compromiso presupuestal viático ${(report as any)._id}: ${err instanceof Error ? err.message : String(err)}`) }
     }
-    try {
-      const recipients = await this.userService.findViaticoAccountingNotifyRecipients(report.clientId.toString())
-      const collaborator = await this.userService.findEmailNameClient(report.userId.toString())
-      for (const r of recipients) {
-        await this.emailService.sendViaticoAprobacionContabilidad(r.email, {
-          clientId: report.clientId.toString(), recipientName: r.name, urgent: false, urgentBanner: '', emailTitle: 'Solicitud de viáticos aprobada',
-          detailBody: `<p>Viático por ${this.viaticoMoneySymbol(report.viaticoMoneda)} ${this.viaticoEscapeHtml(this.viaticoFormatMoney(report.viaticoAmount ?? 0))} de ${this.viaticoEscapeHtml(collaborator?.name ?? '')} aprobado y listo para pago.</p>`,
-          projectLabel: '', platformUrl: this.emailService.buildAppUrl('/tesoreria'),
-        }).catch(() => {})
-      }
-    } catch (err: unknown) { this.logger.error(`Notificación contabilidad viático ${(report as any)._id}: ${err instanceof Error ? err.message : String(err)}`) }
+    // A Contabilidad NO se le avisa aquí: este método solo corre desde
+    // `approveViaticoContabilidad`, es decir, justo después de que Contabilidad
+    // aprobó la solicitud. Enviarle un «Solicitud de viáticos aprobada» sería
+    // notificarle su propia acción. El aviso accionable es el de Tesorería, que
+    // va a continuación.
 
     // Notificar a tesorería con datos de pago del colaborador
     try {

@@ -3,11 +3,30 @@ import { MailerService } from '@nestjs-modules/mailer'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model, Types } from 'mongoose'
 import { Client, ClientDocument } from '../client/entities/client.entity'
+import {
+  getRequestOrigin,
+  toOrigin,
+} from '../../common/request-origin.context'
 
-const DEFAULT_PROD_APP_URL = 'https://app.viatika.tecdidata.com'
-const LEGACY_PROD_APP_HOST = 'app.viatica.tecdidata.com'
-const CURRENT_PROD_APP_HOST = 'app.viatika.tecdidata.com'
+/**
+ * URL del front que se usa cuando la petición no trae un origen utilizable
+ * (tareas programadas, seeds) y no hay `APP_PUBLIC_URL` configurada.
+ * Es el front de Detroit; el caso normal es que el origen salga de la propia
+ * petición — ver `getPublicAppBaseUrl()`.
+ */
+const DEFAULT_APP_URL = 'https://detroit-viatika.netlify.app'
 const CLIENT_LOGO_CACHE_TTL_MS = 60_000
+
+/**
+ * Orígenes de front aceptados para construir los enlaces de los correos cuando
+ * no hay `APP_ALLOWED_ORIGINS` en el entorno. Al pasar a producción basta
+ * añadir el dominio nuevo a esa variable (lista separada por comas) sin tocar
+ * código.
+ */
+const BUILT_IN_ALLOWED_ORIGINS = ['https://detroit-viatika.netlify.app']
+
+/** `localhost`/`127.0.0.1` en cualquier puerto: solo fuera de producción. */
+const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
 
 /**
  * Logo por defecto de los correos cuando la empresa NO tiene `client.logo`
@@ -54,49 +73,109 @@ export class EmailService {
         }
       }
       // Defaults para el header/footer compartido (VD-81): garantiza que
-      // `logoUrl` y `year` existan siempre, para no romper el modo strict de
-      // Handlebars aunque un método olvide pasarlos.
+      // `logoUrl` exista siempre, para no romper el modo strict de Handlebars
+      // aunque un método olvide pasarlo. `year` ya no lo pinta ninguna
+      // plantilla (el pie dejó de llevar el «© año Viatika»), pero se sigue
+      // rellenando por si alguna vuelve a necesitarlo.
       if (ctx.logoUrl === undefined || ctx.logoUrl === null || ctx.logoUrl === '') {
         ctx.logoUrl = this.getLogoUrl()
       }
       if (ctx.year === undefined || ctx.year === null) {
         ctx.year = new Date().getFullYear()
       }
+      // `platformUrl` y `currencySymbol` también se garantizan: el formato
+      // estándar de correo (badge → título → saludo → «Detalles rápidos» →
+      // botón) los usa en TODAS las plantillas, y en modo strict un
+      // `{{platformUrl}}` ausente aborta el render del correo entero.
+      if (
+        ctx.platformUrl === undefined ||
+        ctx.platformUrl === null ||
+        ctx.platformUrl === ''
+      ) {
+        ctx.platformUrl = this.getPublicAppBaseUrl()
+      }
+      if (
+        ctx.currencySymbol === undefined ||
+        ctx.currencySymbol === null ||
+        ctx.currencySymbol === ''
+      ) {
+        ctx.currencySymbol = 'S/'
+      }
     }
     await this.mailerService.sendMail(options)
   }
 
-  /**
-   * URL pública del front (local vs prod vía env).
-   * Preferir `APP_PUBLIC_URL` o `FRONTEND_URL` en `.env`.
-   */
-  private normalizePublicAppBaseUrl(url: string): string {
-    const trimmed = url.trim().replace(/\/+$/, '')
-    if (!trimmed) return trimmed
-
-    try {
-      const parsed = new URL(trimmed)
-      if (parsed.hostname === LEGACY_PROD_APP_HOST) {
-        parsed.hostname = CURRENT_PROD_APP_HOST
-      }
-      return parsed.toString().replace(/\/+$/, '')
-    } catch {
-      return trimmed
-    }
-  }
-
-  getPublicAppBaseUrl(): string {
+  /** URL configurada por entorno, sin la barra final. */
+  private configuredAppBaseUrl(): string {
     const raw = (
       process.env.APP_PUBLIC_URL ||
       process.env.FRONTEND_URL ||
       ''
     ).trim()
-    if (raw) {
-      return this.normalizePublicAppBaseUrl(raw)
+    return raw.replace(/\/+$/, '')
+  }
+
+  /**
+   * Orígenes de front a los que se permite enlazar desde un correo.
+   *
+   * `APP_ALLOWED_ORIGINS` (lista separada por comas) manda; si no está, se usan
+   * los conocidos de Detroit más lo que haya en `APP_PUBLIC_URL`/`FRONTEND_URL`.
+   */
+  private allowedFrontOrigins(): string[] {
+    const fromEnv = (process.env.APP_ALLOWED_ORIGINS ?? '')
+      .split(',')
+      .map(o => toOrigin(o))
+      .filter(Boolean)
+    if (fromEnv.length > 0) return fromEnv
+
+    const configured = toOrigin(this.configuredAppBaseUrl())
+    return [
+      ...BUILT_IN_ALLOWED_ORIGINS,
+      ...(configured ? [configured] : []),
+    ]
+  }
+
+  /**
+   * Decide si el origen de la petición en curso puede escribirse en un correo.
+   *
+   * Importa porque `Origin`/`Referer` los pone el cliente: sin este filtro,
+   * quien pudiera disparar un envío marcaría el origen que quisiera y el
+   * destinatario —un aprobador, Contabilidad— recibiría un correo con la
+   * imagen de Detroit y un botón hacia un sitio ajeno.
+   */
+  private isAllowedFrontOrigin(origin: string): boolean {
+    if (!origin) return false
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      LOCALHOST_ORIGIN.test(origin)
+    ) {
+      return true
     }
-    return process.env.NODE_ENV === 'production'
-      ? DEFAULT_PROD_APP_URL
-      : 'http://localhost:4200'
+    return this.allowedFrontOrigins().some(
+      allowed => allowed.toLowerCase() === origin.toLowerCase()
+    )
+  }
+
+  /**
+   * URL pública del front para los enlaces de los correos, en este orden:
+   *
+   *  1. El origen de la petición HTTP en curso, si está permitido. Así un mismo
+   *     backend sirve a `localhost`, al front de desarrollo y al de producción,
+   *     y cada correo enlaza al front desde el que se hizo la acción.
+   *  2. `APP_PUBLIC_URL` / `FRONTEND_URL` del entorno.
+   *  3. `DEFAULT_APP_URL`, para lo que no nace de una petición (recordatorios
+   *     programados, scripts).
+   */
+  getPublicAppBaseUrl(): string {
+    const requestOrigin = getRequestOrigin()
+    if (requestOrigin) {
+      if (this.isAllowedFrontOrigin(requestOrigin)) return requestOrigin
+      this.logger.warn(
+        `Origen no permitido para enlaces de correo: ${requestOrigin}. ` +
+          'Se usa la URL configurada. Añádelo a APP_ALLOWED_ORIGINS si es legítimo.'
+      )
+    }
+    return this.configuredAppBaseUrl() || DEFAULT_APP_URL
   }
 
   /** Ruta absoluta en el front, p. ej. `/tesoreria` → `https://…/tesoreria` */
@@ -263,6 +342,16 @@ export class EmailService {
     return this.buildAppUrl(s)
   }
 
+  /**
+   * Asunto estándar: `Base — referencia`, con guion largo y sin dejar el
+   * separador colgando cuando la referencia viene vacía (antes producía
+   * asuntos como «Solicitud aprobada - »).
+   */
+  private withSubjectRef(base: string, ref?: string | null): string {
+    const s = ref?.trim()
+    return s ? `${base} — ${s}` : base
+  }
+
   getCode() {
     const code = Math.floor(100000 + Math.random() * 900000).toString()
     return code
@@ -273,8 +362,10 @@ export class EmailService {
       this.logger.debug(`Enviando código de confirmación a ${email}`)
       await this.send({
         to: email,
-        subject: 'Confirma tu correo en Nuestra App',
-        template: './confirmation', // se añade automáticamente la extensión (.hbs)
+        subject: 'Verifique su correo',
+        // La plantilla se llama `send-code.hbs`; `./confirmation` no existe y
+        // hacía fallar el envío del código de verificación.
+        template: './send-code',
         context: {
           logoUrl: await this.resolveLogoUrl(clientId),
           verificationCode: this.getCode(),
@@ -307,7 +398,7 @@ export class EmailService {
       this.logger.debug(`Enviando notificación de factura a ${email}`, data)
       await this.send({
         to: email,
-        subject: 'Nueva Factura Subida',
+        subject: 'Nueva factura subida',
         template: './invoice-notification',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -338,7 +429,7 @@ export class EmailService {
   ) {
     await this.send({
       to: email,
-      subject: 'Pago Programado',
+      subject: 'Pago programado',
       template: './payment-scheduled',
       context: {
         logoUrl: await this.resolveLogoUrl(clientId),
@@ -358,7 +449,7 @@ export class EmailService {
   ) {
     await this.send({
       to: email,
-      subject: `Factura ${decision === 'approved' ? 'Aprobada' : 'Rechazada'}`,
+      subject: `Factura ${decision === 'approved' ? 'aprobada' : 'rechazada'}`,
       template: './accounting-decision',
       context: {
         logoUrl: await this.resolveLogoUrl(clientId),
@@ -383,7 +474,7 @@ export class EmailService {
       this.logger.debug(`Enviando notificación de acta a ${email}`)
       await this.send({
         to: email,
-        subject: 'Acta de Aceptación Subida',
+        subject: 'Acta de aceptación subida',
         template: './acta-notification',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -427,7 +518,7 @@ export class EmailService {
       await this.send({
         to: email,
         subject:
-          'Nueva factura subida por ' + (data.createdBy || data.providerName),
+          'Nueva factura subida — ' + (data.createdBy || data.providerName),
         template: './invoice-notification',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -482,7 +573,7 @@ export class EmailService {
       await this.send({
         to: email,
         subject:
-          'Acta de aprobación subida por ' +
+          'Acta de aprobación subida — ' +
           (data.createdBy || data.providerName),
         template: './acta-notification',
         context: {
@@ -535,7 +626,7 @@ export class EmailService {
       await this.send({
         to: email,
         subject:
-          'Nueva factura de gastos subida por ' +
+          'Nueva factura de gastos subida — ' +
           (data.createdBy || data.providerName),
         template: './invoice-notification',
         context: {
@@ -581,7 +672,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: 'Factura Aprobada',
+        subject: 'Factura aprobada',
         template: 'invoice-approved',
         context: {
           providerName: data.providerName,
@@ -614,7 +705,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: 'Factura Rechazada',
+        subject: 'Factura rechazada',
         template: 'invoice-rejected',
         context: {
           providerName: data.providerName,
@@ -653,7 +744,7 @@ export class EmailService {
 
       await this.send({
         to: email,
-        subject: `Factura ${data.status === 'APPROVED' ? 'Aprobada para Pago' : 'Rechazada para Pago'}`,
+        subject: `Factura ${data.status === 'APPROVED' ? 'aprobada para pago' : 'rechazada para pago'}`,
         template: 'invoice-decision',
         context: {
           providerName: data.providerName,
@@ -693,7 +784,7 @@ export class EmailService {
       this.logger.debug(`Enviando correo de bienvenida a proveedor: ${email}`)
       await this.send({
         to: email,
-        subject: 'Bienvenido a Nuestra Plataforma de Proveedores',
+        subject: 'Bienvenido a la plataforma',
         template: './provider-welcome',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -818,7 +909,7 @@ export class EmailService {
       this.logger.debug(`Enviando correo de rendición aprobada a ${email}`)
       await this.send({
         to: email,
-        subject: '¡Rendición de Gastos Aprobada!',
+        subject: this.withSubjectRef('Rendición aprobada', data.title),
         template: './rendicion-approved',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -980,7 +1071,7 @@ export class EmailService {
       const reportTitle = this.normalizeIsoDatesInText(data.reportTitle)
       await this.send({
         to: email,
-        subject: `Rendicion aprobada - Pendiente de pago — ${reportTitle}`,
+        subject: `Rendición aprobada, pendiente de pago — ${reportTitle}`,
         template: './rendicion-aprobada-tesoreria',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1024,7 +1115,7 @@ export class EmailService {
       const { platformUrl, ...rest } = data
       await this.send({
         to: email,
-        subject: `Viatico aprobado - Pendiente de pago — ${data.advanceDescription}`,
+        subject: `Viático aprobado, pendiente de pago — ${data.advanceDescription}`,
         template: './viatico-aprobado-tesoreria',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1236,14 +1327,22 @@ export class EmailService {
       urgent: boolean
       urgentBanner: string
       emailTitle: string
-      detailBody: string
+      /** HTML libre con el desglose largo. Opcional: el bloque «Detalles
+       *  rápidos» de la plantilla se arma con los campos sueltos de abajo. */
+      detailBody?: string
+      collaboratorName?: string
+      place?: string
+      startDate?: string
+      endDate?: string
+      totalFormatted?: string
+      currencySymbol?: string
       projectLabel: string
       platformUrl?: string
     }
   ) {
     try {
       const prefix = data.urgent ? '[🔴 URGENTE] ' : ''
-      const subject = `${prefix}Solicitud pendiente de aprobación final - ${data.projectLabel}`
+      const subject = `${prefix}${this.withSubjectRef('Solicitud pendiente de aprobación final', data.projectLabel)}`
       const { platformUrl, ...rest } = data
       await this.send({
         to: email,
@@ -1272,7 +1371,17 @@ export class EmailService {
       urgent: boolean
       urgentBanner: string
       emailTitle: string
-      detailBody: string
+      /** Párrafo de contexto bajo el saludo; la plantilla trae uno genérico. */
+      intro?: string
+      /** HTML libre con el desglose largo. Opcional: el bloque «Detalles
+       *  rápidos» de la plantilla se arma con los campos sueltos de abajo. */
+      detailBody?: string
+      collaboratorName?: string
+      place?: string
+      startDate?: string
+      endDate?: string
+      totalFormatted?: string
+      currencySymbol?: string
       /** Etiqueta N° centro de costo ej. `[CODE - Nombre]` (Fase 3). */
       projectLabel: string
       platformUrl?: string
@@ -1280,7 +1389,7 @@ export class EmailService {
   ) {
     try {
       const prefix = data.urgent ? '[🔴 URGENTE] ' : ''
-      const subject = `${prefix}Solicitud aprobada - ${data.projectLabel}`
+      const subject = `${prefix}${this.withSubjectRef('Solicitud aprobada', data.projectLabel)}`
       const { platformUrl, ...rest } = data
       await this.send({
         to: email,
@@ -1319,7 +1428,10 @@ export class EmailService {
     }
   ) {
     try {
-      const subject = `Nueva solicitud de viáticos, ${data.projectLabel}`
+      const subject = this.withSubjectRef(
+        'Nueva solicitud de viáticos',
+        data.projectLabel
+      )
       this.logger.debug(`Enviando solicitud de viáticos a coordinador ${email}`)
       const { platformUrl, ...rest } = data
       await this.send({
@@ -1361,7 +1473,10 @@ export class EmailService {
     }
   ) {
     try {
-      const subject = `Solicitud de viáticos enviada — ${data.projectLabel}`
+      const subject = this.withSubjectRef(
+        'Solicitud de viáticos enviada',
+        data.projectLabel
+      )
       const { platformUrl, ...rest } = data
       await this.send({
         to: email,
@@ -1403,7 +1518,10 @@ export class EmailService {
     }
   ) {
     try {
-      const subject = `Nueva solicitud de viáticos — ${data.projectLabel}`
+      const subject = this.withSubjectRef(
+        'Nueva solicitud de viáticos',
+        data.projectLabel
+      )
       const { platformUrl, ...rest } = data
       await this.send({
         to: email,
@@ -1450,7 +1568,7 @@ export class EmailService {
       const { platformUrl, ...rest } = data
       await this.send({
         to: email,
-        subject: `Solicitud de viáticos cancelada — ${data.projectLabel}`,
+        subject: this.withSubjectRef('Solicitud de viáticos cancelada', data.projectLabel),
         template: './viatico-cancelacion-coordinator',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1629,7 +1747,7 @@ export class EmailService {
       const reportTitle = this.normalizeIsoDatesInText(data.reportTitle)
       await this.send({
         to: email,
-        subject: `Rendición Cerrada Definitivamente — ${reportTitle}`,
+        subject: `Rendición cerrada definitivamente — ${reportTitle}`,
         template: './rendicion-cerrada',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1756,7 +1874,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: `DEVOLUCIÓN PENDIENTE — Viático N° ${data.advanceId} — Monto ${data.currencySymbol ?? 'S/'} ${data.amountDue}`,
+        subject: `Devolución pendiente — Anticipo N° ${data.advanceId} — ${data.currencySymbol ?? 'S/'} ${data.amountDue}`,
         template: './devolucion-pendiente',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1783,7 +1901,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: `Devolución validada — Viático N° ${data.advanceId}`,
+        subject: `Devolución validada — Anticipo N° ${data.advanceId}`,
         template: './devolucion-validada',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1810,7 +1928,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: `Comprobante de devolución rechazado — Viático N° ${data.advanceId}`,
+        subject: `Comprobante de devolución rechazado — Anticipo N° ${data.advanceId}`,
         template: './devolucion-rechazada',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1838,7 +1956,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: `Caja Chica Creada — ${data.code}`,
+        subject: `Caja chica creada — ${data.code}`,
         template: './caja-chica-creada',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1863,7 +1981,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: `Caja Chica Fondeada y Activa — ${data.code}`,
+        subject: `Caja chica activa — ${data.code}`,
         template: './caja-chica-fondeada',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1893,7 +2011,7 @@ export class EmailService {
         data.frequency === 'semanal' ? 'esta semana' : 'este mes'
       await this.send({
         to: email,
-        subject: `Recordatorio: Rinde tus viáticos — ${periodoLabel}`,
+        subject: `Recordatorio de rendición de viáticos — ${periodoLabel}`,
         template: './viatico-recordatorio-colaborador',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1928,7 +2046,7 @@ export class EmailService {
       const formattedEndDate = this.formatDateDDMMYYYY(data.endDate)
       await this.send({
         to: email,
-        subject: `Hoy vence tu periodo de viáticos — ${formattedEndDate}`,
+        subject: `Hoy vence su periodo de viáticos — ${formattedEndDate}`,
         template: './viatico-recordatorio-ultimo-dia',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1965,7 +2083,7 @@ export class EmailService {
       const periodoLabel = data.frequency === 'semanal' ? 'semanal' : 'mensual'
       await this.send({
         to: email,
-        subject: `Resumen ${periodoLabel}: gastos de viáticos pendientes de revisión`,
+        subject: `Gastos de viáticos pendientes de revisión — resumen ${periodoLabel}`,
         template: './viatico-resumen-coordinador',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -1997,7 +2115,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: `Recordatorio: tienes ${data.pendingCount} rendicion(es) pendiente(s) de revision`,
+        subject: `Rendiciones pendientes de revisión — ${data.pendingCount} pendiente(s)`,
         template: './rendicion-recordatorio-coordinador',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),
@@ -2026,7 +2144,7 @@ export class EmailService {
     try {
       await this.send({
         to: email,
-        subject: `Recordatorio: ${data.pendingCount} rendicion(es) pendiente(s) de aprobacion contable`,
+        subject: `Rendiciones pendientes de aprobación contable — ${data.pendingCount} pendiente(s)`,
         template: './rendicion-recordatorio-contabilidad',
         context: {
           logoUrl: await this.resolveLogoUrl(this.extractClientId(data)),

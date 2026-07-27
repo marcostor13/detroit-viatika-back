@@ -3,9 +3,16 @@
       <h1 class="title">Rendición cerrada definitivamente</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
       <p>Le informamos que su rendición ha sido <strong>cerrada definitivamente</strong> por Contabilidad.</p>
+
+      <p class="label">Detalles rápidos:</p>
       <div class="box">
         <div class="row"><strong>Rendición:</strong> {{reportTitle}}</div>
         <div class="row"><strong>Fecha de cierre:</strong> {{closedAt}}</div>
       </div>
+
       <p>A partir de este momento la rendición queda en modo solo lectura. Si requiere reabrirla, deberá solicitar autorización a su administrador.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

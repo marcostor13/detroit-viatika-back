@@ -1,18 +1,20 @@
 {{> email-header}}
-
       <span class="badge">Comprobante cargado</span>
-      <h1 class="heading">Devolución de saldo — Comprobante recibido</h1>
+      <h1 class="title">Comprobante de devolución recibido</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
-      <p>El colaborador <strong>{{collaboratorName}}</strong> ha adjuntado el comprobante de devolución de saldo para la rendición <strong>{{reportTitle}}</strong>. Por favor, verifica el depósito y confirma la recepción.</p>
-      <div class="details">
-        <p><strong>Colaborador:</strong> {{collaboratorName}}</p>
-        <p><strong>Rendición:</strong> {{reportTitle}}</p>
-        <p><strong>Monto devuelto:</strong> S/ {{amountFormatted}}</p>
-        <p><strong>Fecha de depósito:</strong> {{depositDate}}</p>
-        {{#if bankOrigin}}<p><strong>Banco origen:</strong> {{bankOrigin}}</p>{{/if}}
-        {{#if operationNumber}}<p><strong>N° Operación:</strong> {{operationNumber}}</p>{{/if}}
+      <p>El colaborador <strong>{{collaboratorName}}</strong> ha adjuntado el comprobante de devolución de saldo. Por favor, verifique el depósito y confirme la recepción.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Rendición:</strong> {{reportTitle}}</div>
+        <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
+        <div class="row"><strong>Monto devuelto:</strong> {{currencySymbol}} {{amountFormatted}}</div>
+        <div class="row"><strong>Fecha de depósito:</strong> {{depositDate}}</div>
+        {{#if bankOrigin}}<div class="row"><strong>Banco origen:</strong> {{bankOrigin}}</div>{{/if}}
+        {{#if operationNumber}}<div class="row"><strong>N° de operación:</strong> {{operationNumber}}</div>{{/if}}
       </div>
+
       <div class="btn-container">
-        <a href="{{platformUrl}}" class="btn">Ver rendición en la plataforma</a>
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

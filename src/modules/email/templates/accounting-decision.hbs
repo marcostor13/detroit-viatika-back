@@ -1,14 +1,19 @@
 {{> email-header}}
+      <span class="badge badge-info">Decisión registrada</span>
       <h1 class="title">Decisión de Contabilidad</h1>
-<p>Hola,</p>
-                <p>Se ha tomado una decisión sobre la factura:</p>
-                <div class='details-card'>
-                    <p><strong>Número de Factura:</strong> {{invoiceNumber}}</p>
-                    <p><strong>Estado:</strong> {{decisionText}}</p>
-                    {{#if reason}}
-                    <p><strong>Razón:</strong> {{reason}}</p>
-                    {{/if}}
-                </div>
-                <p>Por favor, proceda con los siguientes pasos según corresponda.</p>
-                <p>Si tienes alguna pregunta, no dudes en contactarnos.</p>
+      <p>Estimado/a,</p>
+      <p>Se ha tomado una decisión sobre la siguiente factura.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Estado:</strong> {{decisionText}}</div>
+        {{#if reason}}<div class="row"><strong>Motivo:</strong> {{reason}}</div>{{/if}}
+      </div>
+
+      <p>Por favor, proceda con los siguientes pasos según corresponda.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

@@ -1,14 +1,20 @@
 {{> email-header}}
-      <h1 class="title">Nueva Factura Subida</h1>
-<p>Hola,</p>
-                <p>Se ha subido una nueva factura con los siguientes detalles:</p>
-                <div class='details-card'>
-                    <ul>
-                        <li><strong>Proveedor:</strong> {{providerName}}</li>
-                        <li><strong>Número de Factura:</strong> {{invoiceNumber}}</li>
-                        <li><strong>Fecha:</strong> {{date}}</li>
-                        <li><strong>Tipo:</strong> {{type}}</li>
-                    </ul>
-                </div>
-                <p>Por favor, revise la factura y suba el acta de aprobación correspondiente.</p>
+      <span class="badge badge-info">Nueva factura</span>
+      <h1 class="title">Nueva factura subida</h1>
+      <p>Estimado/a,</p>
+      <p>Se ha subido una nueva factura al sistema.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Proveedor:</strong> {{providerName}}</div>
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha:</strong> {{date}}</div>
+        <div class="row"><strong>Tipo:</strong> {{type}}</div>
+      </div>
+
+      <p>Por favor, revise la factura y suba el acta de aprobación correspondiente.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

@@ -1,13 +1,27 @@
 {{> email-header}}
-
       {{#if urgent}}
-      <div class="urgent">{{urgentBanner}}</div>
+      <div class="urgent-box"><p class="urgent" style="margin: 0;">{{urgentBanner}}</p></div>
       {{/if}}
-      <h1 class="heading">{{emailTitle}}</h1>
+      <span class="badge badge-info">Pendiente de aprobación final</span>
+      <h1 class="title">{{emailTitle}}</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
-      <p>Una solicitud de viáticos ha sido aprobada en el <strong>primer nivel</strong> y está <strong>pendiente de tu aprobación final</strong> para ser procesada.</p>
-      <div class="details">{{{detailBody}}}</div>
+      <p>Una solicitud de viáticos fue aprobada en el <strong>primer nivel</strong> y se encuentra <strong>pendiente de su aprobación final</strong> para ser procesada.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        {{#if projectLabel}}<div class="row"><strong>Centro de costo:</strong> {{projectLabel}}</div>{{/if}}
+        {{#if collaboratorName}}<div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>{{/if}}
+        {{#if place}}<div class="row"><strong>Lugar:</strong> {{place}}</div>{{/if}}
+        {{#if startDate}}<div class="row"><strong>Fechas:</strong> {{startDate}} al {{endDate}}</div>{{/if}}
+        {{#if totalFormatted}}<div class="row"><strong>Monto total:</strong> {{currencySymbol}} {{totalFormatted}}</div>{{/if}}
+      </div>
+
+      {{#if detailBody}}
+      <p class="label">Detalle completo:</p>
+      <div class="box">{{{detailBody}}}</div>
+      {{/if}}
+
       <div class="btn-container">
-        <a href="{{platformUrl}}" class="btn">Ir a la plataforma — Aprobar</a>
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

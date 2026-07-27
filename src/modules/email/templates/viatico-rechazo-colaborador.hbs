@@ -1,19 +1,22 @@
 {{> email-header}}
-
-      <h1 class="heading">Rechazo de solicitud de viáticos</h1>
+      <span class="badge badge-danger">Solicitud rechazada</span>
+      <h1 class="title">Solicitud de viáticos rechazada</h1>
       <p>Estimado/a <strong>{{collaboratorName}}</strong>,</p>
       <p>Su solicitud de viáticos asociada al centro de costo <strong>{{projectLabel}}</strong> ha sido <strong>rechazada</strong>.</p>
-      <div class="meta-table">
-        <div class="meta-row"><strong>Solicitante — datos de consistencia:</strong></div>
-        <div class="meta-row">Nombre completo: <strong>{{collaboratorName}}</strong></div>
-        <div class="meta-row">Documento: <strong>{{collaboratorDocument}}</strong></div>
-        <div class="meta-row">Área: <strong>{{collaboratorArea}}</strong></div>
-        <div class="meta-row">Cargo: <strong>{{collaboratorCargo}}</strong></div>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Centro de costo:</strong> {{projectLabel}}</div>
+        <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
+        <div class="row"><strong>Documento:</strong> {{collaboratorDocument}}</div>
+        <div class="row"><strong>Área:</strong> {{collaboratorArea}}</div>
+        <div class="row"><strong>Cargo:</strong> {{collaboratorCargo}}</div>
+        <div class="row"><strong>Motivo:</strong> {{rejectionReason}}</div>
       </div>
-      <p><strong>Observación del aprobador:</strong></p>
-      <div class="obs-box">{{rejectionReason}}</div>
-      <p>Use el siguiente enlace para revisar la solicitud, corregir la información y <strong>reenviarla</strong>. El historial de acciones quedará registrado.</p>
+
+      <p>Ingrese a la plataforma para revisar la solicitud, corregir la información y <strong>reenviarla</strong>. El historial de acciones quedará registrado.</p>
+
       <div class="btn-container">
-        <a href="{{platformUrl}}" class="btn">Revisar / editar solicitud</a>
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

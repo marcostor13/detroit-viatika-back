@@ -1,15 +1,18 @@
 {{> email-header}}
-
-      <h1 class="heading">Solicitud de viáticos enviada</h1>
+      <span class="badge badge-info">Pendiente de aprobación</span>
+      <h1 class="title">Solicitud de viáticos enviada</h1>
       <p>Estimado/a <strong>{{collaboratorName}}</strong>,</p>
       <p>Usted ha enviado una solicitud de viáticos que se encuentra <strong>pendiente de aprobación</strong>. Le notificaremos por este medio cuando exista una respuesta.</p>
-      <p class="label">Detalles de su solicitud:</p>
-      <ul class="quick-list">
-        <li>Centro de costo: {{projectLabel}}</li>
-        <li>Lugar: {{place}}</li>
-        <li>Fechas: {{startDate}} al {{endDate}}</li>
-        <li>Monto total: {{currencySymbol}} {{totalFormatted}}</li>
-      </ul>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        {{#if projectLabel}}<div class="row"><strong>Centro de costo:</strong> {{projectLabel}}</div>{{/if}}
+        <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
+        <div class="row"><strong>Lugar:</strong> {{place}}</div>
+        <div class="row"><strong>Fechas:</strong> {{startDate}} al {{endDate}}</div>
+        <div class="row"><strong>Monto total:</strong> {{currencySymbol}} {{totalFormatted}}</div>
+      </div>
+
       <div class="btn-container">
         <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>

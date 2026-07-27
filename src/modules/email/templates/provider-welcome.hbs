@@ -1,14 +1,18 @@
 {{> email-header}}
-      <h1 class="title">¡Bienvenido, {{firstName}} {{lastName}}!</h1>
-                <p>Te damos la bienvenida a nuestra plataforma. Tu cuenta ha sido creada exitosamente.</p>
-                <p>A continuación encontrarás tus credenciales de acceso temporales:</p>
-                <div class='details-card'>
-                    <p><strong>Email:</strong> {{email}}</p>
-                    <p><strong>Contraseña temporal:</strong> {{password}}</p>
-                </div>
-                <p>Por favor, cambia tu contraseña después de iniciar sesión por primera vez.</p>
-                <div class='button-container'>
-                    <a href='{{loginUrl}}' target='_blank' class='button'>Acceder a la Plataforma</a>
-                </div>
-                <p>Si tienes alguna pregunta o necesitas ayuda, no dudes en contactarnos.</p>
+      <span class="badge">Cuenta creada</span>
+      <h1 class="title">Bienvenido a la plataforma</h1>
+      <p>Estimado/a <strong>{{firstName}} {{lastName}}</strong>,</p>
+      <p>Su cuenta ha sido creada correctamente. A continuación encontrará sus credenciales de acceso temporales.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Correo:</strong> {{email}}</div>
+        <div class="row"><strong>Contraseña temporal:</strong> {{password}}</div>
+      </div>
+
+      <p>Por favor, cambie su contraseña después de iniciar sesión por primera vez.</p>
+
+      <div class="btn-container">
+        <a href="{{loginUrl}}" target="_blank" rel="noreferrer" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

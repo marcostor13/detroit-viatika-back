@@ -1,16 +1,16 @@
 {{> email-header}}
-
-      <h1 class="heading">Hoy vence tu periodo de viáticos</h1>
+      <span class="badge badge-danger">Vence hoy</span>
+      <h1 class="title">Hoy vence su periodo de viáticos</h1>
       <p>Estimado/a <strong>{{collaboratorName}}</strong>,</p>
-      <div class="urgent-box">
-        <p style="margin: 0;"><strong>Hoy, {{endDate}},</strong> es el último día de tu periodo de viáticos. Asegúrate de cargar todos tus comprobantes antes de que finalice el día.</p>
+      <p><strong>Hoy, {{endDate}},</strong> es el último día de su periodo de viáticos. Asegúrese de cargar todos sus comprobantes antes de que finalice el día.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Lugar:</strong> {{place}}</div>
+        <div class="row"><strong>Fecha de vencimiento:</strong> {{endDate}}</div>
       </div>
-      <p class="label">Datos del viaje:</p>
-      <ul class="quick-list">
-        <li>Lugar: {{place}}</li>
-        <li>Fecha de vencimiento: {{endDate}}</li>
-      </ul>
+
       <div class="btn-container">
-        <a href="{{platformUrl}}" class="btn">Cargar comprobantes ahora</a>
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

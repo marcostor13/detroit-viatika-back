@@ -1,23 +1,26 @@
 {{> email-header}}
-      <h1 class="title">Nueva Factura Subida</h1>
-<p>Hola,</p>
-          <p>Se ha subido una nueva factura al sistema por <strong>{{createdBy}}</strong>:</p>
-          <div class='details-card'>
-            <p><strong>Proveedor:</strong> {{providerName}}</p>
-            <p><strong>Número de Factura:</strong> {{invoiceNumber}}</p>
-            <p><strong>Fecha:</strong> {{date}}</p>
-            <p><strong>Tipo:</strong> {{type}}</p>
-            {{#if showAdditionalInfo}}
-            <p><strong>Monto Total:</strong> {{montoTotalFormatted}}</p>
-            <p><strong>Categoría:</strong> {{category}}</p>
-            <p><strong>Proyecto:</strong> {{projectName}}</p>
-            <p><strong>Razón Social del Emisor:</strong> {{razonSocial}}</p>
-            {{#if direccionEmisor}}
-            <p><strong>Dirección del Emisor:</strong> {{direccionEmisor}}</p>
-            {{/if}}
-            <p><strong>Estado:</strong> {{status}}</p>
-            {{/if}}
-          </div>
-          <p>Puedes acceder a la factura a través del sistema.</p>
-          <p>Si tienes alguna pregunta, no dudes en contactarnos.</p>
+      <span class="badge badge-info">Nueva factura</span>
+      <h1 class="title">Nueva factura subida</h1>
+      <p>Estimado/a,</p>
+      <p>Se ha subido una nueva factura al sistema por <strong>{{createdBy}}</strong>.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Proveedor:</strong> {{providerName}}</div>
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha:</strong> {{date}}</div>
+        <div class="row"><strong>Tipo:</strong> {{type}}</div>
+        {{#if showAdditionalInfo}}
+        <div class="row"><strong>Monto total:</strong> {{montoTotalFormatted}}</div>
+        {{#if category}}<div class="row"><strong>Categoría:</strong> {{category}}</div>{{/if}}
+        {{#if projectName}}<div class="row"><strong>Proyecto:</strong> {{projectName}}</div>{{/if}}
+        {{#if razonSocial}}<div class="row"><strong>Razón social del emisor:</strong> {{razonSocial}}</div>{{/if}}
+        {{#if direccionEmisor}}<div class="row"><strong>Dirección del emisor:</strong> {{direccionEmisor}}</div>{{/if}}
+        {{#if status}}<div class="row"><strong>Estado:</strong> {{status}}</div>{{/if}}
+        {{/if}}
+      </div>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

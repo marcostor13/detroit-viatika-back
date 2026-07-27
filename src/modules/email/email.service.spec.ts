@@ -3,6 +3,7 @@ import { MailerService } from '@nestjs-modules/mailer'
 import { getModelToken } from '@nestjs/mongoose'
 import { EmailService } from './email.service'
 import { Client } from '../client/entities/client.entity'
+import { runWithRequestOrigin } from '../../common/request-origin.context'
 
 describe('EmailService', () => {
   let service: EmailService
@@ -10,6 +11,7 @@ describe('EmailService', () => {
   const originalNodeEnv = process.env.NODE_ENV
   const originalAppPublicUrl = process.env.APP_PUBLIC_URL
   const originalFrontendUrl = process.env.FRONTEND_URL
+  const originalAllowedOrigins = process.env.APP_ALLOWED_ORIGINS
 
   beforeEach(async () => {
     mailerService = { sendMail: jest.fn().mockResolvedValue(undefined) }
@@ -37,6 +39,12 @@ describe('EmailService', () => {
     } else {
       process.env.FRONTEND_URL = originalFrontendUrl
     }
+
+    if (originalAllowedOrigins === undefined) {
+      delete process.env.APP_ALLOWED_ORIGINS
+    } else {
+      process.env.APP_ALLOWED_ORIGINS = originalAllowedOrigins
+    }
   })
 
   it('should be defined', () => {
@@ -48,22 +56,68 @@ describe('EmailService', () => {
     expect(code).toMatch(/^\d{6}$/)
   })
 
-  it('uses the corrected production fallback URL', () => {
-    delete process.env.APP_PUBLIC_URL
-    delete process.env.FRONTEND_URL
-    process.env.NODE_ENV = 'production'
+  describe('getPublicAppBaseUrl', () => {
+    it('falls back to the Detroit front when there is no request nor env', () => {
+      delete process.env.APP_PUBLIC_URL
+      delete process.env.FRONTEND_URL
+      process.env.NODE_ENV = 'production'
 
-    expect(service.getPublicAppBaseUrl()).toBe(
-      'https://app.viatika.tecdidata.com'
-    )
-  })
+      expect(service.getPublicAppBaseUrl()).toBe(
+        'https://detroit-viatika.netlify.app'
+      )
+    })
 
-  it('normalizes the legacy viatica host from env', () => {
-    process.env.APP_PUBLIC_URL = 'https://app.viatica.tecdidata.com/'
+    it('prefers the env URL over the fallback, without trailing slash', () => {
+      process.env.APP_PUBLIC_URL = 'https://detroit-viatika.netlify.app/'
 
-    expect(service.getPublicAppBaseUrl()).toBe(
-      'https://app.viatika.tecdidata.com'
-    )
+      expect(service.getPublicAppBaseUrl()).toBe(
+        'https://detroit-viatika.netlify.app'
+      )
+    })
+
+    it('uses the origin of the request when it is allowed', () => {
+      process.env.APP_ALLOWED_ORIGINS = 'https://front-nuevo.detroit.com'
+      delete process.env.APP_PUBLIC_URL
+
+      const url = runWithRequestOrigin('https://front-nuevo.detroit.com', () =>
+        service.getPublicAppBaseUrl()
+      )
+
+      expect(url).toBe('https://front-nuevo.detroit.com')
+    })
+
+    it('allows localhost outside production so local testing links back to localhost', () => {
+      process.env.NODE_ENV = 'development'
+      delete process.env.APP_ALLOWED_ORIGINS
+
+      const url = runWithRequestOrigin('http://localhost:4200', () =>
+        service.getPublicAppBaseUrl()
+      )
+
+      expect(url).toBe('http://localhost:4200')
+    })
+
+    it('ignores an origin that is not allowed, so a forged header cannot plant a link', () => {
+      process.env.NODE_ENV = 'production'
+      process.env.APP_PUBLIC_URL = 'https://detroit-viatika.netlify.app'
+
+      const url = runWithRequestOrigin('https://sitio-atacante.test', () =>
+        service.getPublicAppBaseUrl()
+      )
+
+      expect(url).toBe('https://detroit-viatika.netlify.app')
+    })
+
+    it('ignores localhost in production', () => {
+      process.env.NODE_ENV = 'production'
+      process.env.APP_PUBLIC_URL = 'https://detroit-viatika.netlify.app'
+
+      const url = runWithRequestOrigin('http://localhost:4200', () =>
+        service.getPublicAppBaseUrl()
+      )
+
+      expect(url).toBe('https://detroit-viatika.netlify.app')
+    })
   })
 
   it('sends viatico payment email with receipt attachment', async () => {
@@ -78,7 +132,7 @@ describe('EmailService', () => {
       paymentMethod: 'transferencia_bancaria',
       paymentReceiptUrl: 'https://files.example.com/receipts/viatico-001.pdf',
       paymentReceiptFileName: 'viatico-001.pdf',
-      platformUrl: 'https://app.viatika.tecdidata.com',
+      platformUrl: 'https://detroit-viatika.netlify.app',
     })
 
     expect(mailerService.sendMail).toHaveBeenCalledTimes(1)
