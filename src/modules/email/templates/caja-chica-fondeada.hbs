@@ -3,8 +3,14 @@
       <h1 class="title">Caja chica activa</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
       <p>Su caja chica ha sido fondeada y está <strong>activa</strong>. Ya puede registrar gastos.</p>
+
+      <p class="label">Detalles rápidos:</p>
       <div class="box">
         <div class="row"><strong>Código:</strong> {{code}}</div>
-        <div class="row"><strong>Monto disponible:</strong> S/ {{fundAmount}}</div>
+        <div class="row"><strong>Monto disponible:</strong> {{currencySymbol}} {{fundAmount}}</div>
+      </div>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

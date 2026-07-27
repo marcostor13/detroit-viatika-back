@@ -1,14 +1,19 @@
 {{> email-header}}
       <span class="badge badge-danger">Rendición cancelada</span>
       <h1 class="title">Rendición cancelada</h1>
-      <p>Hola <strong>{{adminName}}</strong>,</p>
+      <p>Estimado/a <strong>{{adminName}}</strong>,</p>
       <p>El colaborador <strong>{{collaboratorName}}</strong> ha <strong>cancelado</strong> su solicitud de rendición.</p>
 
+      <p class="label">Detalles rápidos:</p>
       <div class="box">
-        <p class="box-title">Detalle de la rendición cancelada</p>
-        <div class="row"><strong>Título:</strong> {{reportTitle}}</div>
+        <div class="row"><strong>Rendición:</strong> {{reportTitle}}</div>
+        <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
         {{#if cancelReason}}<div class="row"><strong>Motivo:</strong> {{cancelReason}}</div>{{/if}}
       </div>
 
-      <p class="muted">No se requiere ninguna acción de su parte.</p>
+      <p>No se requiere ninguna acción de su parte.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

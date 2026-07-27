@@ -1,22 +1,25 @@
 {{> email-header}}
+      <span class="badge badge-info">Pendiente de revisión</span>
       <h1 class="title">Rendición enviada para revisión</h1>
-      <p>Hola <strong>{{recipientName}}</strong>,</p>
-      <p><strong>{{collaboratorName}}</strong> ha enviado una rendición de gastos para su revisión y aprobación.</p>
+      <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
+      <p>El colaborador <strong>{{collaboratorName}}</strong> ha enviado una rendición de gastos para su revisión y aprobación.</p>
 
+      <p class="label">Detalles rápidos:</p>
       <div class="box">
-        <div class="row"><strong>Título:</strong> {{reportTitle}}</div>
+        <div class="row"><strong>Rendición:</strong> {{reportTitle}}</div>
+        <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
         {{#if isDirecta}}
-          {{#if hasDirectaDeposit}}<div class="row"><strong>Total depositado:</strong> S/ {{depositFormatted}}</div>{{/if}}
-          <div class="row"><strong>Total gastado:</strong> S/ {{expenseTotalFormatted}}</div>
-          {{#if hasDirectaDeposit}}<div class="row"><strong>Saldo disponible:</strong> S/ {{saldoFormatted}}</div>{{/if}}
+          {{#if hasDirectaDeposit}}<div class="row"><strong>Total depositado:</strong> {{currencySymbol}} {{depositFormatted}}</div>{{/if}}
+          <div class="row"><strong>Total gastado:</strong> {{currencySymbol}} {{expenseTotalFormatted}}</div>
+          {{#if hasDirectaDeposit}}<div class="row"><strong>Saldo disponible:</strong> {{currencySymbol}} {{saldoFormatted}}</div>{{/if}}
         {{else}}
-          <div class="row"><strong>Presupuesto:</strong> S/ {{budgetFormatted}}</div>
+          <div class="row"><strong>Presupuesto:</strong> {{currencySymbol}} {{budgetFormatted}}</div>
         {{/if}}
         <div class="row"><strong>Documentos adjuntos:</strong> {{expenseCount}}</div>
       </div>
 
       {{#if isDirecta}}
-      <p class="box-title">Comprobantes ({{expenseCount}})</p>
+      <p class="label">Comprobantes ({{expenseCount}}):</p>
       <table class="data">
         {{#each expenseItems}}
         <tr>
@@ -24,17 +27,17 @@
             <span class="tag">{{this.categoryName}}</span>
             {{#if this.description}}<div class="tag-desc">{{this.description}}</div>{{/if}}
           </td>
-          <td class="num">S/ {{this.totalFormatted}}</td>
+          <td class="num">{{../currencySymbol}} {{this.totalFormatted}}</td>
         </tr>
         {{/each}}
         <tr class="total">
           <td>Total gastado</td>
-          <td class="num">S/ {{expenseTotalFormatted}}</td>
+          <td class="num">{{currencySymbol}} {{expenseTotalFormatted}}</td>
         </tr>
         {{#if hasDirectaDeposit}}
         <tr class="total">
           <td>Saldo disponible</td>
-          <td class="num">S/ {{saldoFormatted}}</td>
+          <td class="num">{{currencySymbol}} {{saldoFormatted}}</td>
         </tr>
         {{/if}}
       </table>
@@ -43,6 +46,6 @@
       <p>Ingrese a la plataforma para revisar los comprobantes y aprobar o rechazar la rendición.</p>
 
       <div class="btn-container">
-        <a href="{{platformUrl}}" class="btn">Revisar rendición</a>
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

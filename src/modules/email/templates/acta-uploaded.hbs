@@ -1,16 +1,18 @@
 {{> email-header}}
-      <h1 class="title">Acta de Aprobación Subida</h1>
-<p>Hola,</p>
-                <p>Se ha subido el acta de aprobación para la siguiente factura:</p>
-                <div class='details-card'>
-                    <ul>
-                        <li><strong>Proveedor:</strong> {{providerName}}</li>
-                        <li><strong>Número de Factura:</strong> {{invoiceNumber}}</li>
-                        <li><strong>Fecha:</strong> {{date}}</li>
-                        <li><strong>Tipo:</strong> {{type}}</li>
-                    </ul>
-                </div>
-                <div class='success-badge'>
-                    <p>La factura ha sido aprobada y está lista para el siguiente paso del proceso.</p>
-                </div>
+      <span class="badge">Acta subida</span>
+      <h1 class="title">Acta de aprobación subida</h1>
+      <p>Estimado/a,</p>
+      <p>Se ha subido el acta de aprobación para la siguiente factura. La factura ha sido aprobada y está lista para el siguiente paso del proceso.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Proveedor:</strong> {{providerName}}</div>
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha:</strong> {{date}}</div>
+        <div class="row"><strong>Tipo:</strong> {{type}}</div>
+      </div>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

@@ -1,9 +1,12 @@
 {{> email-header}}
-      <h1 class="title">Verifica tu Email</h1>
-<p>Hola,</p>
-                <p>Gracias por registrarte en Viatika. Para completar tu registro, utiliza el siguiente código de verificación:</p>
-                <div class='code-container'>
-                    <p class='code'>{{verificationCode}}</p>
-                </div>
-                <p>Este código expirará en breve. Si no solicitaste este correo, ignóralo.</p>
+      <span class="badge badge-info">Verificación</span>
+      <h1 class="title">Verifique su correo</h1>
+      <p>Estimado/a,</p>
+      <p>Para completar su registro, utilice el siguiente código de verificación.</p>
+
+      <div class="code-container">
+        <p class="code">{{verificationCode}}</p>
+      </div>
+
+      <p>Este código expirará en breve. Si no solicitó este correo, puede ignorarlo.</p>
 {{> email-footer}}

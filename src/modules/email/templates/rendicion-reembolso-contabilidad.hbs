@@ -1,13 +1,19 @@
 {{> email-header}}
+      <span class="badge badge-info">Reembolso pendiente</span>
       <h1 class="title">Rendición con saldo a favor del colaborador</h1>
-      <p class="muted">Hola {{recipientName}}, según liquidación la rendición «{{reportLabel}}» requiere reembolso de <strong>S/ {{amountFormatted}}</strong> a <strong>{{collaboratorName}}</strong>. Registre el comprobante en Tesorería.</p>
+      <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
+      <p>Según liquidación, la rendición «{{reportLabel}}» requiere un reembolso a <strong>{{collaboratorName}}</strong>. Registre el comprobante en Tesorería.</p>
+
+      <p class="label">Detalles rápidos:</p>
       <div class="box">
         <div class="row"><strong>Rendición:</strong> {{reportTitle}}</div>
         <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
-        <div class="row"><strong>Monto a reembolsar:</strong> S/ {{amountFormatted}}</div>
+        <div class="row"><strong>Monto a reembolsar:</strong> {{currencySymbol}} {{amountFormatted}}</div>
       </div>
-      <p class="muted">Ingrese a Tesorería en la plataforma para adjuntar el comprobante de transferencia una vez realizado el pago.</p>
+
+      <p>Ingrese a Tesorería en la plataforma para adjuntar el comprobante de transferencia una vez realizado el pago.</p>
+
       <div class="btn-container">
-        <a href="{{detailUrl}}" class="btn">Ver rendición en la plataforma</a>
+        <a href="{{detailUrl}}" class="btn">Ir a la plataforma</a>
       </div>
 {{> email-footer}}

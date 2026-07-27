@@ -1,14 +1,22 @@
 {{> email-header}}
-      <h1 class="title">Nueva Factura de Gastos Subida</h1>
-<p>Hola,</p>
-                <p>Se ha subido una nueva factura de gastos con los siguientes detalles:</p>
-                <div class='details-card'>
-                    <p><strong>Proveedor:</strong> {{providerName}}</p>
-                    <p><strong>Número de Factura:</strong> {{invoiceNumber}}</p>
-                    <p><strong>Fecha:</strong> {{date}}</p>
-                    <p><strong>Tipo:</strong> {{type}}</p>
-                    <p><strong>Estado:</strong> {{status}}</p>
-                    <p><strong>Monto Total:</strong> {{montoTotalFormatted}}</p>
-                </div>
-                <p>Por favor, revise la factura y suba el acta de aprobación correspondiente si aplica.</p>
+      <span class="badge badge-info">Nueva factura</span>
+      <h1 class="title">Nueva factura de gastos subida</h1>
+      <p>Estimado/a,</p>
+      <p>Se ha subido una nueva factura de gastos al sistema.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Proveedor:</strong> {{providerName}}</div>
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha:</strong> {{date}}</div>
+        <div class="row"><strong>Tipo:</strong> {{type}}</div>
+        <div class="row"><strong>Estado:</strong> {{status}}</div>
+        <div class="row"><strong>Monto total:</strong> {{montoTotalFormatted}}</div>
+      </div>
+
+      <p>Por favor, revise la factura y suba el acta de aprobación correspondiente si aplica.</p>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

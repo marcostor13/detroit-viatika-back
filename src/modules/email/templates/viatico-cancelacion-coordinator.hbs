@@ -1,14 +1,19 @@
 {{> email-header}}
-
-      <span class="badge">Solicitud cancelada</span>
-      <h1 class="heading">Solicitud de viáticos cancelada</h1>
+      <span class="badge badge-danger">Solicitud cancelada</span>
+      <h1 class="title">Solicitud de viáticos cancelada</h1>
       <p>Estimado/a <strong>{{coordinatorName}}</strong>,</p>
-      <p>El colaborador <strong>{{collaboratorName}}</strong> ha cancelado su solicitud de viáticos que estaba pendiente de aprobación.</p>
-      <div class="details">{{plainSummary}}</div>
-      {{#if cancelReason}}
-      <p><strong>Motivo de cancelación:</strong></p>
-      <div class="reason">{{cancelReason}}</div>
-      {{/if}}
+      <p>El colaborador <strong>{{collaboratorName}}</strong> ha cancelado su solicitud de viáticos, que estaba pendiente de aprobación.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        {{#if projectLabel}}<div class="row"><strong>Centro de costo:</strong> {{projectLabel}}</div>{{/if}}
+        <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
+        {{#if place}}<div class="row"><strong>Lugar:</strong> {{place}}</div>{{/if}}
+        {{#if startDate}}<div class="row"><strong>Fechas:</strong> {{startDate}} al {{endDate}}</div>{{/if}}
+        {{#if totalFormatted}}<div class="row"><strong>Monto total:</strong> {{currencySymbol}} {{totalFormatted}}</div>{{/if}}
+        {{#if cancelReason}}<div class="row"><strong>Motivo:</strong> {{cancelReason}}</div>{{/if}}
+      </div>
+
       <div class="btn-container">
         <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>

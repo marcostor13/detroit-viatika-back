@@ -2,6 +2,15 @@
       <span class="badge">Devolución validada</span>
       <h1 class="title">Devolución validada</h1>
       <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
-      <p>Su comprobante de devolución por el anticipo N° <strong>{{advanceId}}</strong> ({{currencySymbol}} {{amountDue}}) ha sido <strong>validado por Contabilidad</strong>.</p>
-      <p>El proceso de su rendición ha sido completado correctamente.</p>
+      <p>Su comprobante de devolución del anticipo ha sido <strong>validado por Contabilidad</strong>. El proceso de su rendición ha sido completado correctamente.</p>
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>N° de anticipo:</strong> {{advanceId}}</div>
+        <div class="row"><strong>Monto devuelto:</strong> {{currencySymbol}} {{amountDue}}</div>
+      </div>
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}

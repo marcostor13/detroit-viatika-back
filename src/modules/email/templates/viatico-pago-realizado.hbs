@@ -1,16 +1,22 @@
 {{> email-header}}
       <span class="badge">Pago confirmado</span>
       <h1 class="title">Pago de viáticos confirmado</h1>
-      <p class="muted">Hola {{recipientName}}, se registró el desembolso para la solicitud de {{collaboratorName}}.</p>
+      <p>Estimado/a <strong>{{recipientName}}</strong>,</p>
+      <p>Se registró el desembolso correspondiente a la solicitud de <strong>{{collaboratorName}}</strong>.</p>
+
+      <p class="label">Detalles rápidos:</p>
       <div class="box">
-        <div class="row"><strong>Centro de costo:</strong> {{projectLabel}}</div>
+        {{#if projectLabel}}<div class="row"><strong>Centro de costo:</strong> {{projectLabel}}</div>{{/if}}
+        <div class="row"><strong>Colaborador:</strong> {{collaboratorName}}</div>
         <div class="row"><strong>Monto pagado:</strong> {{currencySymbol}} {{amountFormatted}}</div>
         <div class="row"><strong>Fecha de depósito:</strong> {{transferDate}}</div>
         <div class="row"><strong>Método:</strong> {{paymentMethod}}</div>
         <div class="row"><strong>Referencia bancaria:</strong> {{reference}}</div>
-        <div class="row"><strong>Comprobante:</strong> <a href="{{paymentReceiptUrl}}" target="_blank" rel="noreferrer">Ver comprobante</a></div>
+        {{#if paymentReceiptUrl}}<div class="row"><strong>Comprobante:</strong> <a href="{{paymentReceiptUrl}}" target="_blank" rel="noreferrer">Ver comprobante</a></div>{{/if}}
       </div>
-      <p class="muted">El módulo de registro de gastos ya se encuentra habilitado para continuar con la rendición.</p>
+
+      <p>El módulo de registro de gastos ya se encuentra habilitado para continuar con la rendición.</p>
+
       <div class="btn-container">
         <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
       </div>

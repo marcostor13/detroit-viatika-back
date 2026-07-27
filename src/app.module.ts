@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common'
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common'
+import { RequestOriginMiddleware } from './common/request-origin.middleware'
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
 import { MongooseModule } from '@nestjs/mongoose'
@@ -71,4 +72,10 @@ import { ExchangeRateModule } from './modules/exchange-rate/exchange-rate.module
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Para TODAS las rutas: los correos se disparan desde muchos módulos y
+    // cada uno necesita saber desde qué front se originó la acción.
+    consumer.apply(RequestOriginMiddleware).forRoutes('*')
+  }
+}

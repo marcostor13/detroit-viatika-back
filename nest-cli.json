@@ -4,6 +4,7 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "deleteOutDir": true,
+    "watchAssets": true,
     "assets": [
       { "include": "docs/asientos/*.xlsm", "outDir": "./dist" },
       { "include": "modules/email/templates/**/*.hbs", "outDir": "./dist" }

@@ -1,29 +1,31 @@
 {{> email-header}}
-      <h1 class="title">Decisión de Factura</h1>
-<p>Estimado/a {{providerName}},</p>
-                <p>Le informamos sobre el estado de su factura:</p>
-                <div class='details-card'>
-                    <ul>
-                        <li><strong>Número de Factura:</strong> {{invoiceNumber}}</li>
-                        <li><strong>Fecha:</strong> {{date}}</li>
-                        <li><strong>Tipo:</strong> {{type}}</li>
-                    </ul>
-                </div>
-                {{#if (eq status "APPROVED")}}
-                <div class='status-badge approved'>
-                    <p>La factura ha sido aprobada correctamente y está lista para el siguiente paso del proceso.</p>
-                </div>
-                <p>Puede proceder con el siguiente paso del proceso de pago.</p>
-                {{else}}
-                <div class='status-badge rejected'>
-                    <p>La factura ha sido rechazada por el departamento de tesorería.</p>
-                </div>
-                {{#if rejectionReason}}
-                <div class='rejection-reason'>
-                    <strong>Motivo del Rechazo:</strong>
-                    <p>{{rejectionReason}}</p>
-                </div>
-                {{/if}}
-                <p>Por favor, tome las acciones necesarias para corregir la situación y vuelva a enviar la factura.</p>
-                {{/if}}
+      {{#if (eq status "APPROVED")}}
+      <span class="badge">Factura aprobada</span>
+      {{else}}
+      <span class="badge badge-danger">Factura rechazada</span>
+      {{/if}}
+      <h1 class="title">Decisión sobre su factura</h1>
+      <p>Estimado/a <strong>{{providerName}}</strong>,</p>
+      {{#if (eq status "APPROVED")}}
+      <p>Su factura ha sido <strong>aprobada</strong> y está lista para el siguiente paso del proceso de pago.</p>
+      {{else}}
+      <p>Su factura ha sido <strong>rechazada</strong> por el departamento de Tesorería.</p>
+      {{/if}}
+
+      <p class="label">Detalles rápidos:</p>
+      <div class="box">
+        <div class="row"><strong>Proveedor:</strong> {{providerName}}</div>
+        <div class="row"><strong>Número de factura:</strong> {{invoiceNumber}}</div>
+        <div class="row"><strong>Fecha:</strong> {{date}}</div>
+        <div class="row"><strong>Tipo:</strong> {{type}}</div>
+        {{#if rejectionReason}}<div class="row"><strong>Motivo:</strong> {{rejectionReason}}</div>{{/if}}
+      </div>
+
+      {{#unless (eq status "APPROVED")}}
+      <p>Por favor, tome las acciones necesarias para corregir la situación y vuelva a enviar la factura.</p>
+      {{/unless}}
+
+      <div class="btn-container">
+        <a href="{{platformUrl}}" class="btn">Ir a la plataforma</a>
+      </div>
 {{> email-footer}}
