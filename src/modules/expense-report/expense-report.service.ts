@@ -782,8 +782,12 @@ export class ExpenseReportService implements OnModuleInit {
       .populate('viaticoOrdenTrabajoId', 'nombre costCenterId')
       .populate('directaOrdenTrabajoId', 'nombre costCenterId')
       // Comprobantes: total (monto de la rendición directa) y datos/archivo para
-      // mostrar las facturas en el modal de aprobación del jefe inmediato. VD-25.
-      .populate('expenseIds', 'total data file expenseType')
+      // mostrar las facturas en el modal de aprobación del jefe inmediato (VD-25).
+      // `approverChain` y `status` van también porque con el modelo por
+      // comprobante (regla 1.4) la rendición se aprueba aprobando todos sus
+      // gastos: sin ellos el front no puede saber si a este aprobador todavía le
+      // queda alguno pendiente y el Inicio no podía listarlas.
+      .populate('expenseIds', 'total data file expenseType status approverChain')
       .sort({ createdAt: -1 })
       .exec()
   }
