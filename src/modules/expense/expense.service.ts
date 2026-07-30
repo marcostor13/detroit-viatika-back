@@ -8,6 +8,10 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { CreateExpenseDto } from './dto/create-expense.dto'
+import {
+  CreateDeclaracionJuradaDto,
+  DeclaracionJuradaSeccionDto,
+} from './dto/create-declaracion-jurada.dto'
 import { UpdateExpenseDto } from './dto/update-expense.dto'
 import { ConfigService } from '@nestjs/config'
 import { findActionableChainStep, isChainFullyApproved, plainChainStep, ChainStep } from '../advance/approval-chain.util'
@@ -1388,6 +1392,15 @@ export class ExpenseService {
     // documento con RUC); AL además va sin adjunto.
     const requiereDeclaracion = ['AL', 'DJ', 'DJE'].includes(subTipo)
 
+    // La DJ al extranjero se registra con su propio detalle diario por rubro
+    // (Alimentación/Movilidad) — ver `createDeclaracionJurada`.
+    if (subTipo === 'DJE') {
+      throw new HttpException(
+        'Usa el endpoint de Declaración Jurada (declaracion-jurada) para este sub-tipo',
+        HttpStatus.BAD_REQUEST
+      )
+    }
+
     // RUC Emisor obligatorio para los sub-tipos con documento físico (TK, BV, RC)
     if (['TK', 'BV', 'RC'].includes(subTipo) && !body.rucEmisor?.trim()) {
       throw new HttpException(
@@ -1474,6 +1487,175 @@ export class ExpenseService {
     }
 
     return expense
+  }
+
+  /**
+   * Declaración Jurada al extranjero (DJE): sustenta viáticos por Alimentación
+   * y/o Movilidad sin comprobante del proveedor (inciso r) art. 37° TUO LIR).
+   * Crea un gasto `otros_gastos`/`DJE` por cada rubro presente, vinculados por
+   * `declaracionJuradaGroupId`, para que cada rubro caiga en su propia cuenta
+   * contable pero se traten como un solo documento firmado en pantalla y al
+   * generar el PDF.
+   */
+  async createDeclaracionJurada(
+    body: CreateDeclaracionJuradaDto
+  ): Promise<{ groupId: string; expenses: Expense[] }> {
+    if (!body.clientId) {
+      throw new HttpException('clientId es requerido', HttpStatus.BAD_REQUEST)
+    }
+    // Caja chica finalizada: no se permiten más gastos.
+    await this.expenseReportService.assertReportNotLockedByCajaChica(
+      body.expenseReportId
+    )
+
+    const secciones: Array<{
+      seccion: DeclaracionJuradaSeccionDto
+      rubro: 'alimentacion' | 'movilidad'
+    }> = []
+    if (body.alimentacion?.rows?.length) {
+      secciones.push({ seccion: body.alimentacion, rubro: 'alimentacion' })
+    }
+    if (body.movilidad?.rows?.length) {
+      secciones.push({ seccion: body.movilidad, rubro: 'movilidad' })
+    }
+    if (secciones.length === 0) {
+      throw new HttpException(
+        'Debes ingresar al menos un gasto de Alimentación o Movilidad',
+        HttpStatus.BAD_REQUEST
+      )
+    }
+
+    // El proyecto no monta un ValidationPipe global, así que los decoradores del
+    // DTO no corren: sin esto entraban filas con monto 0 o sin fecha y se creaba
+    // un gasto vacío.
+    for (const { seccion, rubro } of secciones) {
+      const nombreRubro = rubro === 'alimentacion' ? 'Alimentación' : 'Movilidad'
+      if (!Types.ObjectId.isValid(seccion.categoryId || '')) {
+        throw new HttpException(
+          `Falta la categoría de ${nombreRubro}`,
+          HttpStatus.BAD_REQUEST
+        )
+      }
+      for (const row of seccion.rows) {
+        if (!String(row?.fecha ?? '').trim()) {
+          throw new HttpException(
+            `Cada fila de ${nombreRubro} requiere una fecha`,
+            HttpStatus.BAD_REQUEST
+          )
+        }
+        if (!(Number(row?.monto) > 0)) {
+          throw new HttpException(
+            `Cada fila de ${nombreRubro} requiere un monto mayor a 0`,
+            HttpStatus.BAD_REQUEST
+          )
+        }
+      }
+    }
+
+    // Misma exigencia que el resto de declaraciones juradas (VD-91): sin firma
+    // digital registrada el documento no tiene validez.
+    if (body.userId) {
+      const profile = await this.userService.findTransactionalProfile(
+        body.userId
+      )
+      if (!profile?.signature) {
+        throw new HttpException(
+          'Debes registrar tu firma digital antes de enviar una Declaración Jurada. Ve a tu perfil para añadirla.',
+          HttpStatus.UNPROCESSABLE_ENTITY
+        )
+      }
+    }
+
+    const firmante = body.userId
+      ? (await this.userService.findEmailNameClient(body.userId))?.name
+      : undefined
+
+    const groupId = new Types.ObjectId().toString()
+    const expenses: Expense[] = []
+
+    for (const { seccion, rubro } of secciones) {
+      const total = seccion.rows.reduce((sum, row) => sum + (row.monto || 0), 0)
+      // Sin descripción el gasto sale en blanco en listados y exportaciones.
+      const description = `Declaración jurada al exterior — ${
+        rubro === 'alimentacion' ? 'Alimentación' : 'Movilidad'
+      }${body.destino ? ` (${body.destino})` : ''}`
+      // La fecha del gasto es la del primer día declarado del rubro.
+      const earliestDate = seccion.rows
+        .map(r => this.parseExpenseDate(r.fecha))
+        .filter((d): d is Date => d !== null)
+        .sort((a, b) => a.getTime() - b.getTime())[0]
+      const deadlineMeta = this.evaluateDeadline(
+        earliestDate ? earliestDate.toISOString().slice(0, 10) : undefined
+      )
+      const categoryMeta = await this.evaluateCategoryLimit(
+        {
+          categoryId: seccion.categoryId,
+          clientId: body.clientId,
+          expenseReportId: body.expenseReportId,
+        } as CreateExpenseDto,
+        total
+      )
+
+      const expense = await this.expenseRepository.create({
+        categoryId: new Types.ObjectId(seccion.categoryId),
+        proyectId: new Types.ObjectId(body.proyectId),
+        clientId: body.clientId,
+        expenseReportId: body.expenseReportId
+          ? new Types.ObjectId(body.expenseReportId)
+          : undefined,
+        total,
+        description,
+        expenseType: 'otros_gastos',
+        subTipo: 'DJE',
+        file: body.imageUrl || undefined,
+        status: 'pending',
+        createdBy: body.userId || 'system',
+        fechaEmision: earliestDate
+          ? this.normalizeFechaEmisionValue(earliestDate)
+          : undefined,
+        observado: deadlineMeta.observado,
+        observacionPlazo: deadlineMeta.observacionPlazo,
+        diasRetraso: deadlineMeta.diasRetraso,
+        categoryLimitPercent: categoryMeta.percent,
+        categoryLimitWarning: categoryMeta.warning,
+        declaracionJurada: true,
+        declaracionJuradaFirmante: firmante,
+        declaracionJuradaRows: seccion.rows,
+        declaracionJuradaMoneda: body.moneda,
+        declaracionJuradaGroupId: groupId,
+        declaracionJuradaDestino: body.destino,
+        declaracionJuradaPais: body.pais,
+        declaracionJuradaLugarFirma: body.lugarFirma,
+        data: JSON.stringify({
+          type: 'otros_gastos',
+          subTipo: 'DJE',
+          rubro,
+          declaracionJurada: true,
+          firmante,
+          description,
+          rows: seccion.rows,
+        }),
+      })
+
+      if (body.userId) {
+        await this.expenseReportService.buildChainForNewExpense(
+          (expense as any)._id.toString(),
+          body.userId,
+          body.clientId
+        )
+      }
+
+      if (body.expenseReportId) {
+        await this.expenseReportService.addExpenseToReport(
+          body.expenseReportId,
+          (expense as any)._id.toString()
+        )
+      }
+
+      expenses.push(expense)
+    }
+
+    return { groupId, expenses }
   }
 
   async createCashReceiptExpense(body: CreateExpenseDto): Promise<Expense> {

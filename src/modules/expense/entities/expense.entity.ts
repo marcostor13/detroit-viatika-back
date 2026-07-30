@@ -57,6 +57,17 @@ export interface MobilityRow {
   gestion: string
 }
 
+/**
+ * Fila de una Declaración Jurada (DJE): el detalle diario de un rubro
+ * (Alimentación o Movilidad), un registro por día. Base legal: inciso r) del
+ * art. 37° del TUO de la LIR / inciso n) del art. 21° de su Reglamento.
+ */
+export interface DeclaracionJuradaRow {
+  /** aaaa-mm-dd (como llega del input date del formulario). */
+  fecha: string
+  monto: number
+}
+
 export interface ExpenseReviewHistory {
   action: 'approved' | 'rejected'
   reviewerId?: string
@@ -122,6 +133,22 @@ export interface ExpenseDocument extends Document {
   mobilityRows?: MobilityRow[]
   declaracionJurada?: boolean
   declaracionJuradaFirmante?: string
+  /** Filas (Alimentación o Movilidad, según categoryId) de ESTE gasto. */
+  declaracionJuradaRows?: DeclaracionJuradaRow[]
+  /** Moneda de los montos de `declaracionJuradaRows` (única por documento). */
+  declaracionJuradaMoneda?: string
+  /**
+   * Vincula los gastos (Alimentación + Movilidad) que provienen de una misma
+   * Declaración Jurada firmada, para tratarlos como un solo documento en
+   * pantalla y al regenerar el PDF.
+   */
+  declaracionJuradaGroupId?: string
+  /** Ciudad de destino del viaje al exterior. */
+  declaracionJuradaDestino?: string
+  /** País de destino del viaje al exterior. */
+  declaracionJuradaPais?: string
+  /** Ciudad donde se firma la declaración. */
+  declaracionJuradaLugarFirma?: string
   reviewHistory?: ExpenseReviewHistory[]
   internalCode?: string
   comentario?: string
@@ -304,6 +331,34 @@ export class Expense {
 
   @Prop({ type: String, required: false })
   declaracionJuradaFirmante?: string
+
+  @Prop({
+    type: [
+      {
+        fecha: { type: String },
+        monto: { type: Number },
+        _id: false,
+      },
+    ],
+    required: false,
+    default: undefined,
+  })
+  declaracionJuradaRows?: DeclaracionJuradaRow[]
+
+  @Prop({ type: String, required: false })
+  declaracionJuradaMoneda?: string
+
+  @Prop({ type: String, required: false })
+  declaracionJuradaGroupId?: string
+
+  @Prop({ type: String, required: false })
+  declaracionJuradaDestino?: string
+
+  @Prop({ type: String, required: false })
+  declaracionJuradaPais?: string
+
+  @Prop({ type: String, required: false })
+  declaracionJuradaLugarFirma?: string
 
   @Prop({ type: String, required: false })
   comentario?: string
