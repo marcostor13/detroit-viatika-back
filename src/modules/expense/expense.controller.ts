@@ -16,6 +16,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express'
 import { ExpenseActorContext, ExpenseService } from './expense.service'
 import { CreateExpenseDto } from './dto/create-expense.dto'
+import { CreateDeclaracionJuradaDto } from './dto/create-declaracion-jurada.dto'
 import { UpdateExpenseDto } from './dto/update-expense.dto'
 import { ApprovalDto } from './dto/approval.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -191,6 +192,30 @@ export class ExpenseController {
       action: 'create_other_expense',
       module: 'facturas',
       entityId: (result as any)?._id?.toString(),
+      clientId,
+    })
+    return result
+  }
+
+  @Post('declaracion-jurada')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.COLABORADOR)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async createDeclaracionJurada(
+    @Body() body: CreateDeclaracionJuradaDto,
+    @Request() req
+  ) {
+    const clientId = body.clientId || req.user?.clientId
+    if (!clientId)
+      throw new Error('No se pudo obtener la empresa del usuario ni del body')
+    body.clientId = clientId
+    body.userId = req.user?.sub || req.user?._id || body.userId
+    const result = await this.expenseService.createDeclaracionJurada(body)
+    this.auditLogService.log({
+      userId: req.user?._id || req.user?.sub,
+      userName: req.user?.name || req.user?.email || 'Usuario',
+      action: 'create_declaracion_jurada',
+      module: 'facturas',
+      entityId: result.groupId,
       clientId,
     })
     return result

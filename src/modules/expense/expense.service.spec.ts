@@ -636,3 +636,198 @@ describe('ExpenseService — resolveMovilidadCategoryId (VD-89: planilla en dire
     await expect(resolve(userId)).resolves.toBe('')
   })
 })
+
+describe('ExpenseService — createDeclaracionJurada (DJE: un gasto por rubro)', () => {
+  let service: ExpenseService
+  const clientId = new Types.ObjectId().toHexString()
+  const userId = new Types.ObjectId().toHexString()
+  const proyectId = new Types.ObjectId().toHexString()
+  const catAlimentacion = new Types.ObjectId().toHexString()
+  const catMovilidad = new Types.ObjectId().toHexString()
+
+  const expenseModel = {
+    create: jest.fn(),
+  }
+  const userService = {
+    findTransactionalProfile: jest.fn(),
+    findEmailNameClient: jest.fn(),
+  }
+  const expenseReportService = {
+    assertReportNotLockedByCajaChica: jest.fn(),
+    buildChainForNewExpense: jest.fn(),
+    addExpenseToReport: jest.fn(),
+  }
+  const categoryService = { findOne: jest.fn() }
+
+  async function build(): Promise<ExpenseService> {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExpenseService,
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('sk-test') },
+        },
+        { provide: getModelToken(Expense.name), useValue: expenseModel },
+        { provide: getModelToken(Client.name), useValue: {} },
+        { provide: EmailService, useValue: {} },
+        { provide: ProjectService, useValue: {} },
+        { provide: UserService, useValue: userService },
+        { provide: SunatConfigService, useValue: {} },
+        { provide: HttpService, useValue: {} },
+        { provide: UploadService, useValue: {} },
+        { provide: ExpenseReportService, useValue: expenseReportService },
+        { provide: NotificationsService, useValue: {} },
+        { provide: CategoryService, useValue: categoryService },
+      ],
+    }).compile()
+    return module.get<ExpenseService>(ExpenseService)
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks()
+    service = await build()
+    userService.findTransactionalProfile.mockResolvedValue({
+      signature: 'data:image/png;base64,firma',
+    })
+    userService.findEmailNameClient.mockResolvedValue({
+      name: 'John Doe',
+      email: 'john@acme.com',
+      clientId,
+    })
+    expenseModel.create.mockImplementation((doc: any) =>
+      Promise.resolve({ ...doc, _id: new Types.ObjectId() })
+    )
+  })
+
+  const baseBody = () => ({
+    clientId,
+    userId,
+    proyectId,
+    moneda: 'US$',
+    destino: 'Quito',
+    pais: 'Ecuador',
+    lugarFirma: 'Lima',
+    alimentacion: {
+      categoryId: catAlimentacion,
+      rows: [
+        { fecha: '2026-07-10', monto: 40 },
+        { fecha: '2026-07-11', monto: 35.5 },
+      ],
+    },
+    movilidad: {
+      categoryId: catMovilidad,
+      rows: [{ fecha: '2026-07-11', monto: 20 }],
+    },
+  })
+
+  it('crea un gasto por rubro con el total del rubro y el mismo groupId', async () => {
+    const res = await service.createDeclaracionJurada(baseBody() as any)
+
+    expect(res.expenses).toHaveLength(2)
+    expect(expenseModel.create).toHaveBeenCalledTimes(2)
+    const [alimentacion, movilidad] = expenseModel.create.mock.calls.map(c => c[0])
+    expect(alimentacion.total).toBeCloseTo(75.5)
+    expect(movilidad.total).toBeCloseTo(20)
+    expect(String(alimentacion.categoryId)).toBe(catAlimentacion)
+    expect(String(movilidad.categoryId)).toBe(catMovilidad)
+    expect(alimentacion.declaracionJuradaGroupId).toBe(res.groupId)
+    expect(movilidad.declaracionJuradaGroupId).toBe(res.groupId)
+    expect(alimentacion.subTipo).toBe('DJE')
+    expect(alimentacion.declaracionJurada).toBe(true)
+    expect(alimentacion.declaracionJuradaFirmante).toBe('John Doe')
+    expect(alimentacion.declaracionJuradaMoneda).toBe('US$')
+    expect(alimentacion.declaracionJuradaDestino).toBe('Quito')
+    expect(alimentacion.declaracionJuradaRows).toHaveLength(2)
+  })
+
+  it('fecha del gasto = primer día declarado del rubro', async () => {
+    const body = baseBody()
+    body.alimentacion.rows = [
+      { fecha: '2026-07-15', monto: 10 },
+      { fecha: '2026-07-09', monto: 10 },
+    ]
+    await service.createDeclaracionJurada(body as any)
+    const alimentacion = expenseModel.create.mock.calls[0][0]
+    expect(alimentacion.fechaEmision).toBe('09/07/2026')
+  })
+
+  it('omite el rubro sin filas', async () => {
+    const body: any = baseBody()
+    delete body.movilidad
+    const res = await service.createDeclaracionJurada(body)
+    expect(res.expenses).toHaveLength(1)
+    expect(expenseModel.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('rechaza la declaración sin ningún rubro con filas', async () => {
+    const body: any = baseBody()
+    delete body.alimentacion
+    delete body.movilidad
+    await expect(service.createDeclaracionJurada(body)).rejects.toThrow(
+      'Debes ingresar al menos un gasto de Alimentación o Movilidad'
+    )
+    expect(expenseModel.create).not.toHaveBeenCalled()
+  })
+
+  it('rechaza filas con monto 0 o sin fecha (no hay ValidationPipe global)', async () => {
+    const sinMonto: any = baseBody()
+    sinMonto.alimentacion.rows = [{ fecha: '2026-07-10', monto: 0 }]
+    await expect(service.createDeclaracionJurada(sinMonto)).rejects.toThrow(
+      /monto mayor a 0/
+    )
+
+    const sinFecha: any = baseBody()
+    sinFecha.alimentacion.rows = [{ fecha: '  ', monto: 20 }]
+    await expect(service.createDeclaracionJurada(sinFecha)).rejects.toThrow(
+      /requiere una fecha/
+    )
+
+    expect(expenseModel.create).not.toHaveBeenCalled()
+  })
+
+  it('rechaza un rubro con filas pero sin categoría válida', async () => {
+    const body: any = baseBody()
+    body.movilidad.categoryId = ''
+    await expect(service.createDeclaracionJurada(body)).rejects.toThrow(
+      /Falta la categoría de Movilidad/
+    )
+    expect(expenseModel.create).not.toHaveBeenCalled()
+  })
+
+  it('exige firma digital registrada', async () => {
+    userService.findTransactionalProfile.mockResolvedValue({ signature: '' })
+    await expect(
+      service.createDeclaracionJurada(baseBody() as any)
+    ).rejects.toThrow(/firma digital/i)
+    expect(expenseModel.create).not.toHaveBeenCalled()
+  })
+
+  it('arma la cadena de aprobación y suma el gasto a la rendición', async () => {
+    const expenseReportId = new Types.ObjectId().toHexString()
+    await service.createDeclaracionJurada({
+      ...baseBody(),
+      expenseReportId,
+    } as any)
+    expect(expenseReportService.buildChainForNewExpense).toHaveBeenCalledTimes(2)
+    expect(expenseReportService.addExpenseToReport).toHaveBeenCalledTimes(2)
+    expect(expenseReportService.addExpenseToReport).toHaveBeenCalledWith(
+      expenseReportId,
+      expect.any(String)
+    )
+  })
+
+  it('el sub-tipo DJE ya no pasa por createOtherExpense', async () => {
+    await expect(
+      service.createOtherExpense({
+        clientId,
+        userId,
+        proyectId,
+        categoryId: catAlimentacion,
+        total: 100,
+        subTipo: 'DJE',
+        declaracionJurada: true,
+        imageUrl: 'https://s3/doc.pdf',
+      } as CreateExpenseDto)
+    ).rejects.toThrow(/declaracion-jurada/)
+  })
+})
